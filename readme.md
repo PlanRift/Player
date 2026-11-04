@@ -30,8 +30,8 @@ A custom, lightweight, self-hosted web music player and NAS companion designed t
 
 3. **Run the Frontend:**
 * Open the project folder in VS Code.
-* Use the **Live Server** extension to launch `index.html` locally.
-* Update your server credentials and endpoints in `app.js`.
+* Use the **Live Server** extension to launch `apps/web/index.html` locally, or run `npm run dev` from the repository root.
+* Update your server credentials and endpoints in `apps/web/app.js`.
 
 
 
