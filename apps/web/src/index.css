@@ -1,0 +1,12 @@
+@import "tailwindcss";
+@import "@player/ui/src/fonts.css";
+@import "@player/ui/src/tokens.css";
+
+/* App shell baseline */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
