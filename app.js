@@ -58,6 +58,7 @@ const dom = {
     albumDetailSubtitle: document.getElementById('album-detail-subtitle'),
     currentAlbumHeading: document.getElementById('current-album-heading'),
     songCount: document.getElementById('song-count'),
+    albumPlayBtn: document.getElementById('album-play-btn'),
     albumShuffleBtn: document.getElementById('album-shuffle-btn'),
     albumShuffleLabel: document.getElementById('album-shuffle-label'),
     songList: document.getElementById('song-list'),
@@ -809,8 +810,6 @@ function startQueueFromAlbumTrack(albumSongs, startIndex) {
 function updateShuffleButtonsUI() {
     const pressedValue = state.isShuffle ? 'true' : 'false';
     dom.playerShuffleBtn.setAttribute('aria-pressed', pressedValue);
-    dom.albumShuffleBtn.setAttribute('aria-pressed', pressedValue);
-    dom.albumShuffleLabel.textContent = state.isShuffle ? 'Shuffle On' : 'Shuffle Album';
 }
 
 // Randomize the remaining items in the active playback queue when shuffle is toggled ON.
@@ -843,23 +842,28 @@ function togglePlayerShuffle() {
     applyShuffleToRemainingQueue();
 }
 
-function handleAlbumShuffleClick() {
-    const albumHasSongs = state.currentSongs.length > 0;
-    const currentSong = state.queue[state.queueIndex];
-    const isPlayingFromCurrentAlbum = Boolean(
-        currentSong && state.currentSongs.some((s) => String(s.id) === String(currentSong.id))
-    );
-
-    if (!isPlayingFromCurrentAlbum && albumHasSongs) {
-        state.isShuffle = true;
-        updateShuffleButtonsUI();
-        state.unshuffledQueue = [...state.currentSongs];
-        state.queue = shuffleArray(state.currentSongs);
-        playQueueIndex(0);
+function handleAlbumPlayClick() {
+    if (state.currentSongs.length === 0) {
         return;
     }
 
-    togglePlayerShuffle();
+    state.isShuffle = false;
+    updateShuffleButtonsUI();
+    state.unshuffledQueue = [...state.currentSongs];
+    state.queue = [...state.currentSongs];
+    playQueueIndex(0);
+}
+
+function handleAlbumShuffleClick() {
+    if (state.currentSongs.length === 0) {
+        return;
+    }
+
+    state.isShuffle = true;
+    updateShuffleButtonsUI();
+    state.unshuffledQueue = [...state.currentSongs];
+    state.queue = shuffleArray(state.currentSongs);
+    playQueueIndex(0);
 }
 
 function toggleQueueDrawer(forceOpen) {
@@ -1147,6 +1151,7 @@ function bindEvents() {
     dom.nextBtn.addEventListener('click', playNextInQueue);
     dom.prevBtn.addEventListener('click', playPreviousInQueue);
     dom.playerShuffleBtn.addEventListener('click', togglePlayerShuffle);
+    dom.albumPlayBtn.addEventListener('click', handleAlbumPlayClick);
     dom.albumShuffleBtn.addEventListener('click', handleAlbumShuffleClick);
 
     dom.queueToggleBtn.addEventListener('click', () => {
