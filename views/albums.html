@@ -1,0 +1,36 @@
+<!-- VIEW: ALBUMS -->
+<section id="view-albums" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#3f3f46] pb-4">
+    <div>
+      <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Albums</h1>
+      <p id="albums-count-label" class="text-xs font-mono text-[#a1a1aa] mt-0.5">Full album catalog</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <label for="albums-sort-select" class="text-xs font-mono text-[#a1a1aa]">SORT:</label>
+      <select
+        id="albums-sort-select"
+        class="px-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] text-xs font-mono text-[#f4f4f5]"
+      >
+        <option value="newest">Recently Added</option>
+        <option value="alphabeticalByName">Title (A-Z)</option>
+        <option value="alphabeticalByArtist">Artist (A-Z)</option>
+        <option value="frequent">Most Played</option>
+        <option value="recent">Recently Played</option>
+        <option value="starred">Starred</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="albums-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
+
+  <div class="flex justify-center pt-4">
+    <button
+      id="albums-load-more-btn"
+      type="button"
+      class="hidden px-5 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] transition-colors"
+    >
+      LOAD MORE ALBUMS
+    </button>
+  </div>
+</section>
+

@@ -1,0 +1,48 @@
+<!-- VIEW: DISCOVERY DETAIL -->
+<section id="view-discovery-detail" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
+  <div>
+    <button
+      id="discovery-back-btn"
+      type="button"
+      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] transition-colors"
+    >
+      <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+      <span>BACK TO HOME</span>
+    </button>
+  </div>
+
+  <div class="flex flex-col md:flex-row gap-6 items-start md:items-end border-b border-[#3f3f46] pb-6">
+    <div class="w-40 h-40 md:w-44 md:h-44 rounded-lg bg-[#18181b] border border-[#3f3f46] overflow-hidden shrink-0">
+      <canvas id="discovery-detail-canvas" class="w-full h-full block"></canvas>
+    </div>
+
+    <div class="flex-1 min-w-0 space-y-2">
+      <div id="discovery-detail-badge" class="text-xs font-mono uppercase tracking-wider text-[#34d399]">VIRTUAL MIX</div>
+      <h1 id="discovery-detail-title" class="text-2xl md:text-3xl font-bold tracking-tight text-[#f4f4f5]"></h1>
+      <p id="discovery-detail-subtitle" class="text-sm text-[#a1a1aa]"></p>
+      <p id="discovery-detail-meta" class="text-xs font-mono text-[#a1a1aa]"></p>
+
+      <div class="pt-3 flex flex-wrap items-center gap-2.5">
+        <button
+          id="discovery-play-btn"
+          type="button"
+          class="px-4 py-2 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity"
+        >
+          <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+          <span>PLAY MIX</span>
+        </button>
+        <button
+          id="discovery-save-playlist-btn"
+          type="button"
+          class="px-4 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] flex items-center gap-2 transition-colors"
+        >
+          <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i>
+          <span>SAVE AS PLAYLIST</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="discovery-tracks-list" class="divide-y divide-[#3f3f46] border border-[#3f3f46] rounded-lg bg-[#18181b] overflow-hidden"></div>
+</section>
+

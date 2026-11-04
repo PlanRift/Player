@@ -1,0 +1,200 @@
+<!-- VIEW: FULLSCREEN SIGNATURE ROOM ("NOW PLAYING ROOM" + SYNCED LYRICS + LYRICS SOURCE MODAL) -->
+<div
+  id="signature-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-label="Now Playing Room and Synced Lyrics"
+  class="hidden fixed inset-0 z-40 bg-[#0e0e11] flex flex-col"
+>
+  <!-- Top Header -->
+  <header class="h-14 px-6 border-b border-[#3f3f46] flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-3">
+      <span class="w-2 h-2 rounded-full bg-[#34d399]"></span>
+      <span class="text-xs font-mono uppercase tracking-wider text-[#a1a1aa]">NOW PLAYING ROOM</span>
+      <span id="sig-provider-badge" class="px-2 py-0.5 rounded bg-[#18181b] border border-[#3f3f46] text-[11px] font-mono text-[#34d399]">
+        LRCLIB
+      </span>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <!-- Timing Offset Nudge Controls -->
+      <div id="sig-offset-controls" class="flex items-center gap-1 bg-[#18181b] border border-[#3f3f46] rounded px-2 py-1">
+        <span class="text-[10px] font-mono text-[#a1a1aa] mr-1">OFFSET:</span>
+        <button
+          id="sig-offset-minus"
+          type="button"
+          class="px-1.5 py-0.5 rounded bg-[#27272a] border border-[#71717a] text-[10px] font-mono text-[#f4f4f5] hover:border-[#34d399]"
+        >
+          -0.2s
+        </button>
+        <span id="sig-offset-value" class="text-[11px] font-mono text-[#34d399] px-1.5">0.0s</span>
+        <button
+          id="sig-offset-plus"
+          type="button"
+          class="px-1.5 py-0.5 rounded bg-[#27272a] border border-[#71717a] text-[10px] font-mono text-[#f4f4f5] hover:border-[#34d399]"
+        >
+          +0.2s
+        </button>
+        <button
+          id="sig-offset-reset"
+          type="button"
+          class="px-1.5 py-0.5 rounded text-[10px] font-mono text-[#a1a1aa] hover:text-[#f4f4f5]"
+        >
+          [RESET]
+        </button>
+      </div>
+
+      <button
+        id="btn-lyrics-source"
+        type="button"
+        class="px-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] hover:border-[#34d399] text-xs font-mono text-[#f4f4f5] flex items-center gap-1.5"
+      >
+        <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5 text-[#34d399]"></i>
+        <span>Sumber Lirik</span>
+      </button>
+
+      <button
+        id="btn-close-signature"
+        type="button"
+        aria-label="Close Now Playing Room"
+        class="px-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5]"
+      >
+        ESC
+      </button>
+    </div>
+  </header>
+
+  <!-- Body: Artwork & Controls Left, Synced Lyrics Right -->
+  <div class="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-8 p-6 md:p-10 max-w-7xl w-full mx-auto overflow-hidden">
+    <!-- Left Column (5 cols) -->
+    <div class="lg:col-span-5 flex flex-col justify-center items-center lg:items-start space-y-6">
+      <div class="w-60 h-60 sm:w-72 sm:h-72 md:w-80 md:h-80 rounded-xl bg-[#18181b] border border-[#3f3f46] overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
+        <img id="sig-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
+        <i id="sig-cover-fallback" data-lucide="disc" class="w-16 h-16 text-[#a1a1aa]"></i>
+      </div>
+
+      <div class="w-full max-w-sm space-y-1 text-center lg:text-left">
+        <h1 id="sig-title" class="font-serif-display text-2xl md:text-3xl text-[#f4f4f5] tracking-tight truncate">
+          No Track Playing
+        </h1>
+        <p id="sig-artist" class="text-sm text-[#a1a1aa] truncate">-</p>
+      </div>
+
+      <!-- Seek Bar -->
+      <div class="w-full max-w-sm space-y-1.5">
+        <input
+          id="sig-seek-slider"
+          type="range"
+          min="0"
+          max="100"
+          step="0.1"
+          value="0"
+          aria-label="Seek track in Now Playing Room"
+          class="studio-range w-full"
+        />
+        <div class="flex justify-between text-[11px] font-mono text-[#a1a1aa]">
+          <span id="sig-time-current">0:00</span>
+          <span id="sig-time-total">0:00</span>
+        </div>
+      </div>
+
+      <!-- Transport Controls -->
+      <div class="w-full max-w-sm flex items-center justify-between">
+        <button id="sig-btn-shuffle" type="button" aria-label="Toggle shuffle" class="p-2 rounded text-[#a1a1aa] hover:text-[#f4f4f5]">
+          <i data-lucide="shuffle" class="w-4 h-4"></i>
+        </button>
+        <button id="sig-btn-prev" type="button" aria-label="Previous track" class="p-2 rounded text-[#f4f4f5] hover:bg-[#18181b]">
+          <i data-lucide="skip-back" class="w-5 h-5"></i>
+        </button>
+        <button
+          id="sig-btn-play"
+          type="button"
+          aria-label="Play or Pause"
+          class="w-12 h-12 rounded-full bg-[#34d399] text-[#090d0b] flex items-center justify-center hover:opacity-90"
+        >
+          <i id="sig-icon-play" data-lucide="play" class="w-5 h-5 fill-current"></i>
+        </button>
+        <button id="sig-btn-next" type="button" aria-label="Next track" class="p-2 rounded text-[#f4f4f5] hover:bg-[#18181b]">
+          <i data-lucide="skip-forward" class="w-5 h-5"></i>
+        </button>
+        <button id="sig-btn-repeat" type="button" aria-label="Cycle repeat mode" class="p-2 rounded text-[#a1a1aa] hover:text-[#f4f4f5]">
+          <i data-lucide="repeat" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Right Column: Synced Lyrics Scroll Panel (7 cols) -->
+    <div class="lg:col-span-7 h-full min-h-0 flex flex-col bg-[#18181b] border border-[#3f3f46] rounded-xl overflow-hidden">
+      <div id="signature-lyrics-container" class="flex-1 overflow-y-auto p-6 md:p-8 space-y-2">
+        <div class="h-full flex items-center justify-center text-sm font-mono text-[#a1a1aa]">
+          Play a track to load synchronized lyrics.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Lyrics Source Modal ("Sumber Lirik" + Manual LRCLIB Search) -->
+<div
+  id="lyrics-source-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-label="Pilih Sumber Lirik"
+  class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+>
+  <div class="w-full max-w-lg rounded-xl bg-[#18181b] border border-[#71717a] overflow-hidden flex flex-col max-h-[90vh]">
+    <div class="px-5 py-4 border-b border-[#3f3f46] flex items-center justify-between">
+      <div>
+        <h2 class="text-sm font-semibold text-[#f4f4f5]">Sumber Lirik</h2>
+        <p class="text-xs font-mono text-[#a1a1aa]">Select provider for this track or search LRCLIB manually</p>
+      </div>
+      <button
+        id="lyrics-source-close-btn"
+        type="button"
+        aria-label="Close lyrics source dialog"
+        class="p-1.5 rounded text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a]"
+      >
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+
+    <div class="p-5 overflow-y-auto space-y-5">
+      <!-- Provider List -->
+      <div id="lyrics-providers-status-list" class="space-y-1.5"></div>
+
+      <!-- Manual LRCLIB Search Form -->
+      <form id="lyrics-manual-search-form" class="pt-4 border-t border-[#3f3f46] space-y-3">
+        <div class="text-xs font-mono uppercase tracking-wider text-[#34d399]">Pencarian Manual (LRCLIB)</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div>
+            <label for="lyrics-manual-title" class="block text-[11px] font-mono text-[#a1a1aa] mb-1">JUDUL LAGU</label>
+            <input
+              id="lyrics-manual-title"
+              type="text"
+              required
+              class="w-full px-3 py-1.5 rounded bg-[#0e0e11] border border-[#71717a] text-xs text-[#f4f4f5]"
+            />
+          </div>
+          <div>
+            <label for="lyrics-manual-artist" class="block text-[11px] font-mono text-[#a1a1aa] mb-1">ARTIS</label>
+            <input
+              id="lyrics-manual-artist"
+              type="text"
+              required
+              class="w-full px-3 py-1.5 rounded bg-[#0e0e11] border border-[#71717a] text-xs text-[#f4f4f5]"
+            />
+          </div>
+        </div>
+        <div class="flex justify-end">
+          <button
+            type="submit"
+            class="px-4 py-1.5 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold hover:opacity-90"
+          >
+            CARI LIRIK
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+

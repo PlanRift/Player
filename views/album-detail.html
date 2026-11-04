@@ -1,0 +1,63 @@
+<!-- VIEW: ALBUM / SINGLES DETAIL (Layer 3) -->
+<section id="view-album-detail" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
+  <div>
+    <button
+      id="album-back-btn"
+      type="button"
+      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] transition-colors"
+    >
+      <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+      <span id="album-back-label">BACK</span>
+    </button>
+  </div>
+
+  <div class="flex flex-col md:flex-row gap-6 items-start md:items-end border-b border-[#3f3f46] pb-6">
+    <div class="w-40 h-40 md:w-48 md:h-48 rounded-lg bg-[#18181b] border border-[#3f3f46] overflow-hidden shrink-0 flex items-center justify-center relative">
+      <img id="album-detail-cover" src="" alt="" class="hidden w-full h-full object-cover" />
+      <div id="album-detail-cover-fallback" class="flex flex-col items-center justify-center text-[#a1a1aa]">
+        <i data-lucide="disc" class="w-10 h-10 mb-1"></i>
+        <span class="text-[10px] font-mono">NO COVER</span>
+      </div>
+    </div>
+
+    <div class="flex-1 min-w-0 space-y-2">
+      <div id="album-detail-badge" class="text-xs font-mono uppercase tracking-wider text-[#34d399]">ALBUM</div>
+      <h1 id="album-detail-title" class="text-2xl md:text-3xl font-bold tracking-tight text-[#f4f4f5] break-words"></h1>
+      <div class="flex flex-wrap items-center gap-2 text-xs font-mono text-[#a1a1aa]">
+        <button id="album-detail-artist-btn" type="button" class="text-[#f4f4f5] hover:text-[#34d399] hover:underline font-sans font-medium"></button>
+        <span id="album-detail-meta"></span>
+      </div>
+
+      <div class="pt-3 flex flex-wrap items-center gap-2.5">
+        <button
+          id="album-play-btn"
+          type="button"
+          class="px-4 py-2 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity"
+        >
+          <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+          <span>PLAY</span>
+        </button>
+        <button
+          id="album-shuffle-btn"
+          type="button"
+          class="px-4 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] flex items-center gap-2 transition-colors"
+        >
+          <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
+          <span>SHUFFLE</span>
+        </button>
+        <button
+          id="album-star-btn"
+          type="button"
+          aria-label="Star or unstar album"
+          class="px-3 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] flex items-center gap-1.5 transition-colors"
+        >
+          <i data-lucide="heart" class="w-3.5 h-3.5"></i>
+          <span id="album-star-label">STAR</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="album-tracks-list" class="divide-y divide-[#3f3f46] border border-[#3f3f46] rounded-lg bg-[#18181b] overflow-hidden"></div>
+</section>
+

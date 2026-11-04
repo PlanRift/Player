@@ -1,0 +1,33 @@
+<!-- VIEW: SEARCH -->
+<section id="view-search" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
+  <div class="border-b border-[#3f3f46] pb-5 space-y-3">
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Search Library</h1>
+      <span class="text-xs font-mono text-[#a1a1aa]">↑↓ Navigate · Enter Open/Play · Esc Clear</span>
+    </div>
+    <div class="relative">
+      <i data-lucide="search" class="w-4 h-4 text-[#a1a1aa] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+      <input
+        id="search-input"
+        type="text"
+        placeholder="Search artists, albums, or songs..."
+        aria-label="Search library"
+        class="w-full pl-10 pr-20 py-2.5 rounded-md bg-[#18181b] border border-[#71717a] text-sm text-[#f4f4f5] placeholder-[#a1a1aa] focus:border-[#34d399]"
+      />
+      <button
+        id="search-clear-btn"
+        type="button"
+        class="hidden absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-[#27272a] border border-[#71717a] text-[11px] font-mono text-[#f4f4f5] hover:border-[#34d399]"
+      >
+        CLEAR
+      </button>
+    </div>
+  </div>
+
+  <div id="search-results" class="space-y-8">
+    <div class="py-12 text-center text-sm font-mono text-[#a1a1aa]">
+      Type above to search across your entire Navidrome library.
+    </div>
+  </div>
+</section>
+

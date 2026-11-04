@@ -1,0 +1,21 @@
+<!-- VIEW: ARTISTS (Layer 1) -->
+<section id="view-artists" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#3f3f46] pb-4">
+    <div>
+      <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Artists</h1>
+      <p id="artists-count-label" class="text-xs font-mono text-[#a1a1aa] mt-0.5">Loading artists...</p>
+    </div>
+    <div class="relative w-full sm:w-64">
+      <i data-lucide="search" class="w-3.5 h-3.5 text-[#a1a1aa] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+      <input
+        id="artists-filter-input"
+        type="text"
+        placeholder="Filter artists..."
+        aria-label="Filter artists"
+        class="w-full pl-8 pr-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] text-xs text-[#f4f4f5] placeholder-[#a1a1aa]"
+      />
+    </div>
+  </div>
+  <div id="artists-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
+</section>
+

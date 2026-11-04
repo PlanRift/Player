@@ -1,0 +1,40 @@
+<!-- VIEW: SONGS -->
+<section id="view-songs" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#3f3f46] pb-4">
+    <div>
+      <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Songs</h1>
+      <p id="songs-count-label" class="text-xs font-mono text-[#a1a1aa] mt-0.5">Library tracks</p>
+    </div>
+    <div class="flex items-center gap-2.5">
+      <button
+        id="songs-play-all-btn"
+        type="button"
+        class="px-4 py-2 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity"
+      >
+        <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+        <span>PLAY ALL</span>
+      </button>
+      <button
+        id="songs-shuffle-btn"
+        type="button"
+        class="px-4 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] flex items-center gap-2 transition-colors"
+      >
+        <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
+        <span>SHUFFLE</span>
+      </button>
+    </div>
+  </div>
+
+  <div id="songs-list" class="divide-y divide-[#3f3f46] border border-[#3f3f46] rounded-lg bg-[#18181b] overflow-hidden"></div>
+
+  <div class="flex justify-center pt-4">
+    <button
+      id="songs-load-more-btn"
+      type="button"
+      class="hidden px-5 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] transition-colors"
+    >
+      LOAD MORE SONGS
+    </button>
+  </div>
+</section>
+
