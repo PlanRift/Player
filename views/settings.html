@@ -23,7 +23,7 @@
       </button>
     </div>
 
-    <!-- 2-Tab Bar -->
+    <!-- 3-Tab Bar -->
     <div class="px-5 border-b border-zinc-800 flex items-center gap-1 bg-zinc-950/60 shrink-0">
       <button
         id="settings-tab-btn-audio"
@@ -39,6 +39,14 @@
       >
         <span>Navidrome Server</span>
         <span id="settings-tab-server-dot" class="w-2 h-2 bg-emerald-400 inline-block"></span>
+      </button>
+      <button
+        id="settings-tab-btn-nas"
+        type="button"
+        class="px-4 py-2.5 text-xs font-mono border-b-2 border-transparent text-zinc-400 hover:text-zinc-200 flex items-center gap-2 transition-colors"
+      >
+        <span>NAS Storage</span>
+        <span id="settings-tab-nas-dot" class="w-2 h-2 bg-zinc-600 inline-block"></span>
       </button>
     </div>
 
@@ -247,6 +255,78 @@
               class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"
             >
               Save &amp; Connect
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- TAB 3: NAS STORAGE -->
+      <div id="settings-tab-nas" class="hidden space-y-5">
+        <!-- Connection Status Banner -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span id="settings-nas-status-dot" class="w-2.5 h-2.5 bg-zinc-600 shrink-0"></span>
+            <div class="min-w-0">
+              <p id="settings-nas-ping-badge" class="text-xs font-mono text-zinc-100 truncate">
+                NAS File Bridge (Port 3001)
+              </p>
+              <p class="text-[11px] text-zinc-400 truncate">Protected file operations requiring x-api-key authentication</p>
+            </div>
+          </div>
+          <button
+            id="settings-nas-recheck-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 shrink-0"
+          >
+            Recheck
+          </button>
+        </div>
+
+        <form id="settings-nas-form" class="space-y-4">
+          <div>
+            <label for="settings-nas-url" class="block text-xs font-mono text-zinc-400 mb-1">NAS SERVER URL</label>
+            <input
+              id="settings-nas-url"
+              type="url"
+              required
+              placeholder="http://localhost:3001"
+              value="http://localhost:3001"
+              class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+            />
+          </div>
+          <div>
+            <label for="settings-nas-key" class="block text-xs font-mono text-zinc-400 mb-1">NAS API KEY</label>
+            <div class="relative">
+              <input
+                id="settings-nas-key"
+                type="password"
+                placeholder="Enter secret x-api-key"
+                class="w-full h-9 pl-3 pr-9 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+              />
+              <button
+                id="settings-nas-key-toggle-btn"
+                type="button"
+                title="Show / Hide API Key"
+                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+              >
+                <i id="settings-nas-key-eye-icon" data-lucide="eye" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <p class="text-[11px] text-zinc-400 mt-1">Sent automatically as the <code class="font-mono text-emerald-400">x-api-key</code> header with file manager requests.</p>
+          </div>
+          <div class="pt-2 flex items-center justify-between gap-2">
+            <button
+              id="settings-reset-nas-btn"
+              type="button"
+              class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
+            >
+              Reset to Default
+            </button>
+            <button
+              type="submit"
+              class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"
+            >
+              Save NAS Settings
             </button>
           </div>
         </form>

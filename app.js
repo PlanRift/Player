@@ -1818,17 +1818,20 @@
   // ============================================================================
   // Lightweight File Manager (Local Storage Explorer)
   // ============================================================================
+  // Local storage file manager (Lightweight File Bridge on port 3001)
+  // ============================================================================
   const filesState = {
     currentPath: '',
     items: [],
     filterQuery: '',
-    bridgeUrl: localStorage.getItem('century.file_bridge_url') || 'http://localhost:3001',
+    bridgeUrl: localStorage.getItem('century.nas_url') || localStorage.getItem('century.file_bridge_url') || 'http://localhost:3001',
+    apiKey: localStorage.getItem('century.nas_api_key') || '',
     isOnline: false,
     initialized: false,
   };
 
   function getFileBridgeBase() {
-    const saved = localStorage.getItem('century.file_bridge_url');
+    const saved = localStorage.getItem('century.nas_url') || localStorage.getItem('century.file_bridge_url');
     if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
 
     // Automatically infer from client.baseUrl (Navidrome's IP / hostname on Windows PC)
@@ -1840,6 +1843,19 @@
     } catch (_) {}
 
     return (filesState.bridgeUrl || 'http://localhost:3001').trim().replace(/\/+$/, '');
+  }
+
+  function getFileBridgeApiKey() {
+    return (localStorage.getItem('century.nas_api_key') || filesState.apiKey || '').trim();
+  }
+
+  function getFileBridgeHeaders(customHeaders = {}) {
+    const headers = { ...customHeaders };
+    const key = getFileBridgeApiKey();
+    if (key) {
+      headers['x-api-key'] = key;
+    }
+    return headers;
   }
 
   function formatFileSize(bytes) {
@@ -1877,28 +1893,52 @@
 
   function updateBridgeStatusBadge(online, text) {
     const badge = $('files-bridge-status');
-    if (!badge) return;
     filesState.isOnline = online;
-    if (online) {
-      badge.textContent = text || 'ONLINE';
-      badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-emerald-500/40 bg-emerald-950/30 text-emerald-400';
-      $('files-offline-panel')?.classList.add('hidden');
-    } else {
-      badge.textContent = text || 'OFFLINE';
-      badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-[#f0605a]/40 bg-[#f0605a]/10 text-[#f0605a]';
-      $('files-offline-panel')?.classList.remove('hidden');
+    if (badge) {
+      if (online) {
+        badge.textContent = text || 'ONLINE';
+        badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-emerald-500/40 bg-emerald-950/30 text-emerald-400';
+        $('files-offline-panel')?.classList.add('hidden');
+      } else {
+        badge.textContent = text || 'OFFLINE';
+        badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-[#f0605a]/40 bg-[#f0605a]/10 text-[#f0605a]';
+        $('files-offline-panel')?.classList.remove('hidden');
+      }
+    }
+    updateSettingsNasBadge(online, text);
+  }
+
+  function updateSettingsNasBadge(online, text) {
+    const dot = $('settings-nas-status-dot');
+    const tabDot = $('settings-tab-nas-dot');
+    const badge = $('settings-nas-ping-badge');
+    if (dot) {
+      dot.className = `w-2.5 h-2.5 shrink-0 ${online ? 'bg-emerald-400' : 'bg-[#f0605a]'}`;
+    }
+    if (tabDot) {
+      tabDot.className = `w-2 h-2 inline-block ${online ? 'bg-emerald-400' : 'bg-[#f0605a]'}`;
+    }
+    if (badge) {
+      badge.textContent = text || (online ? 'Connected to NAS File Bridge' : 'NAS Bridge Disconnected');
     }
   }
 
   async function checkFilesBridge() {
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 2000);
-      const res = await fetch(`${getFileBridgeBase()}/api/files?path=`, { signal: ctrl.signal });
+      const timer = setTimeout(() => ctrl.abort(), 2500);
+      const res = await fetch(`${getFileBridgeBase()}/api/files?path=`, {
+        signal: ctrl.signal,
+        headers: getFileBridgeHeaders(),
+      });
       clearTimeout(timer);
       if (res.ok) {
         updateBridgeStatusBadge(true, 'ONLINE');
         return true;
+      }
+      if (res.status === 401) {
+        updateBridgeStatusBadge(false, '401 UNAUTHORIZED');
+        return false;
       }
     } catch (_) {}
     updateBridgeStatusBadge(false, 'OFFLINE');
@@ -1917,8 +1957,13 @@
 
     const base = getFileBridgeBase();
     try {
-      const res = await fetch(`${base}/api/files?path=${encodeURIComponent(filesState.currentPath)}`);
+      const res = await fetch(`${base}/api/files?path=${encodeURIComponent(filesState.currentPath)}`, {
+        headers: getFileBridgeHeaders(),
+      });
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error('401 Unauthorized: Invalid or missing NAS API Key. Update in Settings.');
+        }
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
@@ -1929,13 +1974,14 @@
       renderFilesBreadcrumbs();
       renderFilesList();
     } catch (err) {
-      updateBridgeStatusBadge(false, 'OFFLINE');
+      updateBridgeStatusBadge(false, err.message.includes('401') ? '401 UNAUTHORIZED' : 'OFFLINE');
       if (tbody) {
         tbody.innerHTML = `
           <tr>
             <td colspan="5" class="py-8 text-center text-xs font-mono text-zinc-400">
               Cannot load directory from <code class="text-emerald-400">${escapeHtml(base)}</code>.<br/>
-              Ensure the backend bridge is running with <code class="text-zinc-200">node file-bridge.js</code>.
+              ${escapeHtml(err.message)}<br/>
+              Ensure the backend bridge is running and your NAS URL/API Key are set in Settings.
             </td>
           </tr>`;
       }
@@ -2073,10 +2119,11 @@
     try {
       const res = await fetch(`${base}/api/files/folder`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getFileBridgeHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ path: filesState.currentPath, name: cleanName }),
       });
       if (!res.ok) {
+        if (res.status === 401) throw new Error('401 Unauthorized: Invalid or missing NAS API Key.');
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
@@ -2099,9 +2146,11 @@
     try {
       const res = await fetch(`${base}/api/files/upload?path=${encodeURIComponent(filesState.currentPath)}`, {
         method: 'POST',
+        headers: getFileBridgeHeaders(),
         body: formData,
       });
       if (!res.ok) {
+        if (res.status === 401) throw new Error('401 Unauthorized: Invalid or missing NAS API Key.');
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
@@ -2127,8 +2176,10 @@
     try {
       const res = await fetch(`${base}/api/files?path=${encodeURIComponent(target)}`, {
         method: 'DELETE',
+        headers: getFileBridgeHeaders(),
       });
       if (!res.ok) {
+        if (res.status === 401) throw new Error('401 Unauthorized: Invalid or missing NAS API Key.');
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
@@ -2209,6 +2260,7 @@
     on('files-save-bridge-url-btn', 'click', () => {
       if (bridgeUrlInput && bridgeUrlInput.value.trim()) {
         filesState.bridgeUrl = bridgeUrlInput.value.trim();
+        localStorage.setItem('century.nas_url', filesState.bridgeUrl);
         localStorage.setItem('century.file_bridge_url', filesState.bridgeUrl);
         showToast('Saved File Bridge URL');
         loadFilesView();
@@ -3138,9 +3190,15 @@
   // ============================================================================
   function setSettingsTab(tab) {
     const audio = tab === 'audio';
+    const server = tab === 'server';
+    const nas = tab === 'nas';
+
     show($('settings-tab-audio'), audio);
-    show($('settings-tab-server'), !audio);
+    show($('settings-tab-server'), server);
+    show($('settings-tab-nas'), nas);
+
     const style = (btn, active) => {
+      if (!btn) return;
       btn.classList.toggle('border-emerald-400', active);
       btn.classList.toggle('text-zinc-100', active);
       btn.classList.toggle('font-semibold', active);
@@ -3148,7 +3206,12 @@
       btn.classList.toggle('text-zinc-400', !active);
     };
     style($('settings-tab-btn-audio'), audio);
-    style($('settings-tab-btn-server'), !audio);
+    style($('settings-tab-btn-server'), server);
+    style($('settings-tab-btn-nas'), nas);
+
+    if (nas) {
+      checkFilesBridge();
+    }
   }
 
   async function populateOutputDevices() {
@@ -3189,6 +3252,16 @@
     $('settings-server-url').value = client.baseUrl;
     $('settings-server-user').value = client.username;
     $('settings-server-pass').value = '';
+
+    const nasUrlInput = $('settings-nas-url');
+    if (nasUrlInput) {
+      nasUrlInput.value = getFileBridgeBase();
+    }
+    const nasKeyInput = $('settings-nas-key');
+    if (nasKeyInput) {
+      nasKeyInput.value = getFileBridgeApiKey();
+    }
+
     populateOutputDevices();
     refreshIcons();
   }
@@ -3600,6 +3673,7 @@
     });
     on('settings-tab-btn-audio', 'click', () => setSettingsTab('audio'));
     on('settings-tab-btn-server', 'click', () => setSettingsTab('server'));
+    on('settings-tab-btn-nas', 'click', () => setSettingsTab('nas'));
     on('settings-output-device', 'change', (e) => audioEngine.setOutputDevice(e.target.value || 'default'));
     on('settings-crossfade-slider', 'input', (e) => {
       const v = parseInt(e.target.value, 10) || 0;
@@ -3643,6 +3717,51 @@
       renderSettings();
       showToast('Restored default Navidrome credentials');
       await retryConnection();
+    });
+
+    // NAS Storage Settings
+    on('settings-nas-recheck-btn', 'click', checkFilesBridge);
+    on('settings-nas-key-toggle-btn', 'click', () => {
+      const input = $('settings-nas-key');
+      if (!input) return;
+      const reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      setIcon($('settings-nas-key-eye-icon'), reveal ? 'eye-off' : 'eye');
+    });
+    on('settings-nas-form', 'submit', async (e) => {
+      e.preventDefault();
+      const rawUrl = $('settings-nas-url')?.value?.trim() || '';
+      const rawKey = $('settings-nas-key')?.value?.trim() || '';
+      const cleanUrl = rawUrl.replace(/\/+$/, '') || 'http://localhost:3001';
+
+      filesState.bridgeUrl = cleanUrl;
+      filesState.apiKey = rawKey;
+
+      localStorage.setItem('century.nas_url', cleanUrl);
+      localStorage.setItem('century.file_bridge_url', cleanUrl);
+      localStorage.setItem('century.nas_api_key', rawKey);
+
+      const bridgeUrlInput = $('files-bridge-url-input');
+      if (bridgeUrlInput) bridgeUrlInput.value = cleanUrl;
+
+      showToast('Saved NAS Storage settings');
+      await checkFilesBridge();
+      if (state.route === 'files') {
+        loadFilesView();
+      }
+    });
+    on('settings-reset-nas-btn', 'click', async () => {
+      filesState.bridgeUrl = 'http://localhost:3001';
+      filesState.apiKey = '';
+      localStorage.removeItem('century.nas_url');
+      localStorage.removeItem('century.file_bridge_url');
+      localStorage.removeItem('century.nas_api_key');
+      renderSettings();
+      showToast('Restored default NAS settings');
+      await checkFilesBridge();
+      if (state.route === 'files') {
+        loadFilesView();
+      }
     });
 
     // Translations arriving later re-render whatever is on screen

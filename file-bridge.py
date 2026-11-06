@@ -5,9 +5,18 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*", "allow_headers": ["Content-Type", "x-api-key", "X-API-Key"]}})
 
 PORT = int(os.environ.get("FILE_BRIDGE_PORT", 3001))
+NAS_API_KEY = os.environ.get("NAS_API_KEY") or os.environ.get("FILE_BRIDGE_KEY") or "your-secret-api-key-here"
+
+@app.before_request
+def require_api_key():
+    if request.method == "OPTIONS":
+        return
+    api_key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+    if not api_key or api_key != NAS_API_KEY:
+        return jsonify({"error": "Unauthorized: Invalid or missing x-api-key header"}), 401
 _script_dir = Path(__file__).resolve().parent
 _raw_music = os.environ.get("ND_MUSICFOLDER", os.environ.get("MUSIC_DIR", ""))
 

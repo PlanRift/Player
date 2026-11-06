@@ -8,8 +8,24 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load .env if present
+const envPath = path.join(__dirname, '.env');
+if (fsSync.existsSync(envPath)) {
+  try {
+    const envLines = fsSync.readFileSync(envPath, 'utf-8').split(/\r?\n/);
+    for (const line of envLines) {
+      const match = line.trim().match(/^([^#=]+)=(.*)$/);
+      if (match && !process.env[match[1].trim()]) {
+        process.env[match[1].trim()] = match[2].trim().replace(/^['"]|['"]$/g, '');
+      }
+    }
+  } catch (_) {}
+}
+
 const app = express();
 const PORT = process.env.FILE_BRIDGE_PORT || process.env.PORT || 3001;
+const NAS_API_KEY = process.env.NAS_API_KEY || process.env.FILE_BRIDGE_KEY || 'your-secret-api-key-here';
 
 // Storage root for NAS (e.g. G:\Server).
 // When Player is at G:\Server\Player, automatically uses parent G:\Server.
@@ -27,8 +43,22 @@ const STORAGE_DIR = path.resolve(resolveStorageRoot());
 
 if (!fsSync.existsSync(STORAGE_DIR)) fsSync.mkdirSync(STORAGE_DIR, { recursive: true });
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'x-api-key', 'X-API-Key'],
+}));
 app.use(express.json());
+
+// Require x-api-key header on all incoming requests
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  const apiKey = req.headers['x-api-key'] || req.headers['X-API-Key'];
+  if (!apiKey || apiKey !== NAS_API_KEY) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid or missing x-api-key header' });
+  }
+  next();
+});
 
 const safe = (sub = '') => {
   const norm = path.normalize(path.join(STORAGE_DIR, sub));
