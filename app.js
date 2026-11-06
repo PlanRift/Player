@@ -314,6 +314,7 @@
     'albums',
     'album-detail',
     'songs',
+    'files',
     'playlists',
     'playlist-detail',
     'favourites',
@@ -380,6 +381,7 @@
     else if (route === 'artists') libraryViews.artists.load();
     else if (route === 'albums') libraryViews.albums.load();
     else if (route === 'songs') libraryViews.songs.load();
+    else if (route === 'files') loadFilesView();
     else if (route === 'playlists') loadPlaylistsView();
     else if (route === 'favourites') loadFavouritesView();
     else if (route === 'now-playing') renderNowPlaying();
@@ -1810,6 +1812,439 @@
       refreshIcons();
     } catch (err) {
       setConnectionError(err.message);
+    }
+  }
+
+  // ============================================================================
+  // Lightweight File Manager (Local Storage Explorer)
+  // ============================================================================
+  const filesState = {
+    currentPath: '',
+    items: [],
+    filterQuery: '',
+    bridgeUrl: localStorage.getItem('century.file_bridge_url') || 'http://localhost:3001',
+    isOnline: false,
+    initialized: false,
+  };
+
+  function getFileBridgeBase() {
+    const saved = localStorage.getItem('century.file_bridge_url');
+    if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
+
+    // Automatically infer from client.baseUrl (Navidrome's IP / hostname on Windows PC)
+    try {
+      if (client?.baseUrl) {
+        const u = new URL(client.baseUrl);
+        return `${u.protocol}//${u.hostname}:3001`;
+      }
+    } catch (_) {}
+
+    return (filesState.bridgeUrl || 'http://localhost:3001').trim().replace(/\/+$/, '');
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes === undefined || bytes === null || bytes === 0) return '-';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
+    return `${(bytes / 1073741824).toFixed(2)} GB`;
+  }
+
+  function formatFileDate(ms) {
+    if (!ms) return '-';
+    try {
+      const d = new Date(ms);
+      return d.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '-';
+    }
+  }
+
+  function getFileIcon(name, isDir) {
+    if (isDir) return 'folder';
+    const ext = name.split('.').pop().toLowerCase();
+    if (['mp3', 'flac', 'm4a', 'wav', 'ogg', 'aac', 'opus', 'wma', 'alac', 'aiff'].includes(ext)) return 'music';
+    if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext)) return 'image';
+    if (['lrc', 'txt', 'cue', 'log'].includes(ext)) return 'file-text';
+    return 'file';
+  }
+
+  function updateBridgeStatusBadge(online, text) {
+    const badge = $('files-bridge-status');
+    if (!badge) return;
+    filesState.isOnline = online;
+    if (online) {
+      badge.textContent = text || 'ONLINE';
+      badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-emerald-500/40 bg-emerald-950/30 text-emerald-400';
+      $('files-offline-panel')?.classList.add('hidden');
+    } else {
+      badge.textContent = text || 'OFFLINE';
+      badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-[#f0605a]/40 bg-[#f0605a]/10 text-[#f0605a]';
+      $('files-offline-panel')?.classList.remove('hidden');
+    }
+  }
+
+  async function checkFilesBridge() {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 2000);
+      const res = await fetch(`${getFileBridgeBase()}/api/files?path=`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        updateBridgeStatusBadge(true, 'ONLINE');
+        return true;
+      }
+    } catch (_) {}
+    updateBridgeStatusBadge(false, 'OFFLINE');
+    return false;
+  }
+
+  async function loadFilesView(targetPath) {
+    initFilesEvents();
+    if (typeof targetPath === 'string') {
+      filesState.currentPath = targetPath;
+    }
+    const tbody = $('files-table-body');
+    if (tbody && !tbody.hasChildNodes()) {
+      tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-xs font-mono text-zinc-400">Loading files...</td></tr>`;
+    }
+
+    const base = getFileBridgeBase();
+    try {
+      const res = await fetch(`${base}/api/files?path=${encodeURIComponent(filesState.currentPath)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      filesState.currentPath = data.path || '';
+      filesState.items = Array.isArray(data.items) ? data.items : [];
+      updateBridgeStatusBadge(true, 'ONLINE');
+      renderFilesBreadcrumbs();
+      renderFilesList();
+    } catch (err) {
+      updateBridgeStatusBadge(false, 'OFFLINE');
+      if (tbody) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" class="py-8 text-center text-xs font-mono text-zinc-400">
+              Cannot load directory from <code class="text-emerald-400">${escapeHtml(base)}</code>.<br/>
+              Ensure the backend bridge is running with <code class="text-zinc-200">node file-bridge.js</code>.
+            </td>
+          </tr>`;
+      }
+      $('files-empty-state')?.classList.add('hidden');
+    }
+  }
+
+  function renderFilesBreadcrumbs() {
+    const container = $('files-breadcrumbs');
+    const upBtn = $('files-up-btn');
+    if (upBtn) {
+      upBtn.disabled = !filesState.currentPath;
+    }
+    if (!container) return;
+    container.innerHTML = '';
+
+    const rootBtn = document.createElement('button');
+    rootBtn.type = 'button';
+    rootBtn.className = 'hover:text-emerald-400 font-bold transition-colors inline-flex items-center gap-1';
+    rootBtn.innerHTML = `<i data-lucide="hard-drive" class="w-3 h-3 text-emerald-400"></i><span>ROOT</span>`;
+    rootBtn.onclick = () => loadFilesView('');
+    container.appendChild(rootBtn);
+
+    if (!filesState.currentPath) {
+      refreshIcons();
+      return;
+    }
+
+    const segments = filesState.currentPath.split('/').filter(Boolean);
+    let accum = '';
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      accum = accum ? `${accum}/${seg}` : seg;
+      const target = accum;
+
+      const sep = document.createElement('span');
+      sep.className = 'text-zinc-600 select-none';
+      sep.textContent = '/';
+      container.appendChild(sep);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const isLast = i === segments.length - 1;
+      btn.className = isLast ? 'text-zinc-100 font-semibold' : 'hover:text-emerald-400 transition-colors';
+      btn.textContent = seg;
+      btn.onclick = () => loadFilesView(target);
+      container.appendChild(btn);
+    }
+    refreshIcons();
+  }
+
+  function renderFilesList() {
+    const tbody = $('files-table-body');
+    const emptyState = $('files-empty-state');
+    const countLabel = $('files-count-label');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const q = (filesState.filterQuery || '').trim().toLowerCase();
+    const filtered = filesState.items.filter((item) => !q || item.name.toLowerCase().includes(q));
+
+    const foldersCount = filesState.items.filter((i) => i.isDirectory).length;
+    const filesCount = filesState.items.length - foldersCount;
+    if (countLabel) {
+      countLabel.textContent = `${foldersCount} folder${foldersCount === 1 ? '' : 's'}, ${filesCount} file${filesCount === 1 ? '' : 's'}${
+        filesState.currentPath ? ` in /${filesState.currentPath}` : ' (root storage)'
+      }`;
+    }
+
+    if (filtered.length === 0) {
+      if (emptyState) emptyState.classList.remove('hidden');
+      return;
+    }
+    if (emptyState) emptyState.classList.add('hidden');
+
+    filtered.forEach((item, idx) => {
+      const tr = document.createElement('tr');
+      tr.className = 'group hover:bg-zinc-800/50 transition-colors';
+
+      const iconName = getFileIcon(item.name, item.isDirectory);
+      const iconColor = item.isDirectory ? 'text-emerald-400' : 'text-zinc-400';
+
+      tr.innerHTML = `
+        <td class="py-2.5 px-4 text-center font-mono text-[11px] text-zinc-500">${idx + 1}</td>
+        <td class="py-2.5 px-4">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <i data-lucide="${iconName}" class="w-4 h-4 shrink-0 ${iconColor}"></i>
+            <button
+              type="button"
+              class="file-item-btn text-left truncate font-sans text-xs ${
+                item.isDirectory ? 'font-medium text-zinc-100 hover:text-emerald-400 hover:underline' : 'text-zinc-200 select-text cursor-default'
+              }"
+              title="${escapeHtml(item.name)}"
+            >
+              ${escapeHtml(item.name)}
+            </button>
+          </div>
+        </td>
+        <td class="py-2.5 px-4 text-right font-mono text-[11px] text-zinc-400">${formatFileSize(item.size)}</td>
+        <td class="py-2.5 px-4 text-right font-mono text-[11px] text-zinc-400 whitespace-nowrap">${formatFileDate(item.mtime)}</td>
+        <td class="py-2.5 px-4 text-center">
+          <button
+            type="button"
+            title="Delete ${item.isDirectory ? 'folder' : 'file'}"
+            class="file-delete-btn w-7 h-7 inline-flex items-center justify-center text-zinc-500 hover:text-[#f0605a] hover:bg-zinc-800 transition-colors"
+          >
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        </td>
+      `;
+
+      if (item.isDirectory) {
+        tr.querySelector('.file-item-btn').onclick = () => {
+          const next = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+          loadFilesView(next);
+        };
+      }
+
+      tr.querySelector('.file-delete-btn').onclick = (e) => {
+        e.stopPropagation();
+        deleteFileItem(item);
+      };
+
+      tbody.appendChild(tr);
+    });
+
+    refreshIcons();
+  }
+
+  async function createNewFolderPrompt() {
+    const name = window.prompt('Enter new folder name:');
+    if (!name || !name.trim()) return;
+    const cleanName = name.trim();
+    const base = getFileBridgeBase();
+    try {
+      const res = await fetch(`${base}/api/files/folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: filesState.currentPath, name: cleanName }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      showToast(`Created folder "${cleanName}"`);
+      loadFilesView();
+    } catch (err) {
+      showToast(`Failed to create folder: ${err.message}`, 'error');
+    }
+  }
+
+  async function uploadFiles(files) {
+    if (!files || files.length === 0) return;
+    const base = getFileBridgeBase();
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append('files', files[i]);
+    }
+    showToast(`Uploading ${files.length} file${files.length === 1 ? '' : 's'}...`);
+
+    try {
+      const res = await fetch(`${base}/api/files/upload?path=${encodeURIComponent(filesState.currentPath)}`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      showToast(`Successfully uploaded ${files.length} file${files.length === 1 ? '' : 's'}`);
+      client.request('startScan').catch(() => {});
+      loadFilesView();
+    } catch (err) {
+      showToast(`Upload failed: ${err.message}`, 'error');
+    }
+  }
+
+  async function deleteFileItem(item) {
+    const isDir = item.isDirectory;
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${isDir ? 'folder' : 'file'} "${item.name}"?${
+        isDir ? '\nWarning: All contents inside will be permanently deleted!' : ''
+      }`
+    );
+    if (!confirmed) return;
+
+    const base = getFileBridgeBase();
+    const target = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+    try {
+      const res = await fetch(`${base}/api/files?path=${encodeURIComponent(target)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      showToast(`Deleted "${item.name}"`);
+      client.request('startScan').catch(() => {});
+      loadFilesView();
+    } catch (err) {
+      showToast(`Failed to delete: ${err.message}`, 'error');
+    }
+  }
+
+  function navigateFilesUp() {
+    if (!filesState.currentPath) return;
+    const parts = filesState.currentPath.split('/').filter(Boolean);
+    parts.pop();
+    loadFilesView(parts.join('/'));
+  }
+
+  function initFilesEvents() {
+    if (filesState.initialized) return;
+    filesState.initialized = true;
+
+    // Up button
+    on('files-up-btn', 'click', navigateFilesUp);
+
+    // New folder button
+    on('files-new-folder-btn', 'click', createNewFolderPrompt);
+
+    // Refresh button
+    on('files-refresh-btn', 'click', () => loadFilesView());
+
+    // Filter input
+    const filterInput = $('files-filter-input');
+    const filterClear = $('files-filter-clear');
+    if (filterInput) {
+      filterInput.addEventListener('input', (e) => {
+        filesState.filterQuery = e.target.value;
+        if (filterClear) filterClear.classList.toggle('hidden', !e.target.value);
+        renderFilesList();
+      });
+    }
+    if (filterClear) {
+      filterClear.addEventListener('click', () => {
+        if (filterInput) filterInput.value = '';
+        filesState.filterQuery = '';
+        filterClear.classList.add('hidden');
+        renderFilesList();
+      });
+    }
+
+    // Upload input
+    const uploadInput = $('files-upload-input');
+    if (uploadInput) {
+      uploadInput.addEventListener('change', (e) => {
+        if (e.target.files?.length) {
+          uploadFiles(e.target.files);
+          uploadInput.value = '';
+        }
+      });
+    }
+
+    // Bridge recheck & URL save
+    on('files-retry-bridge-btn', 'click', () => {
+      checkFilesBridge().then((ok) => {
+        if (ok) {
+          showToast('File Bridge connected');
+          loadFilesView();
+        } else {
+          showToast('Could not reach File Bridge', 'error');
+        }
+      });
+    });
+
+    const bridgeUrlInput = $('files-bridge-url-input');
+    if (bridgeUrlInput) {
+      bridgeUrlInput.value = filesState.bridgeUrl;
+    }
+    on('files-save-bridge-url-btn', 'click', () => {
+      if (bridgeUrlInput && bridgeUrlInput.value.trim()) {
+        filesState.bridgeUrl = bridgeUrlInput.value.trim();
+        localStorage.setItem('century.file_bridge_url', filesState.bridgeUrl);
+        showToast('Saved File Bridge URL');
+        loadFilesView();
+      }
+    });
+
+    // Drag and drop zone
+    const dropzone = $('files-dropzone');
+    const dragOverlay = $('files-drag-overlay');
+    if (dropzone) {
+      let dragCounter = 0;
+      dropzone.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        dragCounter++;
+        if (dragOverlay) dragOverlay.classList.remove('hidden');
+      });
+      dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      });
+      dropzone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter <= 0 && dragOverlay) {
+          dragCounter = 0;
+          dragOverlay.classList.add('hidden');
+        }
+      });
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        if (dragOverlay) dragOverlay.classList.add('hidden');
+        if (e.dataTransfer?.files?.length) {
+          uploadFiles(e.dataTransfer.files);
+        }
+      });
     }
   }
 
@@ -3301,6 +3736,7 @@
       case 'artists': libraryViews.artists.render(); break;
       case 'albums': libraryViews.albums.render(); break;
       case 'songs': libraryViews.songs.render(); break;
+      case 'files': loadFilesView(); break;
       case 'search': renderSearchResults(); break;
       case 'favourites': loadFavouritesView(); break;
       case 'album-detail': renderAlbumDetailView(); break;

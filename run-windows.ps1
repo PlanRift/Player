@@ -5,6 +5,7 @@ Set-Location -LiteralPath $ProjectDir
 
 $BackendProcess = $null
 $DevProcess = $null
+$BridgeProcess = $null
 $RunnerExitCode = 0
 
 function Write-Log {
@@ -35,10 +36,11 @@ $env:ND_PORT = Get-EnvOrDefault "ND_PORT" "4533"
 $env:ND_ADDRESS = Get-EnvOrDefault "ND_ADDRESS" "127.0.0.1"
 
 $WebPort = Get-EnvOrDefault "WEB_PORT" "5500"
-$LyricsPort = Get-EnvOrDefault "LYRICS_PORT" "3005"
+$BridgePort = Get-EnvOrDefault "FILE_BRIDGE_PORT" "3001"
 
 if ([string]::IsNullOrWhiteSpace($env:ND_MUSICFOLDER)) {
     $MusicCandidates = @(
+        "G:\Server\Music",
         (Join-Path $HOME "Music\Mornye"),
         (Join-Path $HOME "Music"),
         (Join-Path $ProjectDir "music")
@@ -53,6 +55,14 @@ if ([string]::IsNullOrWhiteSpace($env:ND_MUSICFOLDER)) {
 
     if ([string]::IsNullOrWhiteSpace($env:ND_MUSICFOLDER)) {
         $env:ND_MUSICFOLDER = Join-Path $ProjectDir "music"
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($env:STORAGE_DIR)) {
+    if (Test-Path -LiteralPath "G:\Server" -PathType Container) {
+        $env:STORAGE_DIR = "G:\Server"
+    } elseif (-not [string]::IsNullOrWhiteSpace($env:ND_MUSICFOLDER)) {
+        $env:STORAGE_DIR = Split-Path -Path $env:ND_MUSICFOLDER -Parent
     }
 }
 
@@ -251,22 +261,21 @@ try {
         throw "index.html not found in project root."
     }
 
-    $BunCommand = Get-Command `
-        "bun.exe" `
-        -CommandType Application `
-        -ErrorAction SilentlyContinue
+    $NodeCommand = Get-Command "node.exe" -CommandType Application -ErrorAction SilentlyContinue
+    $BunCommand = Get-Command "bun.exe" -CommandType Application -ErrorAction SilentlyContinue
 
-    if (-not $BunCommand) {
-        throw "Bun is not available in PATH. Install Bun and reopen the terminal."
+    if (-not $NodeCommand -and -not $BunCommand) {
+        throw "Neither Node.js nor Bun is available in PATH. Install Node.js or Bun and reopen the terminal."
     }
+    $JsRuntime = if ($NodeCommand) { $NodeCommand } else { $BunCommand }
 
-    foreach ($Port in @([int]$WebPort, [int]$LyricsPort)) {
+    foreach ($Port in @([int]$WebPort, [int]$BridgePort)) {
         if (Test-PortInUse -Port $Port) {
             Show-PortOwner -Port $Port
 
             throw (
                 "Port $Port is already in use. " +
-                "Stop the previous dev server before starting another runner."
+                "Stop the previous server before starting another runner."
             )
         }
     }
@@ -383,20 +392,26 @@ VITE_NAVIDROME_PASSWORD=
     Write-Log ""
     Write-Log "Backend reachability verified; account credentials NOT verified."
     Write-Log ""
-    Write-Log "Starting frontend and lyrics relay: bun run dev"
+    Write-Log "Starting File Bridge and Web Player..."
+    Write-Log "  Web Player:  $WebUrl"
+    Write-Log "  File Bridge: http://localhost:$BridgePort"
+    Write-Log "  Navidrome:   $BackendUrl"
+    Write-Log "  NAS Root:    $($env:STORAGE_DIR)"
+    Write-Log "  Music:       $($env:ND_MUSICFOLDER)"
     Write-Log ""
-    Write-Log "Expected frontend: $WebUrl"
-    Write-Log "Expected relay:    http://localhost:$LyricsPort"
-    Write-Log "Navidrome:         $BackendUrl"
-    Write-Log ""
-    Write-Log "Use the actual Local URL printed by Vite."
-    Write-Log "WEB_PORT is only a runner hint, not a Vite port override."
-    Write-Log "Press Ctrl+C to stop."
+    Write-Log "Press Ctrl+C to stop all services."
     Write-Log "--------------------------------------------------------"
 
+    $BridgeProcess = Start-Process `
+        -FilePath $JsRuntime.Source `
+        -ArgumentList @("file-bridge.js") `
+        -WorkingDirectory $ProjectDir `
+        -NoNewWindow `
+        -PassThru
+
     $DevProcess = Start-Process `
-        -FilePath $BunCommand.Source `
-        -ArgumentList @("run", "dev") `
+        -FilePath $JsRuntime.Source `
+        -ArgumentList @("serve.js") `
         -WorkingDirectory $ProjectDir `
         -NoNewWindow `
         -PassThru
@@ -405,12 +420,19 @@ VITE_NAVIDROME_PASSWORD=
         Start-Sleep -Milliseconds 300
         $DevProcess.Refresh()
 
+        if ($null -ne $BridgeProcess) {
+            $BridgeProcess.Refresh()
+            if ($BridgeProcess.HasExited) {
+                throw "File Bridge stopped unexpectedly."
+            }
+        }
+
         if ($null -ne $BackendProcess) {
             $BackendProcess.Refresh()
 
             if ($BackendProcess.HasExited) {
                 Show-BackendLogs
-                throw "Navidrome stopped while the frontend was running."
+                throw "Navidrome stopped while the player was running."
             }
         }
     }
@@ -428,7 +450,8 @@ finally {
     Write-Log ""
     Write-Log "Cleaning up services started by this runner..."
 
-    Stop-OwnedProcess -Process $DevProcess -Label "frontend/relay"
+    Stop-OwnedProcess -Process $BridgeProcess -Label "File Bridge"
+    Stop-OwnedProcess -Process $DevProcess -Label "Web Player"
     Stop-OwnedProcess -Process $BackendProcess -Label "Navidrome"
 
     Write-Log "Cleanup complete."

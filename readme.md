@@ -45,6 +45,8 @@ If you run Navidrome locally alongside the player:
 ├── engine.js                    # Subsonic API client, Dual-deck Gapless Audio Engine, Multi-provider Lyrics & Translations
 ├── app.js                       # View loader, router, UI controllers, Honest History, playlists CRUD, keyboard shortcuts
 ├── serve.js                     # Zero-dependency local static server (Node.js, Bun, Deno)
+├── file-bridge.js               # Standalone microscopic local file bridge (Node.js Express + Multer)
+├── file-bridge.py               # Standalone microscopic local file bridge alternative (Python Flask)
 ├── title-translations.json      # Bundled offline title translations cache
 ├── views/                       # Modular HTML view templates mounted into index.html
 │   ├── home.html                # Honest History (Continue Listening, Forgotten Favourite?, Listen Again, Quick Pick) + Made For You
@@ -55,6 +57,7 @@ If you run Navidrome locally alongside the player:
 │   ├── albums.html              # Full albums catalog with sort selector and pagination
 │   ├── album-detail.html        # Layer 3: Album / Singles tracklist, separate Play and Shuffle buttons, star button
 │   ├── songs.html               # Paginated library songs table with Play All and Shuffle
+│   ├── files.html               # Lightweight File Manager (Upload, New Folder, Delete, Subfolder Drilldown)
 │   ├── playlists.html           # All Playlists grid (2x2 Canvas collages) + inline playlist creator
 │   ├── playlist-detail.html     # Playlist tracklist, inline rename, track removal, and deletion
 │   ├── favourites.html          # Starred / Favourite Songs collection
@@ -101,6 +104,12 @@ If you run Navidrome locally alongside the player:
 7. **Collapsible Queue Drawer & Playlist Management**:
    - Slide-out right queue drawer (`Q` key) with HTML5 drag-and-drop reordering, Up/Down buttons, track removal, and **Save Queue as Playlist**.
    - Playlist creation, renaming, track removal, and deletion.
+
+8. **Lightweight Local Storage File Manager**:
+   - Complete browser-based file explorer to manage your local music library directory (`ND_MUSICFOLDER` or `./music`).
+   - Create new folders, upload files via button or drag-and-drop, delete files and folders with confirmation.
+   - Breadcrumb navigation and subfolder drilldown.
+   - Ultra-lightweight microscopic backend bridge (`file-bridge.js` or `file-bridge.py`, under 90 lines) that sits idle at 0% CPU.
 
 ---
 
