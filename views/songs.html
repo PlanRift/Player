@@ -1,23 +1,24 @@
-<!-- VIEW: SONGS -->
-<section id="view-songs" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#3f3f46] pb-4">
+<!-- VIEW: SONGS (Paginated Library Tracks with LibraryToolbar, SortMenu & Starred Filter) -->
+<section id="view-songs" class="hidden p-6 md:p-8 pb-28 space-y-6 max-w-7xl mx-auto">
+  <!-- Section Header -->
+  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-4 border-b border-zinc-700">
     <div>
-      <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Songs</h1>
-      <p id="songs-count-label" class="text-xs font-mono text-[#a1a1aa] mt-0.5">Library tracks</p>
+      <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-none">Songs</h1>
+      <p id="songs-count-label" class="font-mono text-xs text-zinc-400 tracking-wide mt-2">Library tracks</p>
     </div>
-    <div class="flex items-center gap-2.5">
+    <div class="flex items-center gap-2 self-start sm:self-auto">
       <button
         id="songs-play-all-btn"
         type="button"
-        class="px-4 py-2 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity"
+        class="h-8 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1.5 transition-colors"
       >
-        <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+        <i data-lucide="play" class="w-3.5 h-3.5"></i>
         <span>PLAY ALL</span>
       </button>
       <button
         id="songs-shuffle-btn"
         type="button"
-        class="px-4 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] flex items-center gap-2 transition-colors"
+        class="h-8 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1.5 transition-colors"
       >
         <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
         <span>SHUFFLE</span>
@@ -25,16 +26,115 @@
     </div>
   </div>
 
-  <div id="songs-list" class="divide-y divide-[#3f3f46] border border-[#3f3f46] rounded-lg bg-[#18181b] overflow-hidden"></div>
+  <!-- LibraryToolbar -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-zinc-900/60 border border-zinc-800">
+    <div class="relative w-full sm:w-72 md:w-80">
+      <i data-lucide="search" class="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+      <input
+        id="songs-filter-input"
+        type="text"
+        placeholder="Filter songs, artists, or albums..."
+        aria-label="Filter songs"
+        class="w-full h-9 pl-9 pr-8 bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 font-mono placeholder-zinc-400"
+      />
+      <button
+        id="songs-filter-clear"
+        type="button"
+        title="Clear filter"
+        class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+      >
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
 
-  <div class="flex justify-center pt-4">
+    <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+      <!-- Sort Dropdown -->
+      <div class="relative">
+        <button
+          id="songs-sort-btn"
+          type="button"
+          class="inline-flex items-center gap-1.5 h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200"
+        >
+          <span id="songs-sort-label">Sort: Title A-Z</span>
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-zinc-400"></i>
+        </button>
+        <div
+          id="songs-sort-menu"
+          class="hidden absolute right-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono"
+        >
+          <button type="button" data-sort="title-asc" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-100">
+            <span>Title A-Z</span>
+            <i data-lucide="check" class="sort-check w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="artist-asc" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Artist A-Z</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="most-played" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Most played</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="recently-played" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Recently played</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="recently-added" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Recently added</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Starred Filter Toggle -->
+      <button
+        id="songs-starred-btn"
+        type="button"
+        title="Filter Starred Songs"
+        aria-pressed="false"
+        class="h-9 w-9 border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 flex items-center justify-center text-zinc-400 transition-colors"
+      >
+        <i data-lucide="star" class="w-4 h-4"></i>
+      </button>
+
+      <!-- Reset Button -->
+      <button
+        id="songs-reset-btn"
+        type="button"
+        class="hidden h-9 px-2.5 text-xs font-mono text-zinc-400 hover:text-zinc-100 inline-flex items-center gap-1"
+      >
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+        <span>RESET</span>
+      </button>
+
+      <span id="songs-toolbar-count" class="text-[11px] font-mono text-zinc-400 pl-2 border-l border-zinc-800 whitespace-nowrap">
+        50 songs
+      </span>
+    </div>
+  </div>
+
+  <!-- Songs Tracklist -->
+  <div id="songs-list" class="studio-panel divide-y divide-zinc-800/60 overflow-hidden"></div>
+
+  <!-- Pagination -->
+  <div id="songs-pagination" class="flex items-center justify-between pt-4 border-t border-zinc-800">
     <button
-      id="songs-load-more-btn"
+      id="songs-prev-page"
       type="button"
-      class="hidden px-5 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] transition-colors"
+      disabled
+      class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1"
     >
-      LOAD MORE SONGS
+      <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i>
+      <span>PREVIOUS</span>
+    </button>
+    <span id="songs-page-indicator" class="font-mono text-xs text-zinc-400">PAGE 1</span>
+    <button
+      id="songs-next-page"
+      type="button"
+      disabled
+      class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1"
+    >
+      <span>NEXT</span>
+      <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
     </button>
   </div>
 </section>
-

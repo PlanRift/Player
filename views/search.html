@@ -1,33 +1,59 @@
-<!-- VIEW: SEARCH -->
-<section id="view-search" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
-  <div class="border-b border-[#3f3f46] pb-5 space-y-3">
-    <div class="flex items-center justify-between">
-      <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Search Library</h1>
-      <span class="text-xs font-mono text-[#a1a1aa]">↑↓ Navigate · Enter Open/Play · Esc Clear</span>
+<!-- VIEW: SEARCH (Universal Search across Original + Translated/Romaji Titles) -->
+<section id="view-search" class="hidden p-6 md:p-8 pb-28 space-y-6 max-w-7xl mx-auto">
+  <!-- Section Header -->
+  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-4 border-b border-zinc-700">
+    <div>
+      <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-none">Search</h1>
+      <p id="search-summary-label" class="font-mono text-xs text-zinc-400 tracking-wide mt-2">
+        Search artists, albums, or tracks across original and translated titles
+      </p>
     </div>
-    <div class="relative">
-      <i data-lucide="search" class="w-4 h-4 text-[#a1a1aa] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"></i>
-      <input
-        id="search-input"
-        type="text"
-        placeholder="Search artists, albums, or songs..."
-        aria-label="Search library"
-        class="w-full pl-10 pr-20 py-2.5 rounded-md bg-[#18181b] border border-[#71717a] text-sm text-[#f4f4f5] placeholder-[#a1a1aa] focus:border-[#34d399]"
-      />
+  </div>
+
+  <!-- Search Input Bar -->
+  <div class="relative">
+    <i data-lucide="search" class="w-4 h-4 text-zinc-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+    <input
+      id="search-input"
+      type="text"
+      placeholder="Search artists, albums, tracks... (↑↓ to select, Enter to choose, Esc to exit)"
+      aria-label="Search library"
+      class="w-full h-12 pl-11 pr-24 bg-zinc-900 border border-zinc-700 focus:border-emerald-400 text-sm text-zinc-100 placeholder-zinc-400 font-sans"
+    />
+    <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
       <button
         id="search-clear-btn"
         type="button"
-        class="hidden absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded bg-[#27272a] border border-[#71717a] text-[11px] font-mono text-[#f4f4f5] hover:border-[#34d399]"
+        title="Clear search"
+        class="hidden p-1 text-zinc-400 hover:text-zinc-100"
       >
-        CLEAR
+        <i data-lucide="x" class="w-4 h-4"></i>
       </button>
+      <kbd class="px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 bg-zinc-950 border border-zinc-700">ESC</kbd>
     </div>
   </div>
 
+  <!-- Search Results / Empty State Container -->
   <div id="search-results" class="space-y-8">
-    <div class="py-12 text-center text-sm font-mono text-[#a1a1aa]">
-      Type above to search across your entire Navidrome library.
+    <div class="studio-panel p-12 text-center border border-zinc-800 bg-zinc-900/40">
+      <div class="w-10 h-10 mx-auto mb-3 bg-zinc-900 border border-zinc-700 flex items-center justify-center text-zinc-400">
+        <i data-lucide="search" class="w-5 h-5"></i>
+      </div>
+      <h2 class="font-display text-xl text-zinc-100">Search your library</h2>
+      <p class="text-xs font-mono text-zinc-400 mt-1">
+        Find artists, albums, or tracks across your library
+      </p>
+      <div class="mt-5 flex items-center justify-center gap-2">
+        <button type="button" data-search-nav="artists" class="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 transition-colors">
+          Artists
+        </button>
+        <button type="button" data-search-nav="albums" class="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 transition-colors">
+          Albums
+        </button>
+        <button type="button" data-search-nav="songs" class="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 transition-colors">
+          Songs
+        </button>
+      </div>
     </div>
   </div>
 </section>
-

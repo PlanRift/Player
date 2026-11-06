@@ -1,0 +1,13 @@
+{
+  "name": "plenrip-audio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node serve.js",
+    "start": "node serve.js",
+    "serve": "node serve.js",
+    "serve:python": "python3 -m http.server 5500",
+    "serve:bun": "bun serve.js"
+  }
+}

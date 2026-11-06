@@ -1,27 +1,23 @@
-<!-- VIEW: ALL PLAYLISTS -->
-<section id="view-playlists" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#3f3f46] pb-4">
+<!-- VIEW: ALL PLAYLISTS (Horizontal Row MediaCards with 2x2 Canvas Collages) -->
+<section id="view-playlists" class="hidden p-6 md:p-8 pb-28 space-y-6 max-w-7xl mx-auto">
+  <!-- Section Header -->
+  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-4 border-b border-zinc-700">
     <div>
-      <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Playlists</h1>
-      <p id="playlists-count-label" class="text-xs font-mono text-[#a1a1aa] mt-0.5">Custom server playlists with 2x2 collage covers</p>
+      <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-none">Playlists</h1>
+      <p id="playlists-count-label" class="font-mono text-xs text-zinc-400 tracking-wide mt-2">Custom playlists</p>
     </div>
-    <form id="playlists-create-form" class="flex items-center gap-2">
-      <input
-        id="playlists-create-input"
-        type="text"
-        placeholder="New playlist title..."
-        aria-label="New playlist title"
-        class="px-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] text-xs text-[#f4f4f5] placeholder-[#a1a1aa]"
-      />
+    <div class="flex items-center gap-2 self-start sm:self-auto">
       <button
-        type="submit"
-        class="px-3.5 py-1.5 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold hover:opacity-90 transition-opacity"
+        id="playlists-open-create-modal-btn"
+        type="button"
+        class="h-8 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1.5 transition-colors"
       >
-        + CREATE
+        <i data-lucide="plus" class="w-3.5 h-3.5 text-emerald-400"></i>
+        <span>CREATE PLAYLIST</span>
       </button>
-    </form>
+    </div>
   </div>
 
-  <div id="playlists-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4"></div>
+  <!-- Horizontal Row Cards Grid -->
+  <div id="playlists-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
 </section>
-

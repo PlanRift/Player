@@ -1,35 +1,36 @@
 <!-- VIEW: PLAYLIST DETAIL -->
-<section id="view-playlist-detail" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
+<section id="view-playlist-detail" class="hidden p-6 md:p-8 pb-28 space-y-6 max-w-7xl mx-auto">
   <div>
     <button
       id="playlist-back-btn"
       type="button"
-      class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] transition-colors"
+      class="inline-flex items-center gap-1.5 h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 transition-colors"
     >
       <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
       <span>ALL PLAYLISTS</span>
     </button>
   </div>
 
-  <div class="flex flex-col md:flex-row gap-6 items-start md:items-end border-b border-[#3f3f46] pb-6">
-    <div class="w-40 h-40 md:w-44 md:h-44 rounded-lg bg-[#18181b] border border-[#3f3f46] overflow-hidden shrink-0 flex items-center justify-center">
+  <!-- Playlist Header Studio Panel -->
+  <div class="studio-panel p-5 sm:p-6 bg-zinc-900/60 flex flex-col md:flex-row gap-6 items-start md:items-end">
+    <div class="w-40 h-40 sm:w-44 sm:h-44 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center">
       <img id="playlist-detail-cover" src="" alt="" class="hidden w-full h-full object-cover" />
-      <div id="playlist-detail-cover-fallback" class="flex flex-col items-center justify-center text-[#a1a1aa]">
+      <div id="playlist-detail-cover-fallback" class="flex flex-col items-center justify-center text-zinc-400">
         <i data-lucide="list-music" class="w-10 h-10 mb-1"></i>
         <span class="text-[10px] font-mono">PLAYLIST</span>
       </div>
     </div>
 
     <div class="flex-1 min-w-0 space-y-2">
-      <div class="text-xs font-mono uppercase tracking-wider text-[#34d399]">PLAYLIST</div>
+      <div class="text-[11px] font-mono uppercase tracking-wider text-emerald-400">Layer 3 · Playlist</div>
       <div class="flex items-center gap-2 flex-wrap">
-        <h1 id="playlist-detail-title" class="text-2xl md:text-3xl font-bold tracking-tight text-[#f4f4f5]"></h1>
+        <h1 id="playlist-detail-title" class="text-2xl sm:text-4xl font-display font-normal tracking-tight text-zinc-100"></h1>
         <button
           id="playlist-rename-toggle-btn"
           type="button"
           aria-label="Rename playlist"
           title="Rename playlist"
-          class="p-1.5 rounded bg-[#18181b] border border-[#71717a] text-[#a1a1aa] hover:text-[#f4f4f5]"
+          class="p-1.5 bg-zinc-900 border border-zinc-700 text-zinc-400 hover:text-zinc-100"
         >
           <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
         </button>
@@ -40,54 +41,87 @@
           id="playlist-rename-input"
           type="text"
           aria-label="Playlist new name"
-          class="px-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] text-xs text-[#f4f4f5]"
+          class="h-8 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
         />
         <button
           type="submit"
-          class="px-3 py-1.5 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold"
+          class="h-8 px-3 bg-emerald-400 text-zinc-950 text-xs font-mono font-semibold"
         >
           SAVE
         </button>
         <button
           id="playlist-rename-cancel-btn"
           type="button"
-          class="px-3 py-1.5 rounded bg-[#27272a] border border-[#71717a] text-xs font-mono text-[#f4f4f5]"
+          class="h-8 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-200"
         >
           CANCEL
         </button>
       </form>
 
-      <p id="playlist-detail-meta" class="text-xs font-mono text-[#a1a1aa]"></p>
+      <p id="playlist-detail-meta" class="text-xs font-mono text-zinc-400"></p>
 
-      <div class="pt-3 flex flex-wrap items-center gap-2.5">
+      <div class="pt-3 flex flex-wrap items-center gap-2">
         <button
           id="playlist-play-btn"
           type="button"
-          class="px-4 py-2 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold flex items-center gap-2 hover:opacity-90 transition-opacity"
+          class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors"
         >
           <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
           <span>PLAY</span>
         </button>
+
         <button
           id="playlist-shuffle-btn"
           type="button"
-          class="px-4 py-2 rounded bg-[#18181b] border border-[#71717a] hover:bg-[#27272a] text-xs font-mono text-[#f4f4f5] flex items-center gap-2 transition-colors"
+          class="h-9 px-4 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-2 transition-colors"
         >
           <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
           <span>SHUFFLE</span>
         </button>
-        <button
-          id="playlist-delete-btn"
-          type="button"
-          class="px-3.5 py-2 rounded bg-[#18181b] border border-[#71717a] hover:border-[#f87171] text-xs font-mono text-[#f87171] flex items-center gap-1.5 transition-colors"
-        >
-          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-          <span id="playlist-delete-label">DELETE PLAYLIST</span>
-        </button>
+
+        <!-- Playlist Overflow Menu [...] -->
+        <div class="relative">
+          <button
+            id="playlist-more-btn"
+            type="button"
+            aria-label="More playlist actions"
+            title="More options"
+            class="h-9 w-9 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300 hover:text-zinc-100 transition-colors"
+          >
+            <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+          </button>
+
+          <div
+            id="playlist-more-menu"
+            class="hidden absolute left-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono"
+          >
+            <button id="playlist-menu-shuffle" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-zinc-200">
+              <i data-lucide="shuffle" class="w-3.5 h-3.5 text-zinc-400"></i>
+              <span>Shuffle play</span>
+            </button>
+            <button id="playlist-menu-play-next" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-zinc-200">
+              <i data-lucide="list-start" class="w-3.5 h-3.5 text-zinc-400"></i>
+              <span>Play next</span>
+            </button>
+            <button id="playlist-menu-add-queue" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-zinc-200">
+              <i data-lucide="plus" class="w-3.5 h-3.5 text-zinc-400"></i>
+              <span>Add to queue</span>
+            </button>
+            <button id="playlist-menu-add-playlist" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-zinc-200">
+              <i data-lucide="list-music" class="w-3.5 h-3.5 text-zinc-400"></i>
+              <span>Add to playlist</span>
+            </button>
+            <div class="my-1 border-t border-zinc-800"></div>
+            <button id="playlist-delete-btn" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-[#f0605a]">
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              <span id="playlist-delete-label">Delete playlist</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <div id="playlist-tracks-list" class="divide-y divide-[#3f3f46] border border-[#3f3f46] rounded-lg bg-[#18181b] overflow-hidden"></div>
+  <!-- Tracklist -->
+  <div id="playlist-tracks-list" class="studio-panel divide-y divide-zinc-800/60 overflow-hidden"></div>
 </section>
-

@@ -5,33 +5,108 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Plenrip Audio</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Geist Sans"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+            mono: ['"Geist Mono"', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+            display: ['"Geist Serif"', 'Georgia', 'serif']
+          },
+          colors: {
+            zinc: {
+              950: 'var(--background)',
+              900: 'var(--card)',
+              850: 'var(--card-hover)',
+              800: 'var(--secondary)',
+              700: 'var(--border)',
+              600: 'var(--border-emphasis)',
+              500: 'var(--border-strong)',
+              400: 'var(--muted-foreground)',
+              300: 'var(--text-muted)',
+              200: 'var(--text-body)',
+              100: 'var(--foreground)'
+            },
+            emerald: {
+              300: 'var(--primary-light)',
+              400: 'var(--primary)',
+              500: 'var(--primary-hover)'
+            }
+          }
+        }
+      }
+    };
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
-<body class="h-screen w-screen overflow-hidden flex flex-col bg-[#0e0e11] text-[#f4f4f5] select-none">
+<body class="h-screen w-screen overflow-hidden flex flex-col bg-zinc-950 text-zinc-100 select-none">
 
-  <!-- Main Workspace (Sidebar + Main View Mount + Queue Drawer) -->
-  <div class="flex flex-1 min-h-0 overflow-hidden">
+  <!-- Mobile Top Header (< md, hidden when on /now-playing) -->
+  <header
+    id="mobile-top-bar"
+    class="md:hidden h-12 px-3 bg-zinc-900 border-b border-zinc-700 flex items-center justify-between shrink-0 z-30"
+  >
+    <div class="flex items-center gap-1.5">
+      <button
+        id="mobile-menu-btn"
+        type="button"
+        aria-label="Open menu"
+        class="h-8 px-2.5 bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1.5"
+      >
+        <i data-lucide="menu" class="w-3.5 h-3.5"></i>
+        <span>MENU</span>
+      </button>
+      <button
+        id="mobile-back-btn"
+        type="button"
+        aria-label="Go back"
+        class="hidden h-8 px-2.5 bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1"
+      >
+        <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i>
+        <span>BACK</span>
+      </button>
+    </div>
+
+    <span class="font-display text-base text-zinc-100 truncate">Plenrip Audio</span>
+
+    <button
+      id="mobile-search-btn"
+      type="button"
+      aria-label="Search"
+      class="w-8 h-8 flex items-center justify-center text-zinc-300 hover:text-zinc-100"
+    >
+      <i data-lucide="search" class="w-4 h-4"></i>
+    </button>
+  </header>
+
+  <!-- Mobile Sidebar Backdrop -->
+  <div
+    id="mobile-sidebar-backdrop"
+    class="hidden fixed inset-0 z-40 bg-black/70 md:hidden"
+  ></div>
+
+  <!-- Main Workspace (Sidebar + Main Viewport) -->
+  <div class="flex flex-1 min-h-0 overflow-hidden relative">
 
     <!-- Apple Music-Style Collapsible Sidebar -->
     <aside
       id="sidebar"
       aria-label="Primary Navigation"
-      class="h-full bg-[#18181b] border-r border-[#3f3f46] flex flex-col shrink-0 z-20"
+      class="fixed md:static inset-y-0 left-0 -translate-x-full md:translate-x-0 h-full bg-zinc-900 border-r border-zinc-700 flex flex-col shrink-0 z-50 md:z-20"
     >
       <!-- Brand + Collapse Toggle -->
-      <div id="sidebar-header-row" class="h-14 flex items-center justify-between px-4 border-b border-[#3f3f46]">
+      <div id="sidebar-header-row" class="h-14 flex items-center justify-between px-4 border-b border-zinc-700">
         <button
           id="sidebar-brand-wrap"
           type="button"
-          class="flex items-center gap-2.5 min-w-0 text-left hover:opacity-90 transition-opacity"
+          class="flex items-center gap-2 min-w-0 text-left hover:opacity-90 transition-opacity"
           title="Go to Home"
         >
-          <div class="w-6 h-6 rounded bg-[#27272a] border border-[#71717a] flex items-center justify-center shrink-0">
-            <span class="text-xs font-mono font-bold text-[#34d399]">P</span>
-          </div>
-          <span class="sidebar-label font-semibold text-sm tracking-tight text-[#f4f4f5] truncate">
+          <span class="sidebar-label font-display text-lg tracking-tight text-zinc-100 truncate">
             Plenrip Audio
           </span>
         </button>
@@ -41,26 +116,26 @@
           type="button"
           aria-label="Toggle sidebar width"
           title="Collapse / Expand Sidebar"
-          class="w-8 h-8 rounded flex items-center justify-center text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors shrink-0"
+          class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors shrink-0"
         >
-          <i data-lucide="panel-left-close" class="w-4 h-4"></i>
+          <i id="sidebar-toggle-icon" data-lucide="chevron-left" class="w-4 h-4"></i>
         </button>
       </div>
 
       <!-- Scrollable Navigation Links -->
       <nav aria-label="Library and Playlists" class="flex-1 overflow-y-auto py-3 px-2 space-y-5">
         <!-- Top Actions: Search + Home -->
-        <div class="space-y-1">
+        <div class="space-y-0.5">
           <button
             id="nav-search"
             type="button"
             data-route="search"
             title="Search (Ctrl+K or /)"
-            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
+            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
             <i data-lucide="search" class="nav-icon w-4 h-4 shrink-0"></i>
             <span class="sidebar-label flex-1 text-left truncate">Search</span>
-            <kbd class="sidebar-shortcut text-[10px] font-mono text-[#a1a1aa] border border-[#3f3f46] rounded px-1.5 py-0.5 bg-[#0e0e11]">⌘K</kbd>
+            <kbd class="sidebar-shortcut text-[10px] font-mono text-zinc-400 border border-zinc-700 px-1.5 py-0.5 bg-zinc-950">⌘K</kbd>
           </button>
 
           <button
@@ -68,7 +143,7 @@
             type="button"
             data-route="home"
             title="Home"
-            class="sidebar-nav-btn nav-item-active w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
+            class="sidebar-nav-btn nav-item-active w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
             <i data-lucide="home" class="nav-icon w-4 h-4 shrink-0"></i>
             <span class="sidebar-label flex-1 text-left truncate">Home</span>
@@ -76,8 +151,8 @@
         </div>
 
         <!-- Library Group -->
-        <div class="space-y-1">
-          <div class="sidebar-section-header px-3 pb-1 text-[11px] font-mono uppercase tracking-wider text-[#a1a1aa]">
+        <div class="space-y-0.5">
+          <div class="sidebar-section-header px-3 pb-1 text-[10.5px] font-mono uppercase tracking-wider text-zinc-400">
             Library
           </div>
 
@@ -86,9 +161,9 @@
             type="button"
             data-route="artists"
             title="Artists"
-            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
+            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
-            <i data-lucide="mic-2" class="nav-icon w-4 h-4 shrink-0"></i>
+            <i data-lucide="users" class="nav-icon w-4 h-4 shrink-0"></i>
             <span class="sidebar-label flex-1 text-left truncate">Artists</span>
           </button>
 
@@ -97,7 +172,7 @@
             type="button"
             data-route="albums"
             title="Albums"
-            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
+            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
             <i data-lucide="disc" class="nav-icon w-4 h-4 shrink-0"></i>
             <span class="sidebar-label flex-1 text-left truncate">Albums</span>
@@ -108,7 +183,7 @@
             type="button"
             data-route="songs"
             title="Songs"
-            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
+            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
             <i data-lucide="music" class="nav-icon w-4 h-4 shrink-0"></i>
             <span class="sidebar-label flex-1 text-left truncate">Songs</span>
@@ -116,37 +191,26 @@
         </div>
 
         <!-- Playlists Group -->
-        <div class="space-y-1">
+        <div class="space-y-0.5">
           <div class="sidebar-section-header flex items-center justify-between px-3 pb-1">
-            <span class="text-[11px] font-mono uppercase tracking-wider text-[#a1a1aa]">Playlists</span>
+            <span class="text-[10.5px] font-mono uppercase tracking-wider text-zinc-400">Playlists</span>
             <button
               id="sidebar-new-playlist-btn"
               type="button"
               title="Create new playlist"
-              class="flex items-center gap-1 text-[11px] font-mono text-[#a1a1aa] hover:text-[#34d399] transition-colors"
+              class="flex items-center gap-0.5 text-[10.5px] font-mono text-emerald-400 hover:text-emerald-300 transition-colors"
             >
-              <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+              <i data-lucide="plus" class="w-3 h-3"></i>
               <span>NEW</span>
             </button>
           </div>
-
-          <!-- Inline New Playlist Form -->
-          <form id="sidebar-new-playlist-form" class="hidden px-2 pb-1.5">
-            <input
-              id="sidebar-new-playlist-input"
-              type="text"
-              placeholder="Playlist name..."
-              aria-label="New playlist name"
-              class="w-full px-2.5 py-1.5 text-xs bg-[#0e0e11] border border-[#71717a] rounded text-[#f4f4f5] placeholder-[#a1a1aa]"
-            />
-          </form>
 
           <button
             id="nav-playlists"
             type="button"
             data-route="playlists"
             title="All Playlists"
-            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
+            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
             <i data-lucide="list-music" class="nav-icon w-4 h-4 shrink-0"></i>
             <span class="sidebar-label flex-1 text-left truncate">All Playlists</span>
@@ -157,401 +221,678 @@
             type="button"
             data-route="favourites"
             title="Favourite Songs"
-            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
+            class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
           >
-            <i data-lucide="heart" class="nav-icon w-4 h-4 shrink-0"></i>
+            <i data-lucide="star" class="nav-icon w-4 h-4 shrink-0"></i>
             <span class="sidebar-label flex-1 text-left truncate">Favourite Songs</span>
           </button>
 
-          <!-- Dynamic User Playlists -->
+          <!-- Dynamic User Playlists (with 20x20 2x2 Collage Thumbnails) -->
           <div id="sidebar-custom-playlists" class="space-y-0.5 pt-1"></div>
         </div>
       </nav>
 
-      <!-- Bottom Actions: Shortcuts + Settings + Status -->
-      <div class="p-2 border-t border-[#3f3f46] space-y-1">
-        <button
-          id="nav-shortcuts-btn"
-          type="button"
-          title="Keyboard Shortcuts (?)"
-          class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
-        >
-          <i data-lucide="keyboard" class="nav-icon w-4 h-4 shrink-0"></i>
-          <span class="sidebar-label flex-1 text-left truncate">Shortcuts</span>
-          <kbd class="sidebar-shortcut text-[10px] font-mono text-[#a1a1aa] border border-[#3f3f46] rounded px-1.5 py-0.5 bg-[#0e0e11]">?</kbd>
-        </button>
-
+      <!-- Sidebar Footer: Settings Button -->
+      <div class="p-2 border-t border-zinc-700">
         <button
           id="nav-settings"
           type="button"
-          data-route="settings"
           title="Settings"
-          class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
+          class="sidebar-nav-btn w-full flex items-center gap-3 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
         >
-          <i data-lucide="settings" class="nav-icon w-4 h-4 shrink-0"></i>
+          <i data-lucide="sliders" class="nav-icon w-4 h-4 shrink-0"></i>
           <span class="sidebar-label flex-1 text-left truncate">Settings</span>
         </button>
-
-        <div class="sidebar-footer-text px-3 py-1 flex items-center justify-between text-[11px] font-mono text-[#a1a1aa]">
-          <span id="server-status-badge" class="flex items-center gap-1.5 truncate">
-            <span id="server-status-dot" class="w-2 h-2 rounded-full bg-[#34d399] inline-block"></span>
-            <span>Subsonic v1.16.1</span>
-          </span>
-        </div>
       </div>
     </aside>
 
-    <!-- Main Scrollable Viewport -->
-    <main id="main-content" class="flex-1 h-full overflow-y-auto bg-[#0e0e11] relative">
-      <!-- Connection Error Banner -->
-      <div
-        id="error-banner"
-        class="hidden mx-6 mt-6 p-4 rounded-lg bg-[#18181b] border border-[#f87171] flex items-center justify-between gap-4"
-      >
-        <div class="flex items-center gap-3 min-w-0">
-          <i data-lucide="alert-circle" class="w-5 h-5 text-[#f87171] shrink-0"></i>
-          <div class="min-w-0">
-            <p class="text-sm font-medium text-[#f4f4f5]">Cannot reach Navidrome server</p>
-            <p id="error-banner-msg" class="text-xs font-mono text-[#a1a1aa] truncate">
-              Verify server URL and credentials in Settings.
-            </p>
+    <!-- Main Viewport Wrapper -->
+    <div class="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden bg-zinc-950">
+      <!-- Scrollable View Container -->
+      <main id="main-content" class="flex-1 h-full overflow-y-auto relative">
+        <!-- StatusCard (Connection Error Banner) -->
+        <div
+          id="error-banner"
+          class="hidden mx-6 mt-6 studio-panel p-4 border-l-2 border-l-[#f0605a] bg-zinc-900/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 max-w-7xl lg:mx-auto"
+        >
+          <div class="flex items-center gap-3 min-w-0">
+            <i data-lucide="alert-circle" class="w-5 h-5 text-[#f0605a] shrink-0"></i>
+            <div class="min-w-0">
+              <p id="error-banner-title" class="text-sm font-medium text-zinc-100">Cannot reach Navidrome server</p>
+              <p id="error-banner-msg" class="text-xs font-mono text-zinc-400 truncate mt-0.5">
+                Verify server URL and credentials in Settings.
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              id="error-retry-btn"
+              type="button"
+              class="h-8 px-3 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"
+            >
+              Retry Connection
+            </button>
+            <button
+              id="error-settings-btn"
+              type="button"
+              class="h-8 px-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-xs font-mono text-zinc-200 transition-colors"
+            >
+              Settings
+            </button>
+            <button
+              id="error-dismiss-btn"
+              type="button"
+              class="h-8 px-2.5 text-xs font-mono text-zinc-400 hover:text-zinc-100"
+            >
+              DISMISS
+            </button>
           </div>
         </div>
-        <div class="flex items-center gap-2 shrink-0">
-          <button
-            id="error-retry-btn"
-            type="button"
-            class="px-3 py-1.5 rounded bg-[#27272a] border border-[#71717a] text-xs font-mono text-[#f4f4f5] hover:border-[#34d399] transition-colors"
-          >
-            RETRY
-          </button>
-          <button
-            id="error-settings-btn"
-            type="button"
-            class="px-3 py-1.5 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold hover:opacity-90 transition-opacity"
-          >
-            SETTINGS
-          </button>
+
+        <!-- Toast Notification -->
+        <div
+          id="toast-banner"
+          role="status"
+          aria-live="polite"
+          class="hidden fixed top-4 right-6 z-50 px-4 py-2.5 bg-zinc-900 border border-emerald-400 text-xs font-mono text-zinc-100 shadow-2xl"
+        ></div>
+
+        <!-- Dynamic Views Mount Container (loaded from ./views/*.html) -->
+        <div id="view-mount" class="h-full"></div>
+      </main>
+
+      <!-- Floating Bottom Player Bar (Inside Main Content Area) -->
+      <footer
+        id="bottom-player-bar"
+        aria-label="Audio Player Controls"
+        class="absolute bottom-0 left-0 right-0 p-2 sm:p-3.5 pointer-events-none z-30"
+      >
+        <div class="studio-panel max-w-7xl mx-auto pointer-events-auto shadow-2xl bg-zinc-900/95 backdrop-blur-md border border-zinc-700">
+          <!-- Mobile Mini-Player (< md) -->
+          <div class="md:hidden flex flex-col">
+            <div class="w-full h-1 bg-zinc-800 relative">
+              <div id="mobile-mini-progress" class="h-full bg-emerald-400 w-0"></div>
+            </div>
+            <div class="p-2 flex items-center justify-between gap-2">
+              <button
+                id="mobile-mini-track-btn"
+                type="button"
+                class="flex items-center gap-2.5 min-w-0 flex-1 text-left"
+              >
+                <div class="w-10 h-10 bg-zinc-950 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center">
+                  <img id="mobile-mini-cover" src="" alt="" class="hidden w-full h-full object-cover" />
+                  <i id="mobile-mini-fallback" data-lucide="disc" class="w-4 h-4 text-zinc-400"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p id="mobile-mini-title" class="text-xs font-medium text-zinc-100 truncate">No track selected</p>
+                  <p id="mobile-mini-artist" class="text-[11px] text-zinc-400 truncate">Select a track to play</p>
+                </div>
+              </button>
+              <div class="flex items-center gap-1 shrink-0">
+                <button id="mobile-mini-prev" type="button" class="w-9 h-9 flex items-center justify-center text-zinc-200">
+                  <i data-lucide="skip-back" class="w-4 h-4"></i>
+                </button>
+                <button id="mobile-mini-play" type="button" class="w-9 h-9 flex items-center justify-center text-emerald-400">
+                  <i id="mobile-mini-play-icon" data-lucide="play" class="w-4 h-4 fill-current"></i>
+                </button>
+                <button id="mobile-mini-next" type="button" class="w-9 h-9 flex items-center justify-center text-zinc-200">
+                  <i data-lucide="skip-forward" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Desktop Two-Row Player (>= md) -->
+          <div class="hidden md:flex flex-col px-3.5 pt-2.5 pb-2 gap-2">
+            <!-- Row 1: Left Transport, Center Track Pill, Right Utilities -->
+            <div class="flex items-center justify-between gap-4">
+              <!-- Left: Transport Controls -->
+              <div class="flex items-center gap-1 shrink-0">
+                <button
+                  id="btn-shuffle"
+                  type="button"
+                  aria-label="Toggle shuffle"
+                  title="Shuffle (S)"
+                  class="w-9 h-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  <i data-lucide="shuffle" class="w-4 h-4"></i>
+                </button>
+
+                <button
+                  id="btn-prev"
+                  type="button"
+                  aria-label="Previous track"
+                  title="Previous ([ or P)"
+                  class="w-9 h-9 flex items-center justify-center text-zinc-200 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  <i data-lucide="skip-back" class="w-4 h-4"></i>
+                </button>
+
+                <button
+                  id="btn-play"
+                  type="button"
+                  aria-label="Play or Pause"
+                  title="Play / Pause (Space)"
+                  class="w-9 h-9 flex items-center justify-center text-zinc-100 hover:text-emerald-400 hover:bg-zinc-800 transition-colors"
+                >
+                  <i id="icon-play" data-lucide="play" class="w-4 h-4 fill-current"></i>
+                </button>
+
+                <button
+                  id="btn-next"
+                  type="button"
+                  aria-label="Next track"
+                  title="Next (] or N)"
+                  class="w-9 h-9 flex items-center justify-center text-zinc-200 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  <i data-lucide="skip-forward" class="w-4 h-4"></i>
+                </button>
+
+                <button
+                  id="btn-repeat"
+                  type="button"
+                  aria-label="Cycle repeat mode"
+                  title="Repeat mode (R)"
+                  class="w-9 h-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 relative transition-colors"
+                >
+                  <i id="icon-repeat" data-lucide="repeat" class="w-4 h-4"></i>
+                  <span
+                    id="repeat-one-badge"
+                    class="hidden absolute top-1 right-1 w-3 h-3 bg-emerald-400 text-zinc-950 text-[8px] font-mono font-bold items-center justify-center"
+                  >1</span>
+                </button>
+              </div>
+
+              <!-- Center: Active Track Button (Fades out when scrubbing seek bar; clicks to open /now-playing) -->
+              <div
+                id="player-center-track-wrap"
+                class="flex items-center gap-2.5 min-w-0 max-w-md mx-auto flex-1 justify-center transition-opacity duration-150"
+              >
+                <button
+                  id="player-cover-btn"
+                  type="button"
+                  title="Open Now Playing View"
+                  class="w-10 h-10 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center"
+                >
+                  <img id="player-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
+                  <i id="player-cover-fallback" data-lucide="disc" class="w-4 h-4 text-zinc-400"></i>
+                </button>
+
+                <div class="min-w-0 flex-1 text-left">
+                  <button
+                    id="player-title-btn"
+                    type="button"
+                    title="Open Now Playing View"
+                    class="block max-w-full truncate text-xs font-medium text-zinc-100 hover:text-emerald-400 text-left"
+                  >
+                    No track selected
+                  </button>
+                  <button
+                    id="player-artist-btn"
+                    type="button"
+                    class="block max-w-full truncate text-[11px] text-zinc-400 hover:text-zinc-200 text-left"
+                  >
+                    Select any song or album to begin playback
+                  </button>
+                </div>
+
+                <button
+                  id="player-star-btn"
+                  type="button"
+                  aria-label="Star current track"
+                  title="Star current track"
+                  class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 shrink-0"
+                >
+                  <i data-lucide="star" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+
+              <!-- Right: Context Menu, Lyrics Drawer, Signature Room, Queue Drawer, Volume -->
+              <div class="flex items-center justify-end gap-1 shrink-0">
+                <button
+                  id="player-more-btn"
+                  type="button"
+                  aria-label="Current track options"
+                  title="Track options"
+                  class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                </button>
+
+                <button
+                  id="btn-lyrics-drawer"
+                  type="button"
+                  aria-label="Toggle Lyrics Drawer"
+                  title="Toggle Lyrics Drawer"
+                  class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  <i data-lucide="quote" class="w-4 h-4"></i>
+                </button>
+
+                <button
+                  id="btn-signature"
+                  type="button"
+                  aria-label="Open Fullscreen Listening Room"
+                  title="Fullscreen Listening Room (U)"
+                  class="hidden lg:inline-flex w-8 h-8 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  <i data-lucide="maximize-2" class="w-4 h-4"></i>
+                </button>
+
+                <button
+                  id="btn-queue"
+                  type="button"
+                  aria-label="Toggle playback queue drawer"
+                  title="Toggle Queue (Q)"
+                  class="h-8 px-2 flex items-center gap-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  <i data-lucide="list-music" class="w-4 h-4"></i>
+                  <span id="player-queue-count" class="px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-emerald-400">0</span>
+                </button>
+
+                <div class="flex items-center gap-1.5 pl-1 border-l border-zinc-800">
+                  <button
+                    id="btn-mute"
+                    type="button"
+                    aria-label="Toggle mute"
+                    title="Mute / Unmute"
+                    class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100"
+                  >
+                    <i id="icon-volume" data-lucide="volume-2" class="w-4 h-4"></i>
+                  </button>
+
+                  <input
+                    id="volume-slider"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value="0.85"
+                    aria-label="Master volume"
+                    class="studio-range-thin w-16 sm:w-20"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <!-- Row 2: Full-Width Thin Seek Bar with Floating Hover Timestamps -->
+            <div id="player-seek-row" class="group relative w-full flex items-center pt-0.5">
+              <span
+                id="time-current"
+                class="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-4 left-0 text-[10px] font-mono text-zinc-300 bg-zinc-950/90 px-1 pointer-events-none"
+              >0:00</span>
+              <input
+                id="seek-slider"
+                type="range"
+                min="0"
+                max="100"
+                step="0.1"
+                value="0"
+                aria-label="Seek audio position"
+                class="studio-range-thin w-full"
+              />
+              <span
+                id="time-total"
+                class="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-4 right-0 text-[10px] font-mono text-zinc-300 bg-zinc-950/90 px-1 pointer-events-none"
+              >0:00</span>
+            </div>
+          </div>
         </div>
-      </div>
+      </footer>
+    </div>
 
-      <!-- Toast Notification -->
-      <div
-        id="toast-banner"
-        role="status"
-        aria-live="polite"
-        class="hidden fixed top-4 right-6 z-50 px-4 py-2.5 rounded-md bg-[#18181b] border border-[#34d399] text-xs font-mono text-[#f4f4f5] shadow-lg"
-      ></div>
-
-      <!-- Dynamic Views Mount Container (loaded from ./views/*.html) -->
-      <div id="view-mount"></div>
-    </main>
-
-    <!-- Collapsible Queue Drawer (Right Side) -->
+    <!-- Slide-Out Right Queue Drawer -->
     <aside
       id="queue-drawer"
       aria-label="Playback Queue"
-      class="hidden w-80 h-full bg-[#18181b] border-l border-[#3f3f46] flex flex-col shrink-0 z-20"
+      class="hidden fixed inset-y-0 right-0 z-40 w-full sm:w-[320px] lg:w-[350px] bg-zinc-950 border-l border-zinc-700 flex flex-col shadow-2xl"
     >
-      <div class="h-14 px-4 border-b border-[#3f3f46] flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <h2 class="text-xs font-mono uppercase tracking-wider text-[#f4f4f5]">Playback Queue</h2>
-          <span id="queue-count-badge" class="px-1.5 py-0.5 rounded bg-[#27272a] border border-[#3f3f46] text-[11px] font-mono text-[#34d399]">0</span>
+      <!-- Header -->
+      <div class="h-14 px-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 bg-emerald-400/10 border border-emerald-400/30 text-emerald-400 flex items-center justify-center">
+            <i data-lucide="list-music" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h2 class="font-display text-base text-zinc-100 leading-none">Queue</h2>
+            <p class="text-[11px] font-mono text-zinc-400 mt-0.5"><span id="queue-count-badge">0</span> tracks</p>
+          </div>
         </div>
         <div class="flex items-center gap-1.5">
           <button
             id="queue-clear-btn"
             type="button"
-            class="px-2 py-1 rounded bg-[#27272a] border border-[#71717a] text-[10px] font-mono text-[#f87171] hover:border-[#f87171]"
+            title="Clear queue"
+            class="h-7 px-2 bg-zinc-900 border border-zinc-700 text-[10px] font-mono text-zinc-300 hover:text-[#f0605a] hover:border-[#f0605a] inline-flex items-center gap-1"
           >
-            CLEAR
+            <i data-lucide="trash-2" class="w-3 h-3"></i>
+            <span>Clear</span>
           </button>
           <button
             id="queue-close-btn"
             type="button"
             aria-label="Close queue drawer"
-            class="p-1.5 rounded text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a]"
+            class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
           >
             <i data-lucide="x" class="w-4 h-4"></i>
           </button>
         </div>
       </div>
 
-      <!-- Save Queue as Playlist Bar -->
-      <form id="queue-save-playlist-form" class="p-3 border-b border-[#3f3f46] flex items-center gap-2 bg-[#0e0e11]">
-        <input
-          id="queue-save-playlist-input"
-          type="text"
-          placeholder="Save queue as playlist..."
-          aria-label="Save queue as playlist name"
-          class="flex-1 min-w-0 px-2.5 py-1.5 rounded bg-[#18181b] border border-[#71717a] text-xs text-[#f4f4f5] placeholder-[#a1a1aa]"
-        />
-        <button
-          type="submit"
-          class="px-2.5 py-1.5 rounded bg-[#27272a] border border-[#71717a] hover:border-[#34d399] text-[11px] font-mono text-[#f4f4f5] shrink-0"
-        >
-          SAVE
-        </button>
-      </form>
+      <!-- Sub-bar -->
+      <div class="px-4 py-2 border-b border-zinc-800 bg-zinc-900/40 flex items-center justify-between text-[10.5px] font-mono text-zinc-400 shrink-0">
+        <span>PLAYBACK ORDER</span>
+        <span id="queue-total-duration">0:00 total</span>
+      </div>
 
-      <div id="queue-items-list" class="flex-1 overflow-y-auto divide-y divide-[#3f3f46]"></div>
+      <!-- Queue Items List -->
+      <div id="queue-items-list" class="flex-1 overflow-y-auto divide-y divide-zinc-800/60"></div>
+
+      <!-- Footer: Position + Save as Playlist Modal Button -->
+      <div class="p-3 border-t border-zinc-800 bg-zinc-900/50 space-y-2 shrink-0">
+        <div class="flex items-center justify-between text-[11px] font-mono text-zinc-400">
+          <span id="queue-footer-pos">Track 0 of 0</span>
+        </div>
+        <button
+          id="queue-open-save-modal-btn"
+          type="button"
+          class="w-full h-8 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 flex items-center justify-center gap-1.5 transition-colors"
+        >
+          <i data-lucide="plus" class="w-3.5 h-3.5 text-emerald-400"></i>
+          <span>Save as playlist</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Slide-Out Right Lyrics Drawer (Mutually Exclusive with Queue Drawer) -->
+    <aside
+      id="lyrics-drawer"
+      aria-label="Synced Lyrics Drawer"
+      class="hidden fixed inset-y-0 right-0 z-40 w-full sm:w-[320px] lg:w-[350px] bg-zinc-950 border-l border-zinc-700 flex flex-col shadow-2xl"
+    >
+      <!-- Header -->
+      <div class="h-14 px-4 border-b border-zinc-800 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 bg-emerald-400/10 border border-emerald-400/30 text-emerald-400 flex items-center justify-center">
+            <i data-lucide="quote" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h2 class="font-display text-base text-zinc-100 leading-none">Lyrics</h2>
+            <p class="text-[10px] font-mono uppercase tracking-wider text-zinc-400 mt-0.5">FOLLOW THE TRACK</p>
+          </div>
+        </div>
+        <button
+          id="lyrics-drawer-close-btn"
+          type="button"
+          aria-label="Close lyrics drawer"
+          class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+        >
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Track Strip -->
+      <div class="px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/40 flex items-center gap-3 shrink-0">
+        <div class="w-10 h-10 bg-zinc-950 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center">
+          <img id="ld-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
+          <i id="ld-cover-fallback" data-lucide="disc" class="w-4 h-4 text-zinc-400"></i>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p id="ld-title" class="text-xs font-medium text-zinc-100 truncate">No track selected</p>
+          <p id="ld-artist" class="text-[11px] text-zinc-400 truncate">-</p>
+        </div>
+      </div>
+
+      <!-- Toolbar: 原文 / Romaji / EN + Lyric Search -->
+      <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between gap-2 shrink-0">
+        <div id="ld-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-900">
+          <button type="button" data-lyrics-mode="original" class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono bg-emerald-400 text-zinc-950 font-semibold">原文</button>
+          <button type="button" data-lyrics-mode="romaji" class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
+          <button type="button" data-lyrics-mode="en" class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">EN</button>
+        </div>
+        <span id="ld-lyrics-preparing" class="hidden text-[10px] font-mono text-emerald-400 animate-pulse">preparing readings...</span>
+        <button
+          id="ld-lyrics-search-btn"
+          type="button"
+          class="ml-auto px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-emerald-400 border border-zinc-700 bg-zinc-900 transition-colors"
+        >
+          lyric search
+        </button>
+      </div>
+
+      <!-- Synced Lyrics Body -->
+      <div id="ld-lyrics-scroll" class="flex-1 overflow-y-auto px-4 py-6 space-y-2"></div>
     </aside>
   </div>
 
-  <!-- Bottom Player Transport Bar -->
-  <footer
-    id="bottom-player-bar"
-    aria-label="Audio Player Controls"
-    class="h-20 bg-[#18181b] border-t border-[#3f3f46] px-4 flex items-center justify-between gap-4 shrink-0 z-30"
-  >
-    <!-- Left: Active Track Metadata (30%) -->
-    <div class="w-[30%] min-w-[180px] flex items-center gap-3">
-      <button
-        id="player-cover-btn"
-        type="button"
-        aria-label="Open Now Playing Room"
-        title="Open Now Playing Room (u)"
-        class="w-12 h-12 rounded bg-[#27272a] border border-[#3f3f46] overflow-hidden shrink-0 relative group flex items-center justify-center"
-      >
-        <img id="player-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
-        <i id="player-cover-fallback" data-lucide="disc" class="w-5 h-5 text-[#a1a1aa]"></i>
-        <span class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-          <i data-lucide="maximize-2" class="w-4 h-4 text-[#f4f4f5]"></i>
-        </span>
-      </button>
-
-      <div class="min-w-0 flex-1">
-        <button
-          id="player-title-btn"
-          type="button"
-          class="block max-w-full truncate text-sm font-medium text-[#f4f4f5] hover:text-[#34d399] text-left"
-        >
-          No track selected
-        </button>
-        <button
-          id="player-artist-btn"
-          type="button"
-          class="block max-w-full truncate text-xs text-[#a1a1aa] hover:text-[#f4f4f5] text-left"
-        >
-          Select any song or album to begin playback
-        </button>
-      </div>
-
-      <button
-        id="player-star-btn"
-        type="button"
-        aria-label="Favourite current track"
-        title="Favourite current track"
-        class="p-1.5 rounded text-[#a1a1aa] hover:text-[#f4f4f5] shrink-0"
-      >
-        <i data-lucide="heart" class="w-4 h-4"></i>
-      </button>
-    </div>
-
-    <!-- Center: Transport Buttons + Seek Bar (40%) -->
-    <div class="flex-1 max-w-xl flex flex-col items-center gap-1.5">
-      <div class="flex items-center gap-3">
-        <button
-          id="btn-shuffle"
-          type="button"
-          aria-label="Toggle shuffle"
-          title="Shuffle (s)"
-          class="p-1.5 rounded text-[#a1a1aa] hover:text-[#f4f4f5] transition-colors"
-        >
-          <i data-lucide="shuffle" class="w-4 h-4"></i>
-        </button>
-
-        <button
-          id="btn-prev"
-          type="button"
-          aria-label="Previous track"
-          title="Previous ([ or p)"
-          class="p-1.5 rounded text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
-        >
-          <i data-lucide="skip-back" class="w-4 h-4"></i>
-        </button>
-
-        <button
-          id="btn-play"
-          type="button"
-          aria-label="Play or Pause"
-          title="Play / Pause (Space)"
-          class="w-9 h-9 rounded-full bg-[#34d399] text-[#090d0b] flex items-center justify-center hover:opacity-90 transition-opacity"
-        >
-          <i id="icon-play" data-lucide="play" class="w-4 h-4 fill-current"></i>
-        </button>
-
-        <button
-          id="btn-next"
-          type="button"
-          aria-label="Next track"
-          title="Next (] or n)"
-          class="p-1.5 rounded text-[#f4f4f5] hover:bg-[#27272a] transition-colors"
-        >
-          <i data-lucide="skip-forward" class="w-4 h-4"></i>
-        </button>
-
-        <button
-          id="btn-repeat"
-          type="button"
-          aria-label="Cycle repeat mode"
-          title="Repeat mode (r)"
-          class="p-1.5 rounded text-[#a1a1aa] hover:text-[#f4f4f5] relative transition-colors"
-        >
-          <i data-lucide="repeat" class="w-4 h-4"></i>
-          <span
-            id="repeat-one-badge"
-            class="hidden absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-[#34d399] text-[#090d0b] text-[9px] font-mono font-bold items-center justify-center"
-          >1</span>
-        </button>
-      </div>
-
-      <div class="w-full flex items-center gap-2.5">
-        <span id="time-current" class="w-10 text-right text-[11px] font-mono text-[#a1a1aa]">0:00</span>
-        <input
-          id="seek-slider"
-          type="range"
-          min="0"
-          max="100"
-          step="0.1"
-          value="0"
-          aria-label="Seek audio position"
-          class="studio-range flex-1"
-        />
-        <span id="time-total" class="w-10 text-[11px] font-mono text-[#a1a1aa]">0:00</span>
-      </div>
-    </div>
-
-    <!-- Right: Lyrics Room, Queue Drawer, Volume (30%) -->
-    <div class="w-[30%] min-w-[180px] flex items-center justify-end gap-2">
-      <button
-        id="btn-signature"
-        type="button"
-        aria-label="Open Now Playing Room and Lyrics"
-        title="Now Playing Room & Synced Lyrics (u)"
-        class="px-2.5 py-1.5 rounded bg-[#27272a] border border-[#71717a] hover:border-[#34d399] text-xs font-mono text-[#f4f4f5] flex items-center gap-1.5 transition-colors"
-      >
-        <i data-lucide="mic" class="w-3.5 h-3.5 text-[#34d399]"></i>
-        <span class="hidden md:inline">LYRICS</span>
-      </button>
-
-      <button
-        id="btn-queue"
-        type="button"
-        aria-label="Toggle playback queue drawer"
-        title="Toggle Queue (q)"
-        class="px-2.5 py-1.5 rounded bg-[#27272a] border border-[#71717a] hover:border-[#34d399] text-xs font-mono text-[#f4f4f5] flex items-center gap-1.5 transition-colors"
-      >
-        <i data-lucide="list-ordered" class="w-3.5 h-3.5"></i>
-        <span id="player-queue-count" class="font-mono">0</span>
-      </button>
-
-      <button
-        id="btn-mute"
-        type="button"
-        aria-label="Toggle mute"
-        title="Mute / Unmute"
-        class="p-1.5 rounded text-[#a1a1aa] hover:text-[#f4f4f5]"
-      >
-        <i id="icon-volume" data-lucide="volume-2" class="w-4 h-4"></i>
-      </button>
-
-      <input
-        id="volume-slider"
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        value="0.85"
-        aria-label="Master volume"
-        class="studio-range w-20 md:w-24"
-      />
-    </div>
-  </footer>
-
-  <!-- Fullscreen Signature Room Mount (loaded from ./views/signature-room.html) -->
+  <!-- Fullscreen Signature Room + Settings Modal Mount -->
   <div id="overlay-mount"></div>
+
+  <!-- Create Playlist Modal Dialog -->
+  <div
+    id="create-playlist-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Create Playlist"
+    class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+  >
+    <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-zinc-700 flex items-center justify-between">
+        <div>
+          <h2 class="font-display text-lg text-zinc-100">Create Playlist</h2>
+          <p class="text-xs font-mono text-zinc-400">Enter a name for your new playlist</p>
+        </div>
+        <button id="create-playlist-close-btn" type="button" class="p-1 text-zinc-400 hover:text-zinc-100">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <form id="create-playlist-modal-form" class="p-5 space-y-4">
+        <div>
+          <label for="create-playlist-modal-input" class="block text-xs font-mono text-zinc-400 mb-1">PLAYLIST NAME</label>
+          <input
+            id="create-playlist-modal-input"
+            type="text"
+            required
+            placeholder="My Playlist..."
+            class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+          />
+        </div>
+        <div class="flex justify-end gap-2">
+          <button
+            id="create-playlist-cancel-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="h-8 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold"
+          >
+            Create
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Save Queue as Playlist Modal Dialog -->
+  <div
+    id="save-queue-playlist-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Save queue as playlist"
+    class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+  >
+    <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-zinc-700 flex items-center justify-between">
+        <div>
+          <h2 class="font-display text-lg text-zinc-100">Save queue as playlist</h2>
+          <p class="text-xs font-mono text-zinc-400">Save all tracks currently in the playback queue</p>
+        </div>
+        <button id="save-queue-close-btn" type="button" class="p-1 text-zinc-400 hover:text-zinc-100">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <form id="queue-save-playlist-form" class="p-5 space-y-4">
+        <div>
+          <label for="queue-save-playlist-input" class="block text-xs font-mono text-zinc-400 mb-1">PLAYLIST NAME</label>
+          <input
+            id="queue-save-playlist-input"
+            type="text"
+            required
+            placeholder="Queue mix..."
+            class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+          />
+        </div>
+        <div class="flex justify-end gap-2">
+          <button
+            id="save-queue-cancel-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="h-8 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold"
+          >
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add to Playlist Modal Dialog (Used by TrackContextMenu, AlbumDetailView, PlaylistDetailView) -->
+  <div
+    id="add-to-playlist-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Add to Playlist"
+    class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+  >
+    <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="px-5 py-4 border-b border-zinc-700 flex items-center justify-between">
+        <div>
+          <h2 class="font-display text-lg text-zinc-100">Add to Playlist</h2>
+          <p id="add-to-playlist-subtitle" class="text-xs font-mono text-zinc-400 truncate">Select a playlist or create a new one</p>
+        </div>
+        <button id="add-to-playlist-close-btn" type="button" class="p-1 text-zinc-400 hover:text-zinc-100">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="p-5 overflow-y-auto space-y-4">
+        <div id="add-to-playlist-list" class="divide-y divide-zinc-800 border border-zinc-800 bg-zinc-950 max-h-56 overflow-y-auto"></div>
+        <form id="add-to-playlist-new-form" class="pt-2 border-t border-zinc-800 space-y-2.5">
+          <label for="add-to-playlist-new-input" class="block text-[11px] font-mono uppercase tracking-wider text-emerald-400">Create New Playlist</label>
+          <div class="flex gap-2">
+            <input
+              id="add-to-playlist-new-input"
+              type="text"
+              required
+              placeholder="New playlist name..."
+              class="flex-1 h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+            />
+            <button
+              type="submit"
+              class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold shrink-0"
+            >
+              Create &amp; Add
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <!-- Floating 3-Dot Track Context Menu -->
   <div
     id="track-context-menu"
     role="menu"
     aria-label="Track actions"
-    class="hidden fixed z-50 w-56 rounded-lg bg-[#18181b] border border-[#71717a] shadow-2xl py-1.5 text-xs text-[#f4f4f5]"
+    class="hidden fixed z-50 w-52 bg-zinc-900 border border-zinc-700 shadow-2xl py-1 text-xs font-mono text-zinc-100"
   >
+    <button
+      id="ctx-play-now"
+      type="button"
+      role="menuitem"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5"
+    >
+      <i data-lucide="play" class="w-3.5 h-3.5 text-emerald-400"></i>
+      <span>Play Now</span>
+    </button>
     <button
       id="ctx-play-next"
       type="button"
       role="menuitem"
-      class="w-full px-3.5 py-2 text-left hover:bg-[#27272a] flex items-center gap-2.5"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5"
     >
-      <i data-lucide="list-start" class="w-3.5 h-3.5 text-[#34d399]"></i>
+      <i data-lucide="list-start" class="w-3.5 h-3.5 text-zinc-400"></i>
       <span>Play Next</span>
     </button>
     <button
       id="ctx-add-queue"
       type="button"
       role="menuitem"
-      class="w-full px-3.5 py-2 text-left hover:bg-[#27272a] flex items-center gap-2.5"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5"
     >
-      <i data-lucide="list-plus" class="w-3.5 h-3.5 text-[#a1a1aa]"></i>
+      <i data-lucide="list-plus" class="w-3.5 h-3.5 text-zinc-400"></i>
       <span>Add to Queue</span>
-    </button>
-    <button
-      id="ctx-star-track"
-      type="button"
-      role="menuitem"
-      class="w-full px-3.5 py-2 text-left hover:bg-[#27272a] flex items-center gap-2.5"
-    >
-      <i data-lucide="heart" class="w-3.5 h-3.5 text-[#a1a1aa]"></i>
-      <span id="ctx-star-label">Star Track</span>
     </button>
     <button
       id="ctx-remove-queue"
       type="button"
       role="menuitem"
-      class="hidden w-full px-3.5 py-2 text-left hover:bg-[#27272a] flex items-center gap-2.5 text-[#f87171]"
+      class="hidden w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-[#f0605a]"
     >
-      <i data-lucide="x" class="w-3.5 h-3.5"></i>
+      <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
       <span>Remove from Queue</span>
     </button>
 
-    <div class="my-1 border-t border-[#3f3f46]"></div>
-
-    <!-- Add to Playlist Subsection -->
-    <div class="px-3.5 py-1 text-[10px] font-mono uppercase tracking-wider text-[#a1a1aa]">
-      Add to Playlist
-    </div>
-    <div id="ctx-playlists-list" class="max-h-36 overflow-y-auto"></div>
-    <form id="ctx-new-playlist-form" class="px-2.5 py-1.5">
-      <input
-        id="ctx-new-playlist-input"
-        type="text"
-        placeholder="+ New playlist & add..."
-        aria-label="Create playlist and add track"
-        class="w-full px-2 py-1 rounded bg-[#0e0e11] border border-[#71717a] text-[11px] text-[#f4f4f5] placeholder-[#a1a1aa]"
-      />
-    </form>
-
-    <div class="my-1 border-t border-[#3f3f46]"></div>
+    <div class="my-1 border-t border-zinc-800"></div>
 
     <button
-      id="ctx-goto-album"
+      id="ctx-open-add-playlist"
       type="button"
       role="menuitem"
-      class="w-full px-3.5 py-2 text-left hover:bg-[#27272a] flex items-center gap-2.5"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5"
     >
-      <i data-lucide="disc" class="w-3.5 h-3.5 text-[#a1a1aa]"></i>
-      <span>Go to Album</span>
+      <i data-lucide="plus" class="w-3.5 h-3.5 text-zinc-400"></i>
+      <span>Add to Playlist...</span>
     </button>
+
+    <div class="my-1 border-t border-zinc-800"></div>
+
     <button
       id="ctx-goto-artist"
       type="button"
       role="menuitem"
-      class="w-full px-3.5 py-2 text-left hover:bg-[#27272a] flex items-center gap-2.5"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5"
     >
-      <i data-lucide="mic-2" class="w-3.5 h-3.5 text-[#a1a1aa]"></i>
+      <i data-lucide="user" class="w-3.5 h-3.5 text-zinc-400"></i>
       <span>Go to Artist</span>
+    </button>
+    <button
+      id="ctx-goto-album"
+      type="button"
+      role="menuitem"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5"
+    >
+      <i data-lucide="disc" class="w-3.5 h-3.5 text-zinc-400"></i>
+      <span>Go to Album</span>
+    </button>
+
+    <div class="my-1 border-t border-zinc-800"></div>
+
+    <button
+      id="ctx-star-track"
+      type="button"
+      role="menuitem"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5"
+    >
+      <i id="ctx-star-icon" data-lucide="star" class="w-3.5 h-3.5 text-zinc-400"></i>
+      <span id="ctx-star-label">Star Track</span>
     </button>
   </div>
 
@@ -563,67 +904,89 @@
     aria-label="Keyboard Shortcuts"
     class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
   >
-    <div class="w-full max-w-lg rounded-xl bg-[#18181b] border border-[#71717a] overflow-hidden">
-      <div class="px-5 py-4 border-b border-[#3f3f46] flex items-center justify-between">
+    <div class="w-full max-w-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-zinc-700 flex items-center justify-between">
         <div>
-          <h2 class="text-sm font-semibold text-[#f4f4f5]">Keyboard Shortcuts</h2>
-          <p class="text-xs font-mono text-[#a1a1aa]">Global studio transport and navigation hotkeys</p>
+          <h2 class="font-display text-lg text-zinc-100">Keyboard Shortcuts</h2>
+          <p class="text-xs font-mono text-zinc-400">Global transport, navigation, and room controls</p>
         </div>
         <button
           id="shortcuts-close-btn"
           type="button"
           aria-label="Close shortcuts dialog"
-          class="p-1.5 rounded text-[#a1a1aa] hover:text-[#f4f4f5] hover:bg-[#27272a]"
+          class="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
         >
           <i data-lucide="x" class="w-4 h-4"></i>
         </button>
       </div>
 
-      <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Play / Pause</span>
-          <kbd class="font-mono text-[#34d399]">Space</kbd>
+      <div class="p-5 space-y-5 text-xs">
+        <div class="space-y-2">
+          <div class="text-[10.5px] font-mono uppercase tracking-wider text-emerald-400">Playback Transport</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Play / Pause</span>
+              <kbd class="font-mono text-emerald-400">Space</kbd>
+            </div>
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Next Track</span>
+              <kbd class="font-mono text-emerald-400">] or N</kbd>
+            </div>
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Previous Track</span>
+              <kbd class="font-mono text-emerald-400">[ or P</kbd>
+            </div>
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Seek -10s / +10s</span>
+              <kbd class="font-mono text-emerald-400">J / L or ← / →</kbd>
+            </div>
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Toggle Shuffle</span>
+              <kbd class="font-mono text-emerald-400">S</kbd>
+            </div>
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Cycle Repeat</span>
+              <kbd class="font-mono text-emerald-400">R</kbd>
+            </div>
+          </div>
         </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Next Track</span>
-          <kbd class="font-mono text-[#34d399]">] or N</kbd>
+
+        <div class="space-y-2">
+          <div class="text-[10.5px] font-mono uppercase tracking-wider text-emerald-400">Navigation &amp; Rooms</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Open Search</span>
+              <kbd class="font-mono text-emerald-400">/ or ⌘K</kbd>
+            </div>
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Toggle Queue Drawer</span>
+              <kbd class="font-mono text-emerald-400">Q</kbd>
+            </div>
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Listening Room (Lyrics)</span>
+              <kbd class="font-mono text-emerald-400">U</kbd>
+            </div>
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Close Modal / Drawer</span>
+              <kbd class="font-mono text-emerald-400">Esc</kbd>
+            </div>
+          </div>
         </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Previous Track</span>
-          <kbd class="font-mono text-[#34d399]">[ or P</kbd>
-        </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Seek -10s / +10s</span>
-          <kbd class="font-mono text-[#34d399]">J / L or ← / →</kbd>
-        </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Toggle Shuffle</span>
-          <kbd class="font-mono text-[#34d399]">S</kbd>
-        </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Cycle Repeat</span>
-          <kbd class="font-mono text-[#34d399]">R</kbd>
-        </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Toggle Queue Drawer</span>
-          <kbd class="font-mono text-[#34d399]">Q</kbd>
-        </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Now Playing Room</span>
-          <kbd class="font-mono text-[#34d399]">U</kbd>
-        </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Search Library</span>
-          <kbd class="font-mono text-[#34d399]">⌘K / Ctrl+K / /</kbd>
-        </div>
-        <div class="flex items-center justify-between p-2 rounded bg-[#0e0e11] border border-[#3f3f46]">
-          <span class="text-[#a1a1aa]">Close Modal / Back</span>
-          <kbd class="font-mono text-[#34d399]">Esc</kbd>
+
+        <div class="space-y-2">
+          <div class="text-[10.5px] font-mono uppercase tracking-wider text-emerald-400">Help &amp; Info</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div class="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800">
+              <span class="text-zinc-300">Shortcuts Cheat Sheet</span>
+              <kbd class="font-mono text-emerald-400">?</kbd>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
 
+  <!-- Core Engine + Application Logic -->
   <script src="engine.js"></script>
   <script src="app.js"></script>
 </body>

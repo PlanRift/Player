@@ -1,21 +1,122 @@
-<!-- VIEW: ARTISTS (Layer 1) -->
-<section id="view-artists" class="hidden p-6 md:p-8 space-y-6 max-w-[1440px] mx-auto">
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#3f3f46] pb-4">
+<!-- VIEW: ARTISTS (Layer 1: Artist Index with LibraryToolbar, SortMenu, Starred Filter & Pagination) -->
+<section id="view-artists" class="hidden p-6 md:p-8 pb-28 space-y-6 max-w-7xl mx-auto">
+  <!-- Section Header -->
+  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-4 border-b border-zinc-700">
     <div>
-      <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Artists</h1>
-      <p id="artists-count-label" class="text-xs font-mono text-[#a1a1aa] mt-0.5">Loading artists...</p>
+      <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-none">Artists</h1>
+      <p id="artists-count-label" class="font-mono text-xs text-zinc-400 tracking-wide mt-2">Loading artists...</p>
     </div>
-    <div class="relative w-full sm:w-64">
-      <i data-lucide="search" class="w-3.5 h-3.5 text-[#a1a1aa] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+  </div>
+
+  <!-- LibraryToolbar -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-zinc-900/60 border border-zinc-800">
+    <div class="relative w-full sm:w-72 md:w-80">
+      <i data-lucide="search" class="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
       <input
         id="artists-filter-input"
         type="text"
-        placeholder="Filter artists..."
+        placeholder="Filter artists (original or translated)..."
         aria-label="Filter artists"
-        class="w-full pl-8 pr-3 py-1.5 rounded bg-[#18181b] border border-[#71717a] text-xs text-[#f4f4f5] placeholder-[#a1a1aa]"
+        class="w-full h-9 pl-9 pr-8 bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 font-mono placeholder-zinc-400"
       />
+      <button
+        id="artists-filter-clear"
+        type="button"
+        title="Clear filter"
+        class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+      >
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
+
+    <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+      <!-- Sort Dropdown -->
+      <div class="relative">
+        <button
+          id="artists-sort-btn"
+          type="button"
+          class="inline-flex items-center gap-1.5 h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200"
+        >
+          <span id="artists-sort-label">Sort: Name A-Z</span>
+          <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-zinc-400"></i>
+        </button>
+        <div
+          id="artists-sort-menu"
+          class="hidden absolute right-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono"
+        >
+          <button type="button" data-sort="name-asc" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-100">
+            <span>Name A-Z</span>
+            <i data-lucide="check" class="sort-check w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="name-desc" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Name Z-A</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="most-played" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Most played</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="recently-played" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Recently played</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="album-count" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Most albums</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Starred Filter Toggle -->
+      <button
+        id="artists-starred-btn"
+        type="button"
+        title="Filter Starred Artists"
+        aria-pressed="false"
+        class="h-9 w-9 border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 flex items-center justify-center text-zinc-400 transition-colors"
+      >
+        <i data-lucide="star" class="w-4 h-4"></i>
+      </button>
+
+      <!-- Reset Button -->
+      <button
+        id="artists-reset-btn"
+        type="button"
+        class="hidden h-9 px-2.5 text-xs font-mono text-zinc-400 hover:text-zinc-100 inline-flex items-center gap-1"
+      >
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+        <span>RESET</span>
+      </button>
+
+      <span id="artists-toolbar-count" class="text-[11px] font-mono text-zinc-400 pl-2 border-l border-zinc-800 whitespace-nowrap">
+        0 artists
+      </span>
     </div>
   </div>
-  <div id="artists-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
-</section>
 
+  <!-- Artists Grid -->
+  <div id="artists-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
+
+  <!-- Pagination -->
+  <div id="artists-pagination" class="flex items-center justify-between pt-4 border-t border-zinc-800">
+    <button
+      id="artists-prev-page"
+      type="button"
+      disabled
+      class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1"
+    >
+      <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i>
+      <span>PREVIOUS</span>
+    </button>
+    <span id="artists-page-indicator" class="font-mono text-xs text-zinc-400">PAGE 1</span>
+    <button
+      id="artists-next-page"
+      type="button"
+      disabled
+      class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1"
+    >
+      <span>NEXT</span>
+      <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+    </button>
+  </div>
+</section>

@@ -6,4 +6,8 @@ dist
 .DS_Store
 *.log
 *.tsbuildinfo
-lodesong
+.navidrome-data
+.runner-logs
+scratch
+.cache
+plenripbackup

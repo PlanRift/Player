@@ -1,198 +1,268 @@
-<!-- VIEW: SETTINGS -->
-<section id="view-settings" class="hidden p-6 md:p-8 space-y-8 max-w-3xl mx-auto">
-  <div class="border-b border-[#3f3f46] pb-4">
-    <h1 class="text-xl font-semibold tracking-tight text-[#f4f4f5]">Settings</h1>
-    <p class="text-xs font-mono text-[#a1a1aa] mt-0.5">
-      Configure Navidrome connection, gapless crossfade, Last.fm scrobbling, and lyrics priority
-    </p>
-  </div>
-
-  <!-- 1. Navidrome Connection -->
-  <div class="p-5 rounded-lg bg-[#18181b] border border-[#3f3f46] space-y-4">
-    <div class="flex items-center justify-between">
+<!-- MODAL & VIEW: SETTINGS (2-Tab Modal Dialog: Playback & Audio + Navidrome Server) -->
+<div
+  id="settings-modal"
+  role="dialog"
+  aria-modal="true"
+  aria-label="Settings"
+  class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+>
+  <div class="w-full max-w-xl bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+    <!-- Modal Header -->
+    <div class="px-5 py-4 border-b border-zinc-700 flex items-center justify-between shrink-0">
       <div>
-        <h2 class="text-sm font-semibold text-[#f4f4f5]">Navidrome Server (Subsonic v1.16.1)</h2>
-        <p class="text-xs text-[#a1a1aa]">Direct browser authentication via MD5 salt + token</p>
-      </div>
-      <span id="settings-ping-badge" class="px-2.5 py-1 rounded text-[11px] font-mono bg-[#27272a] border border-[#71717a] text-[#34d399]">
-        CONNECTED
-      </span>
-    </div>
-
-    <form id="settings-server-form" class="space-y-3">
-      <div>
-        <label for="settings-server-url" class="block text-xs font-mono text-[#a1a1aa] mb-1">SERVER URL</label>
-        <input
-          id="settings-server-url"
-          type="url"
-          required
-          placeholder="http://localhost:4533"
-          class="w-full px-3 py-2 rounded bg-[#0e0e11] border border-[#71717a] text-sm text-[#f4f4f5] font-mono"
-        />
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label for="settings-server-user" class="block text-xs font-mono text-[#a1a1aa] mb-1">USERNAME</label>
-          <input
-            id="settings-server-user"
-            type="text"
-            required
-            class="w-full px-3 py-2 rounded bg-[#0e0e11] border border-[#71717a] text-sm text-[#f4f4f5] font-mono"
-          />
-        </div>
-        <div>
-          <label for="settings-server-pass" class="block text-xs font-mono text-[#a1a1aa] mb-1">PASSWORD</label>
-          <input
-            id="settings-server-pass"
-            type="password"
-            required
-            class="w-full px-3 py-2 rounded bg-[#0e0e11] border border-[#71717a] text-sm text-[#f4f4f5] font-mono"
-          />
-        </div>
-      </div>
-      <div class="pt-1 flex items-center gap-2">
-        <button
-          type="submit"
-          class="px-4 py-2 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold hover:opacity-90 transition-opacity"
-        >
-          SAVE &amp; RECONNECT
-        </button>
-        <button
-          id="settings-reset-server-btn"
-          type="button"
-          class="px-3 py-2 rounded bg-[#27272a] border border-[#71717a] text-xs font-mono text-[#f4f4f5] hover:border-[#34d399]"
-        >
-          RESET DEFAULTS
-        </button>
-      </div>
-    </form>
-  </div>
-
-  <!-- 2. Audio Engine & Crossfade -->
-  <div class="p-5 rounded-lg bg-[#18181b] border border-[#3f3f46] space-y-4">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-sm font-semibold text-[#f4f4f5]">Two-Deck Audio Engine &amp; Crossfade</h2>
-        <p class="text-xs text-[#a1a1aa]">0s uses instant gapless deck cut; 1s-12s applies a linear volume crossfade</p>
-      </div>
-      <span id="settings-crossfade-label" class="px-2.5 py-1 rounded bg-[#27272a] border border-[#71717a] text-xs font-mono text-[#34d399]">
-        0s (Gapless)
-      </span>
-    </div>
-
-    <div class="flex items-center gap-4">
-      <span class="text-xs font-mono text-[#a1a1aa]">0s</span>
-      <input
-        id="settings-crossfade-slider"
-        type="range"
-        min="0"
-        max="12"
-        step="1"
-        value="0"
-        aria-label="Crossfade duration in seconds"
-        class="studio-range flex-1"
-      />
-      <span class="text-xs font-mono text-[#a1a1aa]">12s</span>
-    </div>
-  </div>
-
-  <!-- 3. Prioritas Sumber Lirik ("Otomatis") -->
-  <div class="p-5 rounded-lg bg-[#18181b] border border-[#3f3f46] space-y-4">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-sm font-semibold text-[#f4f4f5]">Prioritas Sumber Lirik ("Otomatis")</h2>
-        <p class="text-xs text-[#a1a1aa]">Order in which lyrics providers are queried when track source is set to Otomatis</p>
+        <h2 class="font-display text-xl text-zinc-100 leading-none">Settings</h2>
+        <p class="text-xs font-mono text-zinc-400 mt-1">Audio engine, display preferences, and Navidrome server</p>
       </div>
       <button
-        id="settings-lyrics-reset-btn"
+        id="settings-modal-close-btn"
         type="button"
-        class="px-3 py-1 rounded bg-[#27272a] border border-[#71717a] text-xs font-mono text-[#f4f4f5] hover:border-[#34d399]"
+        aria-label="Close settings"
+        class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
       >
-        RESET DEFAULT
+        <i data-lucide="x" class="w-4 h-4"></i>
       </button>
     </div>
 
-    <div id="settings-lyrics-priority-list" class="divide-y divide-[#3f3f46] border border-[#3f3f46] rounded bg-[#0e0e11]"></div>
+    <!-- 2-Tab Bar -->
+    <div class="px-5 border-b border-zinc-800 flex items-center gap-1 bg-zinc-950/60 shrink-0">
+      <button
+        id="settings-tab-btn-audio"
+        type="button"
+        class="px-4 py-2.5 text-xs font-mono border-b-2 border-emerald-400 text-zinc-100 font-semibold transition-colors"
+      >
+        Playback &amp; Audio
+      </button>
+      <button
+        id="settings-tab-btn-server"
+        type="button"
+        class="px-4 py-2.5 text-xs font-mono border-b-2 border-transparent text-zinc-400 hover:text-zinc-200 flex items-center gap-2 transition-colors"
+      >
+        <span>Navidrome Server</span>
+        <span id="settings-tab-server-dot" class="w-2 h-2 bg-emerald-400 inline-block"></span>
+      </button>
+    </div>
+
+    <!-- Scrollable Tab Body -->
+    <div class="p-5 overflow-y-auto space-y-6 flex-1">
+      <!-- TAB 1: PLAYBACK & AUDIO -->
+      <div id="settings-tab-audio" class="space-y-5">
+        <!-- Audio Output Device -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Audio Output Device</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Route Web Audio output to a specific hardware sink</p>
+            </div>
+          </div>
+          <select
+            id="settings-output-device"
+            class="w-full h-9 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100"
+          >
+            <option value="">System Default Output</option>
+          </select>
+        </div>
+
+        <!-- Crossfade -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Crossfade</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Equal-power transition between tracks (consecutive album tracks never crossfade)</p>
+            </div>
+            <span id="settings-crossfade-label" class="px-2 py-0.5 bg-zinc-900 border border-zinc-700 text-xs font-mono text-emerald-400">
+              0s (Gapless cut)
+            </span>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-[11px] font-mono text-zinc-400">0s</span>
+            <input
+              id="settings-crossfade-slider"
+              type="range"
+              min="0"
+              max="12"
+              step="1"
+              value="0"
+              aria-label="Crossfade duration in seconds"
+              class="studio-range flex-1"
+            />
+            <span class="text-[11px] font-mono text-zinc-400">12s</span>
+          </div>
+        </div>
+
+        <!-- Volume Normalization (ReplayGain) & Preamp -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Volume Normalization (ReplayGain)</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">Auto uses Album Gain during natural album playback and Track Gain otherwise</p>
+          </div>
+          <div id="settings-norm-group" class="grid grid-cols-4 gap-2">
+            <button type="button" data-norm="auto" class="norm-mode-btn h-8 text-xs font-mono bg-emerald-400 text-zinc-950 font-semibold border border-emerald-400">Auto</button>
+            <button type="button" data-norm="track" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Track</button>
+            <button type="button" data-norm="album" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Album</button>
+            <button type="button" data-norm="off" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Off</button>
+          </div>
+
+          <div class="pt-2 border-t border-zinc-800/80 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-zinc-300">Pre-amp Gain</span>
+              <span id="settings-preamp-label" class="text-xs font-mono text-emerald-400">0 dB</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-[11px] font-mono text-zinc-400">-12dB</span>
+              <input
+                id="settings-preamp-slider"
+                type="range"
+                min="-12"
+                max="12"
+                step="0.5"
+                value="0"
+                aria-label="Pre-amp gain in dB"
+                class="studio-range flex-1"
+              />
+              <span class="text-[11px] font-mono text-zinc-400">+12dB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stream Quality -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-2.5">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Stream Quality</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">Configure Subsonic transcoding format and bitrate</p>
+          </div>
+          <select
+            id="settings-stream-quality"
+            class="w-full h-9 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100"
+          >
+            <option value="auto">Auto (Opus 192 kbps)</option>
+            <option value="original">Original (Uncompressed / Direct)</option>
+            <option value="mp3-320">MP3 320 kbps</option>
+            <option value="opus-192">Opus 192 kbps</option>
+            <option value="opus-96">Opus 96 kbps</option>
+          </select>
+        </div>
+
+        <!-- Show Translated Japanese Titles Toggle -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Show Translated Japanese Titles</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">
+              Display official international and romanized titles beside Japanese titles (e.g. 過去を喰らう - Eat The Past)
+            </p>
+          </div>
+          <label class="inline-flex items-center cursor-pointer shrink-0">
+            <input id="settings-translated-titles-toggle" type="checkbox" checked class="w-4 h-4 accent-[#8ab8a0]" />
+          </label>
+        </div>
+
+        <!-- Local Listening History -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Local Listening History</h3>
+            <p id="settings-history-count" class="text-[11px] font-mono text-zinc-400 mt-0.5">0 plays recorded locally</p>
+          </div>
+          <button
+            id="settings-clear-history-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
+          >
+            CLEAR HISTORY
+          </button>
+        </div>
+      </div>
+
+      <!-- TAB 2: NAVIDROME SERVER -->
+      <div id="settings-tab-server" class="hidden space-y-5">
+        <!-- Connection Status Banner -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span id="settings-server-status-dot" class="w-2.5 h-2.5 bg-emerald-400 shrink-0"></span>
+            <div class="min-w-0">
+              <p id="settings-ping-badge" class="text-xs font-mono text-zinc-100 truncate">
+                Connected to Navidrome (Subsonic API v1.16.1)
+              </p>
+              <p class="text-[11px] text-zinc-400 truncate">Direct browser authentication via MD5 salt + token</p>
+            </div>
+          </div>
+          <button
+            id="settings-recheck-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 shrink-0"
+          >
+            Recheck
+          </button>
+        </div>
+
+        <form id="settings-server-form" class="space-y-4">
+          <div>
+            <label for="settings-server-url" class="block text-xs font-mono text-zinc-400 mb-1">SERVER URL</label>
+            <input
+              id="settings-server-url"
+              type="url"
+              required
+              placeholder="http://127.0.0.1:4533"
+              class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+            />
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label for="settings-server-user" class="block text-xs font-mono text-zinc-400 mb-1">USERNAME</label>
+              <input
+                id="settings-server-user"
+                type="text"
+                required
+                class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+              />
+            </div>
+            <div>
+              <label for="settings-server-pass" class="block text-xs font-mono text-zinc-400 mb-1">PASSWORD</label>
+              <div class="relative">
+                <input
+                  id="settings-server-pass"
+                  type="password"
+                  placeholder="Leave blank to keep existing"
+                  class="w-full h-9 pl-3 pr-9 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+                />
+                <button
+                  id="settings-pass-toggle-btn"
+                  type="button"
+                  title="Show / Hide Password"
+                  class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+                >
+                  <i id="settings-pass-eye-icon" data-lucide="eye" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="pt-2 flex items-center justify-between gap-2">
+            <button
+              id="settings-reset-server-btn"
+              type="button"
+              class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
+            >
+              Reset to Default
+            </button>
+            <button
+              type="submit"
+              class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"
+            >
+              Save &amp; Connect
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal Footer -->
+    <div class="px-5 py-3 border-t border-zinc-800 bg-zinc-950/60 flex items-center justify-between shrink-0">
+      <span class="text-[11px] font-mono text-zinc-400">Settings auto-saved</span>
+      <button
+        id="settings-done-btn"
+        type="button"
+        class="h-8 px-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-xs font-mono text-zinc-100"
+      >
+        Done
+      </button>
+    </div>
   </div>
-
-  <!-- 4. Last.fm Scrobbling -->
-  <div class="p-5 rounded-lg bg-[#18181b] border border-[#3f3f46] space-y-4">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-sm font-semibold text-[#f4f4f5]">Last.fm Scrobbling</h2>
-        <p class="text-xs text-[#a1a1aa]">Sends Now Playing updates and scrobbles tracks at 50% duration (or 240s)</p>
-      </div>
-      <span id="settings-lastfm-status" class="px-2.5 py-1 rounded bg-[#27272a] border border-[#71717a] text-xs font-mono text-[#a1a1aa]">
-        NOT CONNECTED
-      </span>
-    </div>
-
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <div>
-        <label for="settings-lastfm-key" class="block text-xs font-mono text-[#a1a1aa] mb-1">API KEY</label>
-        <input
-          id="settings-lastfm-key"
-          type="text"
-          placeholder="Last.fm API Key"
-          class="w-full px-3 py-2 rounded bg-[#0e0e11] border border-[#71717a] text-xs text-[#f4f4f5] font-mono"
-        />
-      </div>
-      <div>
-        <label for="settings-lastfm-secret" class="block text-xs font-mono text-[#a1a1aa] mb-1">SHARED SECRET</label>
-        <input
-          id="settings-lastfm-secret"
-          type="password"
-          placeholder="Last.fm Shared Secret"
-          class="w-full px-3 py-2 rounded bg-[#0e0e11] border border-[#71717a] text-xs text-[#f4f4f5] font-mono"
-        />
-      </div>
-    </div>
-
-    <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
-      <label class="inline-flex items-center gap-2 text-xs text-[#f4f4f5]">
-        <input id="settings-lastfm-enabled" type="checkbox" checked class="accent-[#34d399]" />
-        <span>Enable scrobbling when connected</span>
-      </label>
-
-      <div class="flex items-center gap-2">
-        <button
-          id="settings-lastfm-save-btn"
-          type="button"
-          class="px-3 py-1.5 rounded bg-[#27272a] border border-[#71717a] text-xs font-mono text-[#f4f4f5] hover:border-[#34d399]"
-        >
-          SAVE KEYS
-        </button>
-        <button
-          id="settings-lastfm-connect-btn"
-          type="button"
-          class="px-3.5 py-1.5 rounded bg-[#34d399] text-[#090d0b] text-xs font-mono font-semibold hover:opacity-90"
-        >
-          CONNECT LAST.FM
-        </button>
-        <button
-          id="settings-lastfm-disconnect-btn"
-          type="button"
-          class="hidden px-3 py-1.5 rounded bg-[#27272a] border border-[#f87171] text-xs font-mono text-[#f87171]"
-        >
-          DISCONNECT
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 5. Local Listening History -->
-  <div class="p-5 rounded-lg bg-[#18181b] border border-[#3f3f46] flex items-center justify-between gap-4">
-    <div>
-      <h2 class="text-sm font-semibold text-[#f4f4f5]">Local Listening History</h2>
-      <p id="settings-history-count" class="text-xs font-mono text-[#a1a1aa] mt-0.5">0 plays recorded locally</p>
-    </div>
-    <button
-      id="settings-clear-history-btn"
-      type="button"
-      class="px-3.5 py-1.5 rounded bg-[#27272a] border border-[#71717a] hover:border-[#f87171] text-xs font-mono text-[#f87171] transition-colors"
-    >
-      CLEAR HISTORY
-    </button>
-  </div>
-</section>
-
+</div>
