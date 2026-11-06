@@ -8,11 +8,17 @@ app = Flask(__name__)
 CORS(app)
 
 PORT = int(os.environ.get("FILE_BRIDGE_PORT", 3001))
+_script_dir = Path(__file__).resolve().parent
 _raw_music = os.environ.get("ND_MUSICFOLDER", os.environ.get("MUSIC_DIR", ""))
+
 if os.environ.get("STORAGE_DIR") or os.environ.get("NAS_ROOT"):
     STORAGE_DIR = Path(os.environ.get("STORAGE_DIR") or os.environ.get("NAS_ROOT")).resolve()
+elif Path("G:/Server").exists():
+    STORAGE_DIR = Path("G:/Server").resolve()
 elif _raw_music:
     STORAGE_DIR = Path(_raw_music).resolve().parent
+elif _script_dir.name.lower() == "player":
+    STORAGE_DIR = _script_dir.parent
 else:
     STORAGE_DIR = Path("./storage").resolve()
 
@@ -71,8 +77,8 @@ def upload_files():
 def delete_file():
     try:
         target = safe_path(request.args.get("path", ""))
-        if target == STORAGE_DIR:
-            return jsonify({"error": "Cannot delete root folder"}), 400
+        if target == STORAGE_DIR or target == _script_dir:
+            return jsonify({"error": "Cannot delete server root or Player application folder"}), 400
         if target.is_dir():
             shutil.rmtree(target)
         else:

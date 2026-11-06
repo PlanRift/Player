@@ -39,8 +39,10 @@ $WebPort = Get-EnvOrDefault "WEB_PORT" "5500"
 $BridgePort = Get-EnvOrDefault "FILE_BRIDGE_PORT" "3001"
 
 if ([string]::IsNullOrWhiteSpace($env:ND_MUSICFOLDER)) {
+    $ParentDir = Split-Path -Path $ProjectDir -Parent
     $MusicCandidates = @(
         "G:\Server\Music",
+        (Join-Path $ParentDir "Music"),
         (Join-Path $HOME "Music\Mornye"),
         (Join-Path $HOME "Music"),
         (Join-Path $ProjectDir "music")

@@ -5,16 +5,25 @@ import cors from 'cors';
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.FILE_BRIDGE_PORT || process.env.PORT || 3001;
 
-// Storage root for NAS (e.g. G:\Server). Defaults to parent of ND_MUSICFOLDER if provided.
-const STORAGE_DIR = path.resolve(
-  process.env.STORAGE_DIR ||
-  process.env.NAS_ROOT ||
-  (process.env.ND_MUSICFOLDER ? path.resolve(process.env.ND_MUSICFOLDER, '..') : './storage')
-);
+// Storage root for NAS (e.g. G:\Server).
+// When Player is at G:\Server\Player, automatically uses parent G:\Server.
+function resolveStorageRoot() {
+  if (process.env.STORAGE_DIR) return path.resolve(process.env.STORAGE_DIR);
+  if (process.env.NAS_ROOT) return path.resolve(process.env.NAS_ROOT);
+  if (fsSync.existsSync('G:\\Server')) return 'G:\\Server';
+  if (process.env.ND_MUSICFOLDER) return path.resolve(process.env.ND_MUSICFOLDER, '..');
+  const parent = path.resolve(__dirname, '..');
+  if (path.basename(__dirname).toLowerCase() === 'player') return parent;
+  return './storage';
+}
+
+const STORAGE_DIR = path.resolve(resolveStorageRoot());
 
 if (!fsSync.existsSync(STORAGE_DIR)) fsSync.mkdirSync(STORAGE_DIR, { recursive: true });
 
@@ -82,7 +91,9 @@ app.post('/api/files/upload', upload.array('files'), (req, res) => {
 app.delete('/api/files', async (req, res) => {
   try {
     const target = safe(req.query.path || '');
-    if (target === STORAGE_DIR) return res.status(400).json({ error: 'Cannot delete root folder' });
+    if (target === STORAGE_DIR || target === __dirname) {
+      return res.status(400).json({ error: 'Cannot delete server root or Player application folder' });
+    }
     const stat = await fs.stat(target);
     if (stat.isDirectory()) await fs.rm(target, { recursive: true, force: true });
     else await fs.unlink(target);
