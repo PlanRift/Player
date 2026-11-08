@@ -14,15 +14,17 @@ NAS_API_KEY = os.environ.get("NAS_API_KEY") or os.environ.get("FILE_BRIDGE_KEY")
 def require_api_key():
     if request.method == "OPTIONS":
         return
+    # Century bridge: x-api-key header on every request. Native browser
+    # downloads cannot set headers, so /api/files/download also accepts
+    # ?apiKey. Every other endpoint requires the header.
+    is_download = request.path == "/api/files/download"
     api_key = (
         request.headers.get("x-api-key")
         or request.headers.get("X-API-Key")
-        or request.args.get("apiKey")
-        or request.args.get("api-key")
-        or request.args.get("key")
+        or (request.args.get("apiKey") or request.args.get("key") if is_download else None)
     )
     if not api_key or api_key != NAS_API_KEY:
-        return jsonify({"error": "Unauthorized: Invalid or missing API key (provide x-api-key header or ?apiKey= parameter)"}), 401
+        return jsonify({"error": "Unauthorized: Invalid or missing API key (provide x-api-key header" + (" or ?apiKey= parameter" if is_download else "") + ")"}), 401
 _script_dir = Path(__file__).resolve().parent
 _raw_music = os.environ.get("ND_MUSICFOLDER", os.environ.get("MUSIC_DIR", ""))
 
@@ -40,8 +42,11 @@ else:
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 def safe_path(sub=""):
-    target = (STORAGE_DIR / sub).resolve()
-    if not str(target).startswith(str(STORAGE_DIR)):
+    # Century resolveSafePath: the root + separator check also rejects a
+    # sibling directory whose name merely starts with the root.
+    root = STORAGE_DIR
+    target = (root / sub).resolve()
+    if target != root and not str(target).startswith(str(root) + os.sep):
         raise PermissionError("Access denied: path traversal")
     return target
 
@@ -71,7 +76,13 @@ def list_files():
 def create_folder():
     try:
         data = request.get_json(silent=True) or {}
-        p = safe_path(os.path.join(data.get("path", ""), data.get("name", "")))
+        # Century parity: a folder name must be a single segment — reject
+        # '/', '\', '.', '..' with a 400 instead of silently creating
+        # nested folders (or surfacing a 500 for '..').
+        name = str(data.get("name", ""))
+        if not name or name in (".", "..") or "/" in name or "\\" in name:
+            return jsonify({"error": "Invalid folder name"}), 400
+        p = safe_path(os.path.join(data.get("path", ""), name))
         p.mkdir(parents=True, exist_ok=True)
         return jsonify({"success": True})
     except Exception as e:
@@ -79,12 +90,37 @@ def create_folder():
 
 @app.route("/api/files/upload", methods=["POST"])
 def upload_files():
+    # Century bridge: folder upload via a parallel `paths` form field (one
+    # webkitRelativePath per file, same order as `files`). Parent dirs are
+    # created (mkdir -p). Without a path, the file lands by basename.
+    # A path that escapes the destination is skipped, not an error.
     try:
         dest = safe_path(request.args.get("path", ""))
+        dest.mkdir(parents=True, exist_ok=True)
         files = request.files.getlist("files")
-        for f in files:
-            f.save(dest / f.filename)
-        return jsonify({"success": True, "count": len(files)})
+        paths = request.form.getlist("paths")
+        count = 0
+        for i, f in enumerate(files):
+            rel = (paths[i].strip() if i < len(paths) else "") or ""
+            if rel:
+                if rel.startswith("/") or rel.startswith("\\") or ".." in rel.split("/"):
+                    continue
+                try:
+                    target = safe_path(os.path.join(str(dest.relative_to(STORAGE_DIR)) if dest != STORAGE_DIR else "", rel))
+                    if target == dest or not str(target).startswith(str(dest) + os.sep):
+                        continue
+                except Exception:
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                f.save(target)
+                count += 1
+            else:
+                name = os.path.basename(f.filename or "")
+                if not name or name in (".", ".."):
+                    continue
+                f.save(dest / name)
+                count += 1
+        return jsonify({"success": True, "count": count})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -388,6 +388,68 @@ input[type="range"].studio-range-thin::-moz-range-thumb {
   color: rgba(235, 235, 235, 0.45);
 }
 
+/* Background vocals (Morphe model): a BG line is a small dim line below its
+ * parent lead. It never becomes the active line. It expands + fades in
+ * (250ms) while its lead is active, and collapses to zero space (200ms)
+ * after the lead leaves. Open BG text is dimmer sage, never full sage. */
+.lyric-line-bg {
+  font-size: 0.82em;
+  color: rgba(138, 184, 160, 0.7);
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  overflow: hidden;
+  transition: max-height 200ms ease-out, opacity 200ms ease-out, padding 200ms ease-out;
+}
+
+.lyric-line-bg-open {
+  max-height: 3em;
+  opacity: 1;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  transition-duration: 250ms;
+}
+
+/* Word spans inside a BG line use sage tones, not the lead line's
+ * near-white. Without these rules the .lyric-word-unsung colour
+ * (rgba(235,235,235,0.45)) wins over the BG div's sage, so a BG line's
+ * glyphs look identical to an unsung lead line. */
+.lyric-line-bg .lyric-word-unsung,
+.lyric-line-bg .lyric-word-sung {
+  color: rgba(138, 184, 160, 0.7);
+}
+
+.lyric-line-bg .lyric-word-active {
+  background-image: linear-gradient(
+    90deg,
+    rgba(138, 184, 160, 0.95) var(--word-fill, 100%),
+    rgba(138, 184, 160, 0.35) var(--word-fill, 100%)
+  );
+}
+
+/* Instrumental break dots: three dots that fill as the gap progresses.
+ * Filled = zinc-100, unfilled = zinc-600. No pulse. */
+.lyric-dots {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.lyric-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background-color: #52525b;
+  transition: background-color 200ms ease;
+}
+
+.lyric-dot-filled {
+  background-color: #f4f4f5;
+}
+
 .lyrics-ambient-mask {
   -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 14%, black 86%, transparent 100%);
   mask-image: linear-gradient(to bottom, transparent 0%, black 14%, black 86%, transparent 100%);

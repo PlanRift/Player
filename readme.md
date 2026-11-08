@@ -9,10 +9,8 @@ The project is finished and fully functional.
 - Apple Music-style collapsible sidebar
 - Two-deck gapless audio engine with configurable crossfade
 - Multi-provider synchronized lyrics with offset controls
-- Discovery mixes with generative canvas art
 - Full playlist management and 2x2 collage covers
 - Slide-out queue drawer with drag-and-drop reordering
-- Last.fm scrobbling support
 - Global keyboard shortcuts
 
 ## Setup & Running

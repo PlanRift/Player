@@ -19,12 +19,18 @@
   </div>
 
   <!-- Active State -->
-  <div id="np-active-state" class="h-full w-full">
+  <div id="np-active-state" class="relative h-full w-full overflow-hidden">
+    <!-- Ambient wash: blurred cover, full-view, no halo (Century Now Playing) -->
+    <div
+      id="np-backdrop-art"
+      class="absolute -inset-16 bg-cover bg-center scale-110 blur-[80px] opacity-45 pointer-events-none transition-all duration-700"
+    ></div>
+    <div class="absolute inset-0 bg-zinc-950/35 pointer-events-none"></div>
+
     <!-- Desktop Layout (>= lg) -->
-    <div class="hidden lg:flex h-full w-full overflow-hidden pb-24">
+    <div class="hidden lg:flex relative z-10 h-full w-full overflow-hidden pb-24">
       <!-- Left Column: Large Square Cover & Metadata -->
       <div class="flex-1 flex flex-col items-center justify-center p-6 xl:p-10 relative overflow-hidden">
-        <div class="absolute inset-0 bg-gradient-to-br from-emerald-950/20 via-zinc-950 to-zinc-900 pointer-events-none"></div>
 
         <div class="relative z-10 w-full max-w-[min(520px,calc(100dvh-310px))] flex flex-col">
           <div class="w-full aspect-square bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden flex items-center justify-center">
@@ -78,7 +84,7 @@
       </div>
 
       <!-- Right Column: Queue / Lyrics Tabbed Panel -->
-      <div class="w-[320px] xl:w-[350px] shrink-0 border-l border-zinc-700 bg-zinc-900/50 flex flex-col h-full">
+      <div class="w-[300px] xl:w-[340px] 2xl:w-[380px] shrink-0 border-l border-zinc-700 bg-zinc-950 flex flex-col h-full">
         <div class="h-11 px-3 border-b border-zinc-700 flex items-center justify-between shrink-0">
           <div class="flex items-center gap-1">
             <button
@@ -122,6 +128,12 @@
               <button type="button" data-lyrics-mode="en" class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">EN</button>
             </div>
             <span id="np-lyrics-preparing" class="hidden text-[10px] font-mono text-emerald-400 animate-pulse">preparing readings...</span>
+            <div id="np-offset-controls" class="hidden items-center gap-1 border border-zinc-700 bg-zinc-950 px-1.5 py-0.5">
+              <button id="np-offset-minus" type="button" aria-label="Lyrics earlier" class="w-5 h-5 flex items-center justify-center text-zinc-400 hover:text-zinc-100 text-xs font-mono">−</button>
+              <span id="np-offset-value" class="text-[11px] font-mono text-emerald-400 px-1">0.0s</span>
+              <button id="np-offset-plus" type="button" aria-label="Lyrics later" class="w-5 h-5 flex items-center justify-center text-zinc-400 hover:text-zinc-100 text-xs font-mono">+</button>
+              <button id="np-offset-reset" type="button" aria-label="Reset lyrics offset" class="px-1.5 h-5 flex items-center justify-center text-zinc-400 hover:text-zinc-100 text-[10px] font-mono">reset</button>
+            </div>
             <button
               id="np-lyrics-search-btn"
               type="button"
@@ -136,7 +148,7 @@
     </div>
 
     <!-- Mobile / Tablet Fullscreen Layout (< lg) -->
-    <div class="flex lg:hidden flex-col h-full w-full bg-zinc-950 px-4 pt-3 pb-5 justify-between overflow-hidden">
+    <div class="flex lg:hidden relative z-10 flex-col h-full w-full px-4 pt-3 pb-5 justify-between overflow-hidden">
       <!-- Top Bar -->
       <div class="flex items-center justify-between shrink-0">
         <button
@@ -154,7 +166,7 @@
           aria-label="Track Options"
           class="w-9 h-9 flex items-center justify-center text-zinc-300 hover:text-zinc-100"
         >
-          <i data-lucide="more-horizontal" class="w-5 h-5"></i>
+          <i data-lucide="more-vertical" class="w-5 h-5"></i>
         </button>
       </div>
 

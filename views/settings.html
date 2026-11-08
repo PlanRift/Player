@@ -1,4 +1,4 @@
-<!-- MODAL & VIEW: SETTINGS (2-Tab Modal Dialog: Playback & Audio + Navidrome Server) -->
+<!-- MODAL & VIEW: SETTINGS (6-Tab Modal Dialog: Playback, Audio, Lyrics, Library, Navidrome Server, NAS Storage) -->
 <div
   id="settings-modal"
   role="dialog"
@@ -6,7 +6,7 @@
   aria-label="Settings"
   class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
 >
-  <div class="w-full max-w-xl bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+  <div class="w-[672px] max-w-[calc(100vw-2rem)] h-[560px] max-h-[calc(100vh-2rem)] bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col overflow-hidden">
     <!-- Modal Header -->
     <div class="px-5 py-4 border-b border-zinc-700 flex items-center justify-between shrink-0">
       <div>
@@ -23,53 +23,59 @@
       </button>
     </div>
 
-    <!-- 3-Tab Bar -->
-    <div class="px-5 border-b border-zinc-800 flex items-center gap-1 bg-zinc-950/60 shrink-0">
-      <button
-        id="settings-tab-btn-audio"
-        type="button"
-        class="px-4 py-2.5 text-xs font-mono border-b-2 border-emerald-400 text-zinc-100 font-semibold transition-colors"
-      >
-        Playback &amp; Audio
-      </button>
-      <button
-        id="settings-tab-btn-server"
-        type="button"
-        class="px-4 py-2.5 text-xs font-mono border-b-2 border-transparent text-zinc-400 hover:text-zinc-200 flex items-center gap-2 transition-colors"
-      >
-        <span>Navidrome Server</span>
-        <span id="settings-tab-server-dot" class="w-2 h-2 bg-emerald-400 inline-block"></span>
-      </button>
-      <button
-        id="settings-tab-btn-nas"
-        type="button"
-        class="px-4 py-2.5 text-xs font-mono border-b-2 border-transparent text-zinc-400 hover:text-zinc-200 flex items-center gap-2 transition-colors"
-      >
-        <span>NAS Storage</span>
-        <span id="settings-tab-nas-dot" class="w-2 h-2 bg-zinc-600 inline-block"></span>
-      </button>
-    </div>
+    <!-- Vertical tab nav (w-44) + content -->
+    <div class="flex flex-1 min-h-0">
+      <nav aria-label="Settings sections" class="w-44 shrink-0 border-r border-zinc-800 bg-zinc-950/60 py-3 px-2 space-y-0.5 overflow-y-auto">
+        <button
+          id="settings-tab-btn-playback"
+          type="button"
+          class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          Playback
+        </button>
+        <button
+          id="settings-tab-btn-audio"
+          type="button"
+          class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          Audio
+        </button>
+        <button
+          id="settings-tab-btn-lyrics"
+          type="button"
+          class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          Lyrics
+        </button>
+        <button
+          id="settings-tab-btn-library"
+          type="button"
+          class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          Library
+        </button>
+        <button
+          id="settings-tab-btn-server"
+          type="button"
+          class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          <span>Navidrome Server</span>
+          <span id="settings-tab-server-dot" class="w-2 h-2 bg-emerald-400 inline-block ml-1.5 align-middle"></span>
+        </button>
+        <button
+          id="settings-tab-btn-nas"
+          type="button"
+          class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          <span>NAS Storage</span>
+          <span id="settings-tab-nas-dot" class="w-2 h-2 bg-zinc-600 inline-block ml-1.5 align-middle"></span>
+        </button>
+      </nav>
 
     <!-- Scrollable Tab Body -->
     <div class="p-5 overflow-y-auto space-y-6 flex-1">
-      <!-- TAB 1: PLAYBACK & AUDIO -->
-      <div id="settings-tab-audio" class="space-y-5">
-        <!-- Audio Output Device -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-2.5">
-          <div class="flex items-center justify-between">
-            <div>
-              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Audio Output Device</h3>
-              <p class="text-[11px] text-zinc-400 mt-0.5">Route Web Audio output to a specific hardware sink</p>
-            </div>
-          </div>
-          <select
-            id="settings-output-device"
-            class="w-full h-9 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100"
-          >
-            <option value="">System Default Output</option>
-          </select>
-        </div>
-
+      <!-- TAB: PLAYBACK -->
+      <div id="settings-tab-playback" class="space-y-5">
         <!-- Crossfade -->
         <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-3">
           <div class="flex items-center justify-between">
@@ -96,6 +102,37 @@
             <span class="text-[11px] font-mono text-zinc-400">12s</span>
           </div>
         </div>
+
+        <!-- Radio / Autoplay (Century M1) -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Radio / Autoplay</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">When the queue runs out, keep playing similar tracks (radio) instead of stopping.</p>
+          </div>
+          <label class="inline-flex items-center cursor-pointer shrink-0">
+            <input id="settings-autoplay-toggle" type="checkbox" checked class="w-4 h-4 accent-[#8ab8a0]" />
+          </label>
+        </div>
+      </div>
+
+      <!-- TAB: AUDIO -->
+      <div id="settings-tab-audio" class="space-y-5">
+        <!-- Audio Output Device -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Audio Output Device</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Route Web Audio output to a specific hardware sink</p>
+            </div>
+          </div>
+          <select
+            id="settings-output-device"
+            class="w-full h-9 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100"
+          >
+            <option value="">System Default Output</option>
+          </select>
+        </div>
+
 
         <!-- Volume Normalization (ReplayGain) & Preamp -->
         <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4">
@@ -150,33 +187,7 @@
           </select>
         </div>
 
-        <!-- Show Translated Japanese Titles Toggle -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Show Translated Japanese Titles</h3>
-            <p class="text-[11px] text-zinc-400 mt-0.5">
-              Display official international and romanized titles beside Japanese titles (e.g. 過去を喰らう - Eat The Past)
-            </p>
-          </div>
-          <label class="inline-flex items-center cursor-pointer shrink-0">
-            <input id="settings-translated-titles-toggle" type="checkbox" checked class="w-4 h-4 accent-[#8ab8a0]" />
-          </label>
-        </div>
 
-        <!-- Local Listening History -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Local Listening History</h3>
-            <p id="settings-history-count" class="text-[11px] font-mono text-zinc-400 mt-0.5">0 plays recorded locally</p>
-          </div>
-          <button
-            id="settings-clear-history-btn"
-            type="button"
-            class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
-          >
-            CLEAR HISTORY
-          </button>
-        </div>
       </div>
 
       <!-- TAB 2: NAVIDROME SERVER -->
@@ -331,18 +342,75 @@
           </div>
         </form>
       </div>
-    </div>
 
-    <!-- Modal Footer -->
-    <div class="px-5 py-3 border-t border-zinc-800 bg-zinc-950/60 flex items-center justify-between shrink-0">
-      <span class="text-[11px] font-mono text-zinc-400">Settings auto-saved</span>
-      <button
-        id="settings-done-btn"
-        type="button"
-        class="h-8 px-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-xs font-mono text-zinc-100"
-      >
-        Done
-      </button>
+      <!-- TAB 4: LYRICS -->
+      <div id="settings-tab-lyrics" class="hidden space-y-5">
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4">
+          <div>
+            <h3 class="text-xs font-mono font-semibold text-zinc-100">Lyrics display</h3>
+            <p class="text-[11px] text-zinc-400 mt-1">How synced lyrics are shown in Now Playing, the Signature Room, and the lyrics drawer.</p>
+          </div>
+          <label class="flex items-start justify-between gap-4 cursor-pointer">
+            <span>
+              <span class="block text-xs font-mono text-zinc-100">Word-by-word sweep</span>
+              <span class="block text-[11px] text-zinc-400 mt-0.5">Highlight each word as it is sung on the active line. Off shows the line as plain text.</span>
+            </span>
+            <input id="settings-word-sweep-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
+          </label>
+          <label class="flex items-start justify-between gap-4 cursor-pointer">
+            <span>
+              <span class="block text-xs font-mono text-zinc-100">Split background vocals</span>
+              <span class="block text-[11px] text-zinc-400 mt-0.5">Show background vocal lines small and dim below their lead line, expanding while the lead plays.</span>
+            </span>
+            <input id="settings-split-bg-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
+          </label>
+        </div>
+        <p class="text-[11px] text-zinc-500">Lyrics come from the plenrip-relay (port 3005). Romaji and English readings are derived server-side (kuroshiro / Gemini / Google) when you switch modes.</p>
+      </div>
+
+      <!-- TAB 5: LIBRARY -->
+      <div id="settings-tab-library" class="hidden space-y-5">
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4">
+          <div>
+            <h3 class="text-xs font-mono font-semibold text-zinc-100">Albums view</h3>
+            <p class="text-[11px] text-zinc-400 mt-1">How albums are grouped in the Albums browse view and in artist discographies.</p>
+          </div>
+          <label class="flex items-start justify-between gap-4 cursor-pointer">
+            <span>
+              <span class="block text-xs font-mono text-zinc-100">Split Albums and Singles &amp; EPs</span>
+              <span class="block text-[11px] text-zinc-400 mt-0.5">Show two sections: Albums (7+ tracks) and Singles &amp; EPs (6 or fewer tracks). Off shows one list.</span>
+            </span>
+            <input id="settings-split-albums-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
+          </label>
+        </div>
+        <!-- Show Translated Japanese Titles Toggle -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Show Translated Japanese Titles</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">
+              Display official international and romanized titles beside Japanese titles (e.g. 過去を喰らう - Eat The Past)
+            </p>
+          </div>
+          <label class="inline-flex items-center cursor-pointer shrink-0">
+            <input id="settings-translated-titles-toggle" type="checkbox" checked class="w-4 h-4 accent-[#8ab8a0]" />
+          </label>
+        </div>
+        <!-- Local Listening History -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Local Listening History</h3>
+            <p id="settings-history-count" class="text-[11px] font-mono text-zinc-400 mt-0.5">0 plays recorded locally</p>
+          </div>
+          <button
+            id="settings-clear-history-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
+          >
+            CLEAR HISTORY
+          </button>
+        </div>
+      </div>
     </div>
   </div>
+</div>
 </div>

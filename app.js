@@ -7,26 +7,28 @@
     DEFAULT_CONFIG,
     LYRICS_PROVIDERS_META,
     DEFAULT_LYRICS_PRIORITY,
-    LASTFM_DEFAULT_PLACEHOLDER_HASH,
+    PLACEHOLDER_IMAGE_HASH,
     SubsonicClient,
     TitleTranslationStore,
     LyricsManager,
     HistoryStore,
-    LastFmManager,
     GaplessAudioEngine,
     findActiveLineIndex,
+    findActiveLeadIndex,
+    findBgParentIndex,
+    findInstrumentalGaps,
     hasJapaneseScript,
     processJapaneseLyrics,
     generateAuraPlaceholder,
     fetchDeezerArtistImageJsonp,
     generatePlaylistCollage,
+    balancedShuffle,
   } = window.PlenripEngine;
 
   // Core instances
   const client = new SubsonicClient();
   const lyricsManager = new LyricsManager();
   const historyStore = new HistoryStore();
-  const lastFm = new LastFmManager();
   const titles = new TitleTranslationStore();
   let audioEngine = null;
 
@@ -242,7 +244,7 @@
         if (ok) return ok;
       }
       const remote = artist.artistImageUrl;
-      if (remote && !String(remote).includes(LASTFM_DEFAULT_PLACEHOLDER_HASH)) {
+      if (remote && !String(remote).includes(PLACEHOLDER_IMAGE_HASH)) {
         const ok = await probeImage(remote);
         if (ok) return ok;
       }
@@ -361,6 +363,19 @@
         (r === 'artists' && route === 'album-detail' && state.albumBackRoute === 'artist-detail') ||
         (r === 'playlists' && route === 'playlist-detail');
       btn.classList.toggle('nav-item-active', match);
+    });
+    // Mobile tab bar active state (same mapping as the sidebar)
+    document.querySelectorAll('.mobile-tab-btn[data-route]').forEach((btn) => {
+      const r = btn.getAttribute('data-route');
+      const match =
+        r === route ||
+        (r === 'artists' && route === 'artist-detail') ||
+        (r === 'albums' && route === 'album-detail' && state.albumBackRoute === 'albums') ||
+        (r === 'artists' && route === 'album-detail' && state.albumBackRoute === 'artist-detail') ||
+        (r === 'playlists' && route === 'playlist-detail');
+      btn.classList.toggle('text-primary', match);
+      btn.classList.toggle('text-zinc-400', !match);
+      btn.setAttribute('aria-current', match ? 'page' : 'false');
     });
     highlightSidebarPlaylists();
 
@@ -565,12 +580,54 @@
       right.appendChild(remBtn);
     }
 
+    // Playlist reorder (Century Phase 4): up/down arrows + Alt+Arrow.
+    // Only shown when the caller provides onMoveTrack (playlist detail).
+    if (typeof options.onMoveTrack === 'function') {
+      const total = Array.isArray(queueContext) ? queueContext.length : 0;
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button';
+      upBtn.title = 'Move up (Alt+Up)';
+      upBtn.setAttribute('aria-label', 'Move track up');
+      upBtn.disabled = index <= 0;
+      upBtn.className = `p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:pointer-events-none ${index <= 0 ? 'opacity-30' : ''}`;
+      upBtn.innerHTML = '<i data-lucide="chevron-up" class="w-4 h-4"></i>';
+      upBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        options.onMoveTrack(index, index - 1);
+      });
+      right.appendChild(upBtn);
+      const downBtn = document.createElement('button');
+      downBtn.type = 'button';
+      downBtn.title = 'Move down (Alt+Down)';
+      downBtn.setAttribute('aria-label', 'Move track down');
+      downBtn.disabled = index >= total - 1;
+      downBtn.className = `p-1 text-zinc-400 hover:text-zinc-100 disabled:opacity-30 disabled:pointer-events-none ${index >= total - 1 ? 'opacity-30' : ''}`;
+      downBtn.innerHTML = '<i data-lucide="chevron-down" class="w-4 h-4"></i>';
+      downBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        options.onMoveTrack(index, index + 1);
+      });
+      right.appendChild(downBtn);
+      // Alt+ArrowUp / Alt+ArrowDown reorders the focused row.
+      row.setAttribute('tabindex', '0');
+      row.addEventListener('keydown', (e) => {
+        if (!e.altKey) return;
+        if (e.key === 'ArrowUp' && index > 0) {
+          e.preventDefault();
+          options.onMoveTrack(index, index - 1);
+        } else if (e.key === 'ArrowDown' && index < total - 1) {
+          e.preventDefault();
+          options.onMoveTrack(index, index + 1);
+        }
+      });
+    }
+
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
     menuBtn.title = 'Track options';
     menuBtn.setAttribute('aria-label', 'More actions for track');
     menuBtn.className = 'p-1.5 text-zinc-400 hover:text-zinc-100';
-    menuBtn.innerHTML = '<i data-lucide="more-horizontal" class="w-4 h-4"></i>';
+    menuBtn.innerHTML = '<i data-lucide="more-vertical" class="w-4 h-4"></i>';
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       openTrackContextMenu(e, song, null);
@@ -600,6 +657,112 @@
     }
     audioEngine.playQueue(songs, 0, { shuffle });
   }
+
+  // Radio / autoplay (Century M1): build a continuous list of similar tracks
+  // from a seed song. Algorithm (Century radioEngine):
+  // 1. Tracks from the seed artist's discography.
+  // 2. Similar artists from getArtistInfo2, cross-referenced with the local
+  //    library (never invent fake similar artists), max 4 tracks each.
+  // 3. Fallback: top tracks from listening history — ONLY when no similar
+  //    songs were found at all (Century uses history only then, not as a
+  //    top-up on top of similars).
+  // Deduplicates, excludes the seed song (and, for autoplay, every track
+  // already in the queue), balances distribution, limit 25.
+  async function generateRadioTracks(seed, limit = 25, excludeIds = []) {
+    if (!seed) return [];
+    const exclude = new Set([seed.id, ...(excludeIds || [])]);
+    const out = [];
+    const seen = new Set();
+    const pushAll = (songs) => {
+      for (const s of songs || []) {
+        if (!s?.id || exclude.has(s.id) || seen.has(s.id)) continue;
+        seen.add(s.id);
+        out.push(s);
+      }
+    };
+    const artistSongs = async (artistId) => {
+      try {
+        const artist = await client.getArtist(artistId);
+        const songs = [];
+        for (const alb of artist.album || []) {
+          const detail = await client.resolveAlbumSongs(alb).catch(() => null);
+          songs.push(...(detail?.song || []));
+        }
+        return songs;
+      } catch {
+        return [];
+      }
+    };
+
+    // 1. Seed artist's tracks
+    const seedArtistId = seed.artistId || '';
+    if (seedArtistId) {
+      pushAll(await artistSongs(seedArtistId));
+    }
+
+    // 2. Similar artists (server-provided), cross-referenced with the library
+    const similarBefore = out.length;
+    if (seedArtistId && out.length < limit) {
+      try {
+        const info = await client.getArtistInfo2(seedArtistId);
+        const similars = (info?.similarArtist || []).filter((a) => a?.id).slice(0, 5);
+        // Prefer similar artists that exist in the local library
+        let libraryArtists = [];
+        try {
+          libraryArtists = await loadAllArtists();
+        } catch {
+          libraryArtists = [];
+        }
+        const byName = new Map(libraryArtists.map((a) => [String(a.name || '').toLowerCase(), a]));
+        for (const sim of similars) {
+          if (out.length >= limit) break;
+          const local = byName.get(String(sim.name || '').toLowerCase());
+          const simId = local?.id || sim.id;
+          if (!simId) continue;
+          // Max 4 tracks per similar artist (Century radioEngine) so one
+          // prolific similar artist cannot flood the 25.
+          pushAll((await artistSongs(simId)).slice(0, 4));
+        }
+      } catch {
+        // Similar-artist lookup is best-effort
+      }
+    }
+    const similarAdded = out.length - similarBefore;
+
+    // 3. Fallback: top tracks from listening history — only when NO similar
+    // songs were found (Century: history is the fallback, not a top-up).
+    if (similarAdded === 0 && out.length < limit) {
+      try {
+        const allSongs = await loadAllSongs();
+        const byId = new Map(allSongs.map((s) => [s.id, s]));
+        const top = historyStore.getListenAgain(byId, limit) || [];
+        // getListenAgain returns wrappers {song, playCount, lastPlayed} —
+        // unwrap to the songs, otherwise pushAll skips them (no .id).
+        pushAll(top.map((t) => t.song).filter(Boolean));
+      } catch {
+        // History fallback is best-effort
+      }
+    }
+
+    // Balance distribution + shuffle, then cap at the limit. The first
+    // track stays fixed (Century radioEngine) and the rest are spread out
+    // by artist via balancedShuffle.
+    const shuffled = out.length > 1 ? [out[0], ...balancedShuffle(out.slice(1))] : out;
+    return shuffled.slice(0, limit);
+  }
+
+  // Start a radio queue from a seed song (context menu "Start Radio").
+  async function startRadio(seed) {
+    if (!seed) return;
+    showToast(`Starting radio from "${seed.title || 'Untitled'}"...`);
+    const tracks = await generateRadioTracks(seed, 25);
+    if (tracks.length === 0) {
+      showToast('No similar tracks found for radio');
+      return;
+    }
+    audioEngine.playQueue([seed, ...tracks], 0, { shuffle: false });
+  }
+
 
   // Generic media card (album, artist, playlist, song)
   function createMediaCard(opts) {
@@ -633,14 +796,23 @@
       const playBtn = document.createElement('button');
       playBtn.type = 'button';
       playBtn.setAttribute('aria-label', `Play ${opts.title || ''}`);
+      playBtn.title = `Play ${opts.title || ''}`;
       playBtn.className =
-        'absolute bottom-2 right-2 px-2 py-1 bg-emerald-400 text-zinc-950 text-[10px] font-mono font-semibold opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity';
-      playBtn.textContent = '[PLAY]';
+        'absolute inset-0 m-auto h-8 w-8 flex items-center justify-center rounded-full bg-black/60 text-zinc-100 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary';
+      playBtn.innerHTML = '<i data-lucide="play" class="w-4 h-4 fill-current"></i>';
       playBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         opts.onPlay();
       });
       cover.appendChild(playBtn);
+    } else {
+      // No onPlay: a non-interactive hover affordance (Century MediaCard).
+      const hint = document.createElement('span');
+      hint.setAttribute('aria-hidden', 'true');
+      hint.className =
+        'absolute inset-0 flex items-center justify-center bg-black/40 text-zinc-100 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none';
+      hint.innerHTML = '<i data-lucide="play" class="w-4 h-4 fill-current"></i>';
+      cover.appendChild(hint);
     }
 
     if (typeof opts.progressPercent === 'number') {
@@ -674,7 +846,7 @@
     return card;
   }
 
-  function createAlbumCard(album, backRoute = 'albums') {
+  function createAlbumCard(album, backRoute = 'albums', withPlay = true) {
     return createMediaCard({
       coverId: album.coverArt || (String(album.id).startsWith('singles-') ? null : album.id),
       fallbackSongId: album._virtualSongs?.[0]?.id,
@@ -683,14 +855,16 @@
       subtitle: album.artist || 'Unknown Artist',
       meta: `${album.year ? album.year + ' · ' : ''}${album.songCount ? album.songCount + ' trk' : 'Album'}`,
       onClick: () => openAlbumDetail(album, backRoute),
-      onPlay: async () => {
-        try {
-          const detail = await client.resolveAlbumSongs(album);
-          playSongs(detail.song, { shuffle: false });
-        } catch (err) {
-          showToast(`Failed to play album: ${err.message}`);
-        }
-      },
+      onPlay: withPlay
+        ? async () => {
+            try {
+              const detail = await client.resolveAlbumSongs(album);
+              playSongs(detail.song, { shuffle: false });
+            } catch (err) {
+              showToast(`Failed to play album: ${err.message}`);
+            }
+          }
+        : undefined,
     });
   }
 
@@ -760,6 +934,26 @@
     }
   }
 
+  // Optimistic starred update for an album across every cached list
+  // (browse albumsByType + the artist discography). Century's
+  // setAlbumStarred spec (2026-11-08): starring an album must update the
+  // cached album objects immediately, not just the starredAlbumIds set,
+  // or a starred filter reading album.starred shows stale data.
+  function setAlbumStarred(albumId, starred) {
+    if (!albumId) return;
+    const stamp = starred ? new Date().toISOString() : undefined;
+    const apply = (list) => {
+      if (!Array.isArray(list)) return;
+      for (const a of list) {
+        if (a && a.id === albumId) a.starred = stamp;
+      }
+    };
+    for (const type of Object.keys(state.albumsByType || {})) {
+      apply(state.albumsByType[type]);
+    }
+    apply(state.currentArtistAlbums);
+  }
+
   async function toggleStarAlbum(album) {
     if (!album?.id || String(album.id).startsWith('singles-')) return;
     const was = state.starredAlbumIds.has(album.id);
@@ -767,9 +961,13 @@
       if (was) {
         await client.unstar({ albumId: album.id });
         state.starredAlbumIds.delete(album.id);
+        album.starred = undefined;
+        setAlbumStarred(album.id, false);
       } else {
         await client.star({ albumId: album.id });
         state.starredAlbumIds.add(album.id);
+        album.starred = new Date().toISOString();
+        setAlbumStarred(album.id, true);
       }
       renderAlbumStarButton();
     } catch (err) {
@@ -995,6 +1193,34 @@
 
   const libraryViews = {};
 
+  // Albums / Singles & EPs split (Century): an album with <= 6 tracks (or a
+  // virtual Singles bucket) is a Single/EP; anything else is an Album.
+  // One toggle in Settings > Library controls the browse view + discography.
+  // These helpers live at module scope (not inside initLibraryViews) because
+  // they are also called from openArtistDetail, renderSettings, and the
+  // split-toggle change handler.
+  const SINGLE_EP_MAX_TRACKS = 6;
+  function getSplitAlbumsSingles() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.SPLIT_ALBUMS_SINGLES);
+      return raw === null ? true : raw === 'true';
+    } catch {
+      return true;
+    }
+  }
+  function setSplitAlbumsSingles(value) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.SPLIT_ALBUMS_SINGLES, value ? 'true' : 'false');
+    } catch {
+      // Ignore storage errors
+    }
+  }
+  function isSingleOrEp(album) {
+    if (!album) return false;
+    if (typeof album.songCount === 'number') return album.songCount <= SINGLE_EP_MAX_TRACKS;
+    return false;
+  }
+
   function initLibraryViews() {
     const byName = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' });
     const stats = () => getPlayStats();
@@ -1038,7 +1264,13 @@
       fetchItems: (view) => loadAllAlbums(view.sort),
       isStarred: (a) => state.starredAlbumIds.has(a.id),
       matches: (a, q) =>
-        titles.matchesSearchWithTranslation(a.name, a.artist, q) || titles.matchesSearchWithTranslation(a.artist, '', q),
+        titles.matchesAllTokens(
+          [
+            { text: a.name, artist: a.artist },
+            { text: a.artist, artist: '' },
+          ],
+          q
+        ),
       translationItem: (a) => ({ title: a.name, artist: a.artist }),
       sorters: { newest: (l) => l, alphabeticalByName: (l) => l, alphabeticalByArtist: (l) => l, frequent: (l) => l, recent: (l) => l },
       onSortChange: async (view, isReset) => {
@@ -1050,7 +1282,28 @@
           setConnectionError(err.message);
         }
       },
-      renderPage: (container, items) => items.forEach((a) => container.appendChild(createAlbumCard(a, 'albums'))),
+      renderPage: (container, items, view, all) => {
+        if (!getSplitAlbumsSingles()) {
+          items.forEach((a) => container.appendChild(createAlbumCard(a, 'albums')));
+          return;
+        }
+        // Split view: two sections (Albums / Singles & EPs) with mono counts
+        // from the full filtered list; each section shows its page slice.
+        const allAlbums = (all || []).filter((a) => !isSingleOrEp(a));
+        const allSingles = (all || []).filter((a) => isSingleOrEp(a));
+        const pageAlbums = items.filter((a) => !isSingleOrEp(a));
+        const pageSingles = items.filter((a) => isSingleOrEp(a));
+        const section = (title, count, cards) => {
+          if (cards.length === 0) return;
+          const head = document.createElement('div');
+          head.className = 'col-span-full flex items-baseline justify-between gap-2 pb-2 border-b border-zinc-800';
+          head.innerHTML = `<h2 class="font-display font-normal text-lg text-zinc-100 tracking-tight">${title}</h2><span class="font-mono text-xs text-zinc-400">${count} ${count === 1 ? 'album' : 'albums'}</span>`;
+          container.appendChild(head);
+          cards.forEach((a) => container.appendChild(createAlbumCard(a, 'albums')));
+        };
+        section('Albums', allAlbums.length, pageAlbums);
+        section('Singles & EPs', allSingles.length, pageSingles);
+      },
     });
 
     libraryViews.songs = createLibraryView({
@@ -1063,9 +1316,14 @@
       fetchItems: () => loadAllSongs(),
       isStarred: (s) => state.starredSongIds.has(s.id),
       matches: (s, q) =>
-        titles.matchesSearchWithTranslation(s.title, s.artist, q) ||
-        titles.matchesSearchWithTranslation(s.album, s.artist, q) ||
-        titles.matchesSearchWithTranslation(s.artist, '', q),
+        titles.matchesAllTokens(
+          [
+            { text: s.title, artist: s.artist },
+            { text: s.album, artist: s.artist },
+            { text: s.artist, artist: '' },
+          ],
+          q
+        ),
       translationItem: (s) => ({ title: s.title, artist: s.artist }),
       sorters: {
         'title-asc': (l) => l.sort((a, b) => byName(a.title, b.title)),
@@ -1106,7 +1364,7 @@
       if (recent.length === 0) {
         recentGrid.innerHTML = '<div class="col-span-full py-6 text-xs font-mono text-zinc-400">No albums found on server.</div>';
       } else {
-        recent.forEach((alb) => recentGrid.appendChild(createAlbumCard(alb, 'home')));
+        recent.forEach((alb) => recentGrid.appendChild(createAlbumCard(alb, 'home', false)));
         queueTranslations(recent.map((a) => ({ title: a.name, artist: a.artist })));
       }
       refreshIcons();
@@ -1158,7 +1416,7 @@
       `${cont.length} in progress`
     );
 
-    // 2. Forgotten Favourite?
+    // 4. Forgotten Favourite?
     const forgotten = historyStore.getForgottenFavourites(state.favouriteSongs, 6);
     const forgottenSongs = forgotten.map((f) => f.song);
     fillSection(
@@ -1182,7 +1440,7 @@
       })
     );
 
-    // 4. Quick Pick (deterministic per day)
+    // 2. Quick Pick (deterministic per day)
     const quick = historyStore.getQuickPick(state.favouriteSongs, songMap, 9);
     fillSection(
       'home-section-quick-pick',
@@ -1235,7 +1493,7 @@
         } catch (err) {
           showToast(`Search failed: ${err.message}`);
         }
-      }, 250);
+      }, 200);
     });
 
     input.addEventListener('keydown', (e) => {
@@ -1332,7 +1590,7 @@
       const grid = document.createElement('div');
       grid.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3';
       album.forEach((al) => {
-        const card = createAlbumCard(al, 'search');
+        const card = createAlbumCard(al, 'search', false);
         grid.appendChild(card);
         state.searchNavItems.push({ el: card, trigger: () => openAlbumDetail(al, 'search') });
       });
@@ -1402,8 +1660,24 @@
       grid.innerHTML = '';
       if (albums.length === 0) {
         grid.innerHTML = '<div class="col-span-full py-8 text-xs font-mono text-zinc-400">No releases found for this artist.</div>';
-      } else {
+      } else if (!getSplitAlbumsSingles()) {
         albums.forEach((alb) => grid.appendChild(createAlbumCard(alb, 'artist-detail')));
+      } else {
+        // Split discography: Albums / Singles & EPs (the virtual Singles
+        // bucket is always a Single/EP).
+        const isDiscSingle = (a) => String(a.id).startsWith('singles-') || isSingleOrEp(a);
+        const discAlbums = albums.filter((a) => !isDiscSingle(a));
+        const discSingles = albums.filter((a) => isDiscSingle(a));
+        const discSection = (title, count, cards) => {
+          if (cards.length === 0) return;
+          const head = document.createElement('div');
+          head.className = 'col-span-full flex items-baseline justify-between gap-2 pb-2 border-b border-zinc-800';
+          head.innerHTML = `<h2 class="font-display font-normal text-lg text-zinc-100 tracking-tight">${title}</h2><span class="font-mono text-xs text-zinc-400">${count} ${count === 1 ? 'album' : 'albums'}</span>`;
+          grid.appendChild(head);
+          cards.forEach((alb) => grid.appendChild(createAlbumCard(alb, 'artist-detail')));
+        };
+        discSection('Albums', discAlbums.length, discAlbums);
+        discSection('Singles & EPs', discSingles.length, discSingles);
       }
       queueTranslations([{ title: artist.name, artist: '' }, ...albums.map((a) => ({ title: a.name, artist: a.artist }))]);
       refreshIcons();
@@ -1735,11 +2009,37 @@
               showToast(`Failed to remove track: ${err.message}`);
             }
           },
+          onMoveTrack: (fromIdx, toIdx) => movePlaylistTrack(fromIdx, toIdx),
         })
       );
     });
     queueTranslations(entries.map((s) => ({ title: s.title, artist: s.artist })));
     refreshIcons();
+  }
+
+  // Playlist reorder (Century Phase 4, atomic updatePlaylist): remove ALL
+  // indices and add the full reordered ID list in one call, so the server
+  // replaces the playlist content with the new order.
+  async function movePlaylistTrack(fromIdx, toIdx) {
+    const pl = state.currentPlaylist;
+    if (!pl || !Array.isArray(pl.entry)) return;
+    const entries = [...pl.entry];
+    if (fromIdx < 0 || fromIdx >= entries.length || toIdx < 0 || toIdx >= entries.length) return;
+    if (fromIdx === toIdx) return;
+    const [moved] = entries.splice(fromIdx, 1);
+    entries.splice(toIdx, 0, moved);
+    try {
+      await client.updatePlaylist({
+        playlistId: pl.id,
+        songIdToAdd: entries.map((s) => s.id),
+        songIndexToRemove: pl.entry.map((_, i) => i),
+      });
+      invalidatePlaylistCollage(pl.id);
+      await openPlaylistDetail(pl.id);
+      await refreshPlaylistsSidebarAndCache();
+    } catch (err) {
+      showToast(`Failed to reorder playlist: ${err.message}`);
+    }
   }
 
   // Modals: create playlist, save queue, add to playlist
@@ -1824,6 +2124,12 @@
     currentPath: '',
     items: [],
     filterQuery: '',
+    // Incremental reveal: show 100 rows at a time.
+    visibleCount: 100,
+    // Recursive search results (when a filter query is set): items from
+    // every subdirectory, each with its relative path.
+    searchResults: null,
+    searchRunning: false,
     bridgeUrl: localStorage.getItem('century.nas_url') || localStorage.getItem('century.file_bridge_url') || 'http://localhost:3001',
     apiKey: localStorage.getItem('century.nas_api_key') || '',
     isOnline: false,
@@ -1956,11 +2262,86 @@
     return false;
   }
 
+  // Recursive search (Century FilesView): BFS-walk the current folder and
+  // every subdirectory, collecting items whose name matches the query.
+  // Capped (500 results, 200 directories) so a huge library cannot hammer
+  // the bridge. Each result carries relPath (its path from the search root)
+  // so open/download/delete work from the results list.
+  async function searchFilesRecursive(query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) {
+      filesState.searchResults = null;
+      filesState.visibleCount = 100;
+      renderFilesList();
+      return;
+    }
+    // Race guard: each search gets a token; if a newer search starts while
+    // this one is still fetching, this one is stale and must not overwrite
+    // the newer results when it finishes.
+    const token = (filesState.searchToken || 0) + 1;
+    filesState.searchToken = token;
+    const base = getFileBridgeBase();
+    const root = filesState.currentPath || '';
+    const results = [];
+    const queue = [root];
+    const seenDirs = new Set([root]);
+    const MAX_RESULTS = 500;
+    const MAX_DIRS = 200;
+    filesState.searchRunning = true;
+    try {
+      while (queue.length > 0 && results.length < MAX_RESULTS && seenDirs.size <= MAX_DIRS) {
+        // Stop early if a newer search superseded this one.
+        if (filesState.searchToken !== token) return;
+        const dir = queue.shift();
+        let data;
+        try {
+          const res = await fetch(`${base}/api/files?path=${encodeURIComponent(dir)}`, {
+            headers: getFileBridgeHeaders(),
+          });
+          if (!res.ok) continue;
+          data = await res.json();
+        } catch {
+          continue;
+        }
+        for (const item of data.items || []) {
+          const rel = dir ? `${dir}/${item.name}` : item.name;
+          if (item.isDirectory) {
+            if (!seenDirs.has(rel)) {
+              seenDirs.add(rel);
+              queue.push(rel);
+            }
+          }
+          if (item.name.toLowerCase().includes(q)) {
+            results.push({ ...item, relPath: rel });
+            if (results.length >= MAX_RESULTS) break;
+          }
+        }
+      }
+    } finally {
+      filesState.searchRunning = false;
+    }
+    // Only apply the results if no newer search started while we ran.
+    if (filesState.searchToken !== token) return;
+    filesState.searchResults = results;
+    filesState.visibleCount = 100;
+    renderFilesList();
+  }
+
   async function loadFilesView(targetPath) {
     initFilesEvents();
     if (typeof targetPath === 'string') {
       filesState.currentPath = targetPath;
     }
+    // Reset the search + reveal count on every (re)load, not only on
+    // navigation: after an upload / delete / folder-create / refresh the
+    // old result list is stale (a new file would stay invisible behind
+    // the filter) and the filter text no longer matches the listing.
+    filesState.searchResults = null;
+    filesState.filterQuery = '';
+    filesState.visibleCount = 100;
+    const filterInput = $('files-filter-input');
+    if (filterInput) filterInput.value = '';
+    $('files-filter-clear')?.classList.add('hidden');
     const tbody = $('files-table-body');
     if (tbody && !tbody.hasChildNodes()) {
       tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-xs font-mono text-zinc-400">Loading files...</td></tr>`;
@@ -2048,27 +2429,44 @@
     const tbody = $('files-table-body');
     const emptyState = $('files-empty-state');
     const countLabel = $('files-count-label');
+    const showMoreBtn = $('files-show-more-btn');
     if (!tbody) return;
     tbody.innerHTML = '';
 
     const q = (filesState.filterQuery || '').trim().toLowerCase();
-    const filtered = filesState.items.filter((item) => !q || item.name.toLowerCase().includes(q));
+    // Recursive search results (when filtering) carry their own list;
+    // otherwise filter the current folder's items.
+    const source = filesState.searchResults || filesState.items;
+    const filtered = filesState.searchResults
+      ? source
+      : filesState.items.filter((item) => !q || item.name.toLowerCase().includes(q));
 
     const foldersCount = filesState.items.filter((i) => i.isDirectory).length;
     const filesCount = filesState.items.length - foldersCount;
     if (countLabel) {
-      countLabel.textContent = `${foldersCount} folder${foldersCount === 1 ? '' : 's'}, ${filesCount} file${filesCount === 1 ? '' : 's'}${
-        filesState.currentPath ? ` in /${filesState.currentPath}` : ' (root storage)'
-      }`;
+      countLabel.textContent = filesState.searchResults
+        ? `${filtered.length} result${filtered.length === 1 ? '' : 's'} for "${filesState.filterQuery}" (recursive, from /${filesState.currentPath || 'root'})`
+        : `${foldersCount} folder${foldersCount === 1 ? '' : 's'}, ${filesCount} file${filesCount === 1 ? '' : 's'}${
+            filesState.currentPath ? ` in /${filesState.currentPath}` : ' (root storage)'
+          }`;
     }
 
     if (filtered.length === 0) {
       if (emptyState) emptyState.classList.remove('hidden');
+      if (showMoreBtn) showMoreBtn.classList.add('hidden');
       return;
     }
     if (emptyState) emptyState.classList.add('hidden');
 
-    filtered.forEach((item, idx) => {
+    // Incremental reveal: 100 rows at a time.
+    const visible = filtered.slice(0, filesState.visibleCount);
+    if (showMoreBtn) {
+      const remaining = filtered.length - visible.length;
+      showMoreBtn.classList.toggle('hidden', remaining <= 0);
+      if (remaining > 0) showMoreBtn.textContent = `Show more (${remaining} remaining)`;
+    }
+
+    visible.forEach((item, idx) => {
       const tr = document.createElement('tr');
       tr.className = 'group hover:bg-zinc-800/50 transition-colors';
 
@@ -2129,7 +2527,7 @@
 
       if (item.isDirectory) {
         tr.querySelector('.file-item-btn').onclick = () => {
-          const next = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+          const next = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
           loadFilesView(next);
         };
       } else if (isImg) {
@@ -2150,7 +2548,7 @@
       if (downloadBtn) {
         downloadBtn.onclick = (e) => {
           e.stopPropagation();
-          const target = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+          const target = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
           downloadFile(target, item.name);
         };
       }
@@ -2189,32 +2587,89 @@
     }
   }
 
+  // Upload files (and folders) to the bridge. Folder upload: each file's
+  // webkitRelativePath is sent as a parallel `paths` field (same order as
+  // `files`; the bridge recreates the folder structure with mkdir -p).
+  // Uses XMLHttpRequest so the upload shows a progress bar (fetch has no
+  // upload-progress events). The `paths` fields are appended BEFORE the
+  // files so the bridge parses them before the first file arrives.
   async function uploadFiles(files) {
     if (!files || files.length === 0) return;
     const base = getFileBridgeBase();
     const formData = new FormData();
-    for (let i = 0; i < files.length; i++) {
-      formData.append('files', files[i]);
+    const fileList = Array.from(files);
+    // Paths first (folder upload), then the files, in the same order.
+    for (const f of fileList) {
+      const rel = f.webkitRelativePath || '';
+      formData.append('paths', rel);
     }
-    showToast(`Uploading ${files.length} file${files.length === 1 ? '' : 's'}...`);
+    for (const f of fileList) {
+      formData.append('files', f);
+    }
+    const isFolder = fileList.some((f) => f.webkitRelativePath);
+    const label = isFolder
+      ? `Uploading folder (${fileList.length} files)...`
+      : `Uploading ${fileList.length} file${fileList.length === 1 ? '' : 's'}...`;
+    showToast(label);
+    showUploadProgress(0, label);
 
     try {
-      const res = await fetch(`${base}/api/files/upload?path=${encodeURIComponent(filesState.currentPath)}`, {
-        method: 'POST',
-        headers: getFileBridgeHeaders(),
-        body: formData,
+      const count = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${base}/api/files/upload?path=${encodeURIComponent(filesState.currentPath)}`);
+        const headers = getFileBridgeHeaders();
+        for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            showUploadProgress(Math.round((e.loaded / e.total) * 100), label);
+          }
+        });
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText || '{}');
+              resolve(data.count ?? fileList.length);
+            } catch {
+              resolve(fileList.length);
+            }
+          } else if (xhr.status === 401) {
+            reject(new Error('401 Unauthorized: Invalid or missing NAS API Key.'));
+          } else {
+            try {
+              const err = JSON.parse(xhr.responseText || '{}');
+              reject(new Error(err.error || `HTTP ${xhr.status}`));
+            } catch {
+              reject(new Error(`HTTP ${xhr.status}`));
+            }
+          }
+        });
+        xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+        xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+        xhr.send(formData);
       });
-      if (!res.ok) {
-        if (res.status === 401) throw new Error('401 Unauthorized: Invalid or missing NAS API Key.');
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
-      showToast(`Successfully uploaded ${files.length} file${files.length === 1 ? '' : 's'}`);
+      hideUploadProgress();
+      showToast(`Successfully uploaded ${count} file${count === 1 ? '' : 's'}`);
       client.request('startScan').catch(() => {});
       loadFilesView();
     } catch (err) {
+      hideUploadProgress();
       showToast(`Upload failed: ${err.message}`, 'error');
     }
+  }
+
+  // Upload progress bar (shown above the files list while uploading).
+  function showUploadProgress(percent, label) {
+    let bar = $('files-upload-progress');
+    if (!bar) return;
+    bar.classList.remove('hidden');
+    const fill = $('files-upload-progress-fill');
+    const text = $('files-upload-progress-text');
+    if (fill) fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    if (text) text.textContent = `${label} ${percent}%`;
+  }
+  function hideUploadProgress() {
+    const bar = $('files-upload-progress');
+    if (bar) bar.classList.add('hidden');
   }
 
   async function deleteFileItem(item) {
@@ -2227,7 +2682,7 @@
     if (!confirmed) return;
 
     const base = getFileBridgeBase();
-    const target = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+    const target = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
     try {
       const res = await fetch(`${base}/api/files?path=${encodeURIComponent(target)}`, {
         method: 'DELETE',
@@ -2253,6 +2708,7 @@
 
     if (!apiKey) {
       showToast('NAS API Key is missing. Please set your API key in Settings.', 'error');
+      return;
     }
 
     try {
@@ -2289,10 +2745,20 @@
   };
 
   function openImageViewer(targetItem) {
-    const images = filesState.items.filter((i) => !i.isDirectory && isImageFile(i.name));
+    // Use the list the user is actually looking at: the recursive search
+    // results when a search is active, otherwise the current folder.
+    // Match by relPath first (a search result lives in a subdirectory and
+    // may share its name with an image in the current folder), falling
+    // back to name for items without one.
+    const source = filesState.searchResults || filesState.items;
+    const images = source.filter((i) => !i.isDirectory && isImageFile(i.name));
     if (!images.length) return;
 
-    let idx = images.findIndex((i) => i.name === targetItem.name);
+    const targetRel = targetItem.relPath || null;
+    let idx = targetRel
+      ? images.findIndex((i) => (i.relPath || null) === targetRel)
+      : -1;
+    if (idx === -1) idx = images.findIndex((i) => i.name === targetItem.name);
     if (idx === -1) idx = 0;
 
     imageViewerState.images = images;
@@ -2345,15 +2811,18 @@
 
     if (spinner) spinner.classList.remove('hidden');
 
-    const relativePath = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+    const relativePath = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
     const base = getFileBridgeBase();
-    const apiKey = getFileBridgeApiKey();
 
-    const rawUrl = new URL(`${base}/api/files/raw`);
-    rawUrl.searchParams.set('path', relativePath);
-    if (apiKey) rawUrl.searchParams.set('apiKey', apiKey);
-
+    // Fetch the image as a blob with the x-api-key header (Century
+    // downloadEndpointUrl). This keeps the key out of the DOM, unlike an
+    // <img> src with ?apiKey. The native download link still uses ?apiKey
+    // (an anchor cannot set headers).
     if (img) {
+      if (img._blobUrl) {
+        URL.revokeObjectURL(img._blobUrl);
+        img._blobUrl = null;
+      }
       img.onload = () => {
         if (spinner) spinner.classList.add('hidden');
         if (metaEl) {
@@ -2366,7 +2835,23 @@
           metaEl.textContent = `Failed to load preview · ${formatFileSize(item.size)}`;
         }
       };
-      img.src = rawUrl.toString();
+      fetch(`${base}/api/files/raw?path=${encodeURIComponent(relativePath)}`, {
+        headers: getFileBridgeHeaders(),
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.blob();
+        })
+        .then((blob) => {
+          img._blobUrl = URL.createObjectURL(blob);
+          img.src = img._blobUrl;
+        })
+        .catch(() => {
+          if (spinner) spinner.classList.add('hidden');
+          if (metaEl) {
+            metaEl.textContent = `Failed to load preview · ${formatFileSize(item.size)}`;
+          }
+        });
       img.style.transform = `scale(${zoom})`;
     }
   }
@@ -2400,7 +2885,7 @@
     const { images, currentIndex } = imageViewerState;
     if (!images.length) return;
     const item = images[currentIndex];
-    const target = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+    const target = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
     downloadFile(target, item.name);
   }
 
@@ -2479,26 +2964,38 @@
     // Refresh button
     on('files-refresh-btn', 'click', () => loadFilesView());
 
-    // Filter input
+    // Filter input: recursive search (BFS walk) when a query is set;
+    // clearing it returns to the current folder's listing.
     const filterInput = $('files-filter-input');
     const filterClear = $('files-filter-clear');
+    let filesSearchTimer = null;
     if (filterInput) {
       filterInput.addEventListener('input', (e) => {
         filesState.filterQuery = e.target.value;
         if (filterClear) filterClear.classList.toggle('hidden', !e.target.value);
-        renderFilesList();
+        if (filesSearchTimer) clearTimeout(filesSearchTimer);
+        const q = filesState.filterQuery;
+        if (!q.trim()) {
+          filesState.searchResults = null;
+          filesState.visibleCount = 100;
+          renderFilesList();
+          return;
+        }
+        filesSearchTimer = setTimeout(() => searchFilesRecursive(q), 300);
       });
     }
     if (filterClear) {
       filterClear.addEventListener('click', () => {
         if (filterInput) filterInput.value = '';
         filesState.filterQuery = '';
+        filesState.searchResults = null;
+        filesState.visibleCount = 100;
         filterClear.classList.add('hidden');
         renderFilesList();
       });
     }
 
-    // Upload input
+    // Upload input (files)
     const uploadInput = $('files-upload-input');
     if (uploadInput) {
       uploadInput.addEventListener('change', (e) => {
@@ -2508,6 +3005,25 @@
         }
       });
     }
+
+    // Upload folder input (webkitdirectory): the files carry
+    // webkitRelativePath, which uploadFiles sends as the `paths` field so
+    // the bridge recreates the folder structure.
+    const uploadFolderInput = $('files-upload-folder-input');
+    if (uploadFolderInput) {
+      uploadFolderInput.addEventListener('change', (e) => {
+        if (e.target.files?.length) {
+          uploadFiles(e.target.files);
+          uploadFolderInput.value = '';
+        }
+      });
+    }
+
+    // Incremental reveal: show the next 100 rows.
+    on('files-show-more-btn', 'click', () => {
+      filesState.visibleCount += 100;
+      renderFilesList();
+    });
 
     // Bridge recheck & URL save
     on('files-retry-bridge-btn', 'click', () => {
@@ -2578,7 +3094,12 @@
 
   function queueSignature() {
     const q = audioEngine?.queue || [];
-    return `${q.length}:${audioEngine?.currentIndex}:${q[0]?.id}:${q[q.length - 1]?.id}:${audioEngine?.currentSong?.id}`;
+    // Include EVERY song id, not just the first/last: two different queues
+    // can share length + first + last + current song (e.g. two lists that
+    // start and end on the same tracks), and the old first/last-only
+    // signature made renderQueueViews skip the re-render, leaving the
+    // previous queue visible in the drawer after playing new music.
+    return `${q.length}:${audioEngine?.currentIndex}:${q.map((s) => s.id).join(',')}:${audioEngine?.currentSong?.id}`;
   }
 
   function buildQueueList(container) {
@@ -2644,7 +3165,7 @@
       };
       right.appendChild(mk('chevron-up', 'Move up', () => { audioEngine.moveQueueItem(idx, idx - 1); renderQueueViews(true); }, idx === 0));
       right.appendChild(mk('chevron-down', 'Move down', () => { audioEngine.moveQueueItem(idx, idx + 1); renderQueueViews(true); }, idx === q.length - 1));
-      right.appendChild(mk('more-horizontal', 'Track options', (e) => openTrackContextMenu(e, song, idx)));
+      right.appendChild(mk('more-vertical', 'Track options', (e) => openTrackContextMenu(e, song, idx)));
       right.appendChild(mk('x', 'Remove from queue', () => { audioEngine.removeFromQueue(idx); renderQueueViews(true); }, false, 'hover:!text-[#f0605a]'));
 
       item.appendChild(left);
@@ -2653,6 +3174,16 @@
     });
     queueTranslations(q.slice(0, 80).map((s) => ({ title: s.title, artist: s.artist })));
     refreshIcons();
+    // Scroll the currently playing track into view, so opening the queue
+    // lands on the song that's playing instead of the top of the list.
+    // 'nearest' only scrolls when the row is off-screen, so it never yanks
+    // the list while the user is browsing it. (buildQueueList only runs
+    // when the queue signature changes, i.e. on track/queue change, not on
+    // every timeupdate.)
+    const currentRow = container.querySelector('[data-active="true"]');
+    if (currentRow && typeof currentRow.scrollIntoView === 'function') {
+      currentRow.scrollIntoView({ block: 'nearest' });
+    }
   }
 
   function renderQueueViews(force = false) {
@@ -2819,9 +3350,32 @@
     const L = state.lyrics;
     const song = audioEngine?.currentSong;
     if (!song || !L.result?.lines || L.romaji || L.preparing) return;
+    // Prefer the relay's sidecars (kuroshiro / Gemini / Google, server-side) — instant, no extra network.
+    const res = L.result;
+    if (Array.isArray(res.romajiLines) && res.romajiLines.length === res.lines.length) {
+      L.romaji = res.lines.map((l, i) => ({ t: l.t, timeSeconds: l.timeSeconds ?? l.t, text: res.romajiLines[i] ?? '' }));
+    }
+    if (Array.isArray(res.translationLines) && res.translationLines.length === res.lines.length) {
+      L.en = res.lines.map((l, i) => ({ t: l.t, timeSeconds: l.timeSeconds ?? l.t, text: res.translationLines[i] ?? '' }));
+    }
+    if (L.romaji || L.en) {
+      // Fill whichever side is missing from the other (romaji-only or EN-only result).
+      if (!L.romaji) L.romaji = res.lines.map((l) => ({ t: l.t, timeSeconds: l.timeSeconds ?? l.t, text: l.text }));
+      if (!L.en) L.en = res.lines.map((l) => ({ t: l.t, timeSeconds: l.timeSeconds ?? l.t, text: l.text }));
+      renderAllLyrics();
+      return;
+    }
+    // Fallback (manual LRCLIB candidate, or a relay result without sidecars):
+    // derive via the relay (kuroshiro / Gemini / Google, server-side), then
+    // client-side Google Translate + offline Hepburn if the relay is down.
     L.preparing = true;
     renderAllLyrics();
-    const { romaji, en } = await processJapaneseLyrics(L.result.lines, song.id);
+    let { romaji, en } = await lyricsManager.deriveReadings(L.result.lines, song.id);
+    if (!romaji || !en) {
+      const fallback = await processJapaneseLyrics(L.result.lines, song.id);
+      romaji = romaji || fallback.romaji;
+      en = en || fallback.en;
+    }
     if (audioEngine?.currentSong?.id !== song.id) return;
     L.romaji = romaji;
     L.en = en;
@@ -2895,13 +3449,31 @@
 
     const lines = getDisplayLines();
     const mode = lyricsManager.getTrackMode(L.trackId);
+    const wordSweep = lyricsManager.getWordSweep();
+    const splitBg = lyricsManager.getSplitBackground();
     container.innerHTML = '<div class="py-[30%]"></div>';
     const wrap = container.firstElementChild;
     lines.forEach((line, idx) => {
       const el = document.createElement('div');
       el.setAttribute('data-idx', String(idx));
-      el.className = `lyric-line cursor-pointer px-4 py-2 leading-snug text-zinc-400 hover:text-zinc-100 ${view.size}`;
-      if (mode === 'original' && line.words && line.words.length > 0) {
+      // Background vocal: small + dim below its parent lead (Morphe model).
+      // A BG line with no parent lead renders as a normal line (defensive
+      // rule for a stray first-line isBG flag from the relay).
+      const isBg = Boolean(line.isBG) && splitBg;
+      const parentIdx = isBg ? findBgParentIndex(lines, idx) : -1;
+      const renderAsBg = isBg && parentIdx >= 0;
+      if (renderAsBg) {
+        el.setAttribute('data-parent', String(parentIdx));
+        // No py-2 / size class here: .lyric-line-bg owns the vertical
+        // padding (0 closed, 0.25rem open) and the 0.82em font size. The
+        // Tailwind Play stylesheet loads after style.css, so a py-2 or
+        // text-sm utility on this element would beat the BG rules and the
+        // closed line would keep a 16px height instead of collapsing to 0.
+        el.className = 'lyric-line lyric-line-bg cursor-pointer px-4 leading-snug';
+      } else {
+        el.className = `lyric-line cursor-pointer px-4 py-2 leading-snug text-zinc-400 hover:text-zinc-100 ${view.size}`;
+      }
+      if (mode === 'original' && wordSweep && line.words && line.words.length > 0) {
         line.words.forEach((w) => {
           const span = document.createElement('span');
           span.className = 'lyric-word lyric-word-unsung';
@@ -2915,10 +3487,18 @@
       }
       el.addEventListener('click', () => {
         const offset = lyricsManager.getTrackOffset(L.trackId);
-        audioEngine.seek(Math.max(0, line.timeSeconds - offset));
+        // Clicking a BG line seeks + its parent lead becomes the active line.
+        const seekTo = renderAsBg ? (lines[parentIdx].timeSeconds ?? lines[parentIdx].t ?? line.timeSeconds) : line.timeSeconds;
+        audioEngine.seek(Math.max(0, seekTo - offset));
       });
       wrap.appendChild(el);
     });
+    // Instrumental dots element (one per view; shown only inside a >=10s gap).
+    const dots = document.createElement('div');
+    dots.className = 'lyric-dots hidden px-4 py-2';
+    dots.setAttribute('role', 'status');
+    dots.innerHTML = '<span class="lyric-dot"></span><span class="lyric-dot"></span><span class="lyric-dot"></span>';
+    wrap.appendChild(dots);
   }
 
   function scrollLineIntoCenter(container, el) {
@@ -2937,8 +3517,12 @@
     const lines = getDisplayLines();
     const deck = audioEngine.getActiveDeck();
     const time = (deck.currentTime || audioEngine.currentTime || 0) + lyricsManager.getTrackOffset(song.id);
-    const idx = findActiveLineIndex(lines, time);
+    // The active line is always a lead line — a BG line never becomes active.
+    const idx = findActiveLeadIndex(lines, time);
     L.activeIdx = idx;
+    // Instrumental gap the playback time is currently inside (if any).
+    const gaps = findInstrumentalGaps(lines, song.duration || 0);
+    const gap = gaps.find((g) => time >= g.start && time < g.end) || null;
 
     for (const view of lyricViews) {
       if (!view.visible()) continue;
@@ -2951,7 +3535,15 @@
         els.forEach((el, i) => {
           const active = i === idx;
           el.classList.toggle('lyric-line-active', active);
-          el.classList.toggle('text-zinc-400', !active && !el.querySelector('.lyric-word'));
+          // Never put text-zinc-400 on a BG line: its sage-dim colour comes
+          // from .lyric-line-bg, and the zinc utility would override it.
+          const isBgLine = el.classList.contains('lyric-line-bg');
+          el.classList.toggle('text-zinc-400', !active && !isBgLine && !el.querySelector('.lyric-word'));
+          // BG line: open (expand + fade in) only while its parent lead is active.
+          if (el.classList.contains('lyric-line-bg')) {
+            const parent = parseInt(el.getAttribute('data-parent') || '-1', 10);
+            el.classList.toggle('lyric-line-bg-open', parent === idx);
+          }
           // Reset word state for non-active lines
           if (!active) {
             el.querySelectorAll('.lyric-word').forEach((w) => {
@@ -2964,6 +3556,27 @@
         });
         if (idx >= 0 && els[idx]) scrollLineIntoCenter(container, els[idx]);
         view.lastIdx = idx;
+      }
+
+      // Instrumental dots: show after the active line while inside a gap.
+      const dots = container.querySelector('.lyric-dots');
+      if (dots) {
+        if (gap && idx >= 0 && els[idx]) {
+          const progress = Math.max(0, Math.min(1, (time - gap.start) / Math.max(0.01, gap.end - gap.start)));
+          const filled = Math.min(3, Math.round(progress * 3));
+          dots.classList.remove('hidden');
+          dots.setAttribute('aria-label', `Instrumental break, ${filled} of 3`);
+          dots.querySelectorAll('.lyric-dot').forEach((d, di) => {
+            d.classList.toggle('lyric-dot-filled', di < filled);
+          });
+          // Keep the dots directly after the active line.
+          if (els[idx].nextElementSibling !== dots) els[idx].after(dots);
+        } else {
+          dots.classList.add('hidden');
+          // Reset the label with the fill count so a hidden dots element
+          // never carries a stale "Instrumental break, N of 3".
+          dots.removeAttribute('aria-label');
+        }
       }
 
       // Word-level karaoke fill on the active line
@@ -3030,6 +3643,23 @@
   }
 
   let lastSigCoverId = null;
+
+  // Update every lyrics-offset display (Signature Room + Now Playing).
+  function updateLyricsOffsetDisplays() {
+    const song = audioEngine?.currentSong;
+    const offset = song ? lyricsManager.getTrackOffset(song.id) : 0;
+    const text = `${offset >= 0 ? '+' : ''}${offset.toFixed(1)}s`;
+    const sig = $('sig-offset-value');
+    if (sig) sig.textContent = text;
+    const np = $('np-offset-value');
+    if (np) np.textContent = text;
+    const npControls = $('np-offset-controls');
+    if (npControls) {
+      const showNp = Boolean(song) && state.route === 'now-playing' && state.npTab === 'lyrics';
+      npControls.classList.toggle('hidden', !showNp);
+      npControls.classList.toggle('flex', showNp);
+    }
+  }
 
   function updateSignatureMetadataUI(force = false) {
     const song = audioEngine?.currentSong;
@@ -3247,6 +3877,7 @@
     style($('np-tab-queue'), queueActive);
     style($('np-tab-lyrics'), !queueActive);
     show($('np-clear-queue-btn'), queueActive);
+    updateLyricsOffsetDisplays();
     renderQueueViews(true);
     updateLyricsVisibilityDependents();
     if (!queueActive) renderAllLyrics();
@@ -3288,6 +3919,16 @@
       lastNpTrackId = song.id;
       attachCoverImage($('np-cover-img'), $('np-cover-fallback'), song.coverArt || song.albumId, song.id, 700);
       attachCoverImage($('np-mobile-cover-img'), $('np-mobile-cover-fallback'), song.coverArt || song.albumId, song.id, 700);
+      // Ambient wash: blurred cover behind the whole Now Playing view.
+      const backdrop = $('np-backdrop-art');
+      const coverId = song.coverArt || song.albumId;
+      if (backdrop && coverId) {
+        backdrop.style.backgroundImage = `url("${client.getCoverArtUrl(coverId, 300)}")`;
+        backdrop.style.backgroundSize = 'cover';
+        backdrop.style.backgroundPosition = 'center';
+      } else if (backdrop) {
+        backdrop.style.backgroundImage = '';
+      }
     }
     setNpTab(state.npTab);
   }
@@ -3364,6 +4005,8 @@
     if (!song) {
       $('player-title-btn').textContent = 'No track selected';
       $('player-artist-btn').textContent = 'Select any song or album to begin playback';
+      $('player-album-btn')?.classList.add('hidden');
+      $('player-album-sep')?.classList.add('hidden');
       $('mobile-mini-title').textContent = 'No track selected';
       $('mobile-mini-artist').textContent = 'Select a track to play';
       lastPlayerTrackId = null;
@@ -3377,6 +4020,16 @@
       lastTranslationStamp = stamp;
       $('player-title-btn').innerHTML = titleHtml(song.title || 'Untitled Track', song.artist);
       $('player-artist-btn').textContent = song.artist || 'Unknown Artist';
+      // Album button (bottom bar): shows the album name and opens the album
+      // detail when clicked. Hidden when the song has no album.
+      const albumBtn = $('player-album-btn');
+      const albumSep = $('player-album-sep');
+      if (albumBtn) {
+        const hasAlbum = Boolean(song.album);
+        albumBtn.textContent = song.album || '';
+        albumBtn.classList.toggle('hidden', !hasAlbum);
+        albumSep?.classList.toggle('hidden', !hasAlbum);
+      }
       $('mobile-mini-title').innerHTML = titleHtml(song.title || 'Untitled Track', song.artist);
       $('mobile-mini-artist').textContent = song.artist || 'Unknown Artist';
       queueTranslations([{ title: song.title, artist: song.artist }]);
@@ -3459,13 +4112,19 @@
   // Settings modal
   // ============================================================================
   function setSettingsTab(tab) {
+    const playback = tab === 'playback';
     const audio = tab === 'audio';
     const server = tab === 'server';
     const nas = tab === 'nas';
+    const lyrics = tab === 'lyrics';
+    const library = tab === 'library';
 
+    show($('settings-tab-playback'), playback);
     show($('settings-tab-audio'), audio);
     show($('settings-tab-server'), server);
     show($('settings-tab-nas'), nas);
+    show($('settings-tab-lyrics'), lyrics);
+    show($('settings-tab-library'), library);
 
     const style = (btn, active) => {
       if (!btn) return;
@@ -3475,9 +4134,12 @@
       btn.classList.toggle('border-transparent', !active);
       btn.classList.toggle('text-zinc-400', !active);
     };
+    style($('settings-tab-btn-playback'), playback);
     style($('settings-tab-btn-audio'), audio);
     style($('settings-tab-btn-server'), server);
     style($('settings-tab-btn-nas'), nas);
+    style($('settings-tab-btn-lyrics'), lyrics);
+    style($('settings-tab-btn-library'), library);
 
     if (nas) {
       checkFilesBridge();
@@ -3518,6 +4180,15 @@
     $('settings-stream-quality').value = audioEngine.streamQuality;
     $('settings-translated-titles-toggle').checked = titles.isEnabled();
     $('settings-history-count').textContent = `${historyStore.entries.length} plays recorded locally`;
+
+    const wordSweepToggle = $('settings-word-sweep-toggle');
+    if (wordSweepToggle) wordSweepToggle.checked = lyricsManager.getWordSweep();
+    const splitBgToggle = $('settings-split-bg-toggle');
+    if (splitBgToggle) splitBgToggle.checked = lyricsManager.getSplitBackground();
+    const splitAlbumsToggle = $('settings-split-albums-toggle');
+    if (splitAlbumsToggle) splitAlbumsToggle.checked = getSplitAlbumsSingles();
+    const autoplayToggle = $('settings-autoplay-toggle');
+    if (autoplayToggle) autoplayToggle.checked = audioEngine.autoplay;
 
     $('settings-server-url').value = client.baseUrl;
     $('settings-server-user').value = client.username;
@@ -3575,6 +4246,9 @@
     on('mobile-back-btn', 'click', goBack);
     on('mobile-search-btn', 'click', () => navigateTo('search'));
     document.querySelectorAll('.sidebar-nav-btn[data-route]').forEach((btn) => {
+      btn.addEventListener('click', () => navigateTo(btn.getAttribute('data-route')));
+    });
+    document.querySelectorAll('.mobile-tab-btn[data-route]').forEach((btn) => {
       btn.addEventListener('click', () => navigateTo(btn.getAttribute('data-route')));
     });
     on('nav-settings', 'click', () => openSettings('audio'));
@@ -3771,6 +4445,10 @@
       const id = audioEngine?.currentSong?.artistId;
       if (id) openArtistDetail(id);
     });
+    on('player-album-btn', 'click', () => {
+      const id = audioEngine?.currentSong?.albumId;
+      if (id) openAlbumDetail(id);
+    });
     const starCurrent = () => audioEngine?.currentSong && toggleStarTrack(audioEngine.currentSong);
     ['player-star-btn', 'np-star-btn', 'np-mobile-star-btn'].forEach((id) => on(id, 'click', starCurrent));
     ['player-more-btn', 'np-more-btn', 'np-mobile-more-btn'].forEach((id) =>
@@ -3862,12 +4540,15 @@
       const song = audioEngine?.currentSong;
       if (!song) return;
       lyricsManager.setTrackOffset(song.id, delta === null ? 0 : lyricsManager.getTrackOffset(song.id) + delta);
-      updateSignatureMetadataUI();
+      updateLyricsOffsetDisplays();
       syncLyrics(true);
     };
     on('sig-offset-minus', 'click', () => nudgeOffset(-0.2));
     on('sig-offset-plus', 'click', () => nudgeOffset(0.2));
     on('sig-offset-reset', 'click', () => nudgeOffset(null));
+    on('np-offset-minus', 'click', () => nudgeOffset(-0.2));
+    on('np-offset-plus', 'click', () => nudgeOffset(0.2));
+    on('np-offset-reset', 'click', () => nudgeOffset(null));
     ['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach((evt) => {
       $('signature-modal')?.addEventListener(evt, wakeSignatureChrome, { passive: true });
     });
@@ -3877,6 +4558,11 @@
       const s = state.ctxSong;
       closeTrackContextMenu();
       if (s) audioEngine.playQueue([s], 0, { shuffle: false });
+    });
+    on('ctx-start-radio', 'click', () => {
+      const s = state.ctxSong;
+      closeTrackContextMenu();
+      if (s) startRadio(s);
     });
     on('ctx-play-next', 'click', () => {
       if (state.ctxSong) {
@@ -3937,19 +4623,36 @@
 
     // Settings
     on('settings-modal-close-btn', 'click', closeSettings);
-    on('settings-done-btn', 'click', closeSettings);
     $('settings-modal')?.addEventListener('click', (e) => {
       if (e.target === $('settings-modal')) closeSettings();
     });
+    on('settings-tab-btn-playback', 'click', () => setSettingsTab('playback'));
     on('settings-tab-btn-audio', 'click', () => setSettingsTab('audio'));
     on('settings-tab-btn-server', 'click', () => setSettingsTab('server'));
     on('settings-tab-btn-nas', 'click', () => setSettingsTab('nas'));
+    on('settings-tab-btn-lyrics', 'click', () => setSettingsTab('lyrics'));
+    on('settings-tab-btn-library', 'click', () => setSettingsTab('library'));
+    on('settings-split-albums-toggle', 'change', (e) => {
+      setSplitAlbumsSingles(e.target.checked);
+      // Re-render the albums view (and the discography if visible)
+      libraryViews.albums?.load(true);
+      if (state.route === 'artist-detail') navigateTo('artist-detail');
+    });
+    on('settings-word-sweep-toggle', 'change', (e) => {
+      lyricsManager.setWordSweep(e.target.checked);
+      renderAllLyrics();
+    });
+    on('settings-split-bg-toggle', 'change', (e) => {
+      lyricsManager.setSplitBackground(e.target.checked);
+      renderAllLyrics();
+    });
     on('settings-output-device', 'change', (e) => audioEngine.setOutputDevice(e.target.value || 'default'));
     on('settings-crossfade-slider', 'input', (e) => {
       const v = parseInt(e.target.value, 10) || 0;
       audioEngine.setCrossfadeSeconds(v);
       $('settings-crossfade-label').textContent = v === 0 ? '0s (Gapless cut)' : `${v}s`;
     });
+    on('settings-autoplay-toggle', 'change', (e) => audioEngine.setAutoplay(e.target.checked));
     $('settings-norm-group')?.querySelectorAll('[data-norm]').forEach((btn) => {
       btn.addEventListener('click', () => {
         audioEngine.setNormalization(btn.getAttribute('data-norm'));
@@ -4178,9 +4881,20 @@
   async function init() {
     applySidebarState();
     await loadViewTemplates();
-    await client.loadEnvConfig();
 
-    audioEngine = new GaplessAudioEngine(client, historyStore, lastFm, updatePlayerBarUI);
+    audioEngine = new GaplessAudioEngine(client, historyStore, updatePlayerBarUI, (err, song) => {
+      // A stream failed to play (network / decode / server error).
+      // The engine already cleared isPlaying; tell the user what happened.
+      const label = song ? ` "${song.title || 'Untitled'}"` : '';
+      showToast(`Couldn't play${label}. Check the connection and try again.`);
+    });
+    // Radio / autoplay (Century M1): when the queue runs out, the engine
+    // asks the app for similar tracks to keep playing.
+    // Autoplay: exclude every track already in the queue (Century
+    // enqueueAutoplayTracks passes the whole queue as excludeSongIds), so
+    // radio never replays something the user already heard or queued.
+    audioEngine.onAutoplayNeeded = (lastSong) =>
+      generateRadioTracks(lastSong, 25, (audioEngine.queue || []).map((s) => s.id));
 
     initLibraryViews();
     setupSearchHandlers();
@@ -4188,13 +4902,6 @@
     renderSearchResults();
     updatePlayerBarUI();
     requestAnimationFrame(lyricsFrameLoop);
-
-    // Last.fm OAuth callback token (if the user connected scrobbling before)
-    const lfmToken = new URLSearchParams(window.location.search).get('token');
-    if (lfmToken) {
-      window.history.replaceState({}, document.title, window.location.pathname);
-      lastFm.handleCallbackToken(lfmToken).then((s) => showToast(`Connected to Last.fm as ${s.name}`)).catch(() => {});
-    }
 
     await Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]);
     navigateTo('home');

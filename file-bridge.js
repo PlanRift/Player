@@ -50,31 +50,42 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Authentication middleware:
-// Supports 'x-api-key' (or 'X-API-Key') in headers, or 'apiKey' / 'api-key' / 'key' in query parameters.
+// Authentication middleware (Century bridge):
+// x-api-key header on EVERY request. Native browser downloads cannot set
+// headers, so /api/files/download also accepts ?apiKey (or ?key).
+// Every other endpoint requires the header; a query-string key is NOT
+// accepted there (it would leak the key into logs and referrers).
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return next();
 
+  const isDownload = req.path === '/api/files/download';
   const apiKey =
     req.headers['x-api-key'] ||
     req.headers['X-API-Key'] ||
-    req.query.apiKey ||
-    req.query['api-key'] ||
-    req.query.key;
+    (isDownload ? req.query.apiKey || req.query.key || req.query['x-api-key'] : undefined);
 
   if (!apiKey || apiKey !== NAS_API_KEY) {
     return res.status(401).json({
-      error: 'Unauthorized: Invalid or missing API key (provide x-api-key header or ?apiKey= parameter)'
+      error: 'Unauthorized: Invalid or missing API key (provide x-api-key header' +
+        (isDownload ? ' or ?apiKey= parameter' : '') + ')'
     });
   }
   next();
 });
 
-const safe = (sub = '') => {
-  const norm = path.normalize(path.join(STORAGE_DIR, sub));
-  if (!norm.startsWith(STORAGE_DIR)) throw new Error('Access denied: path traversal');
-  return norm;
+// Resolve a client-supplied relative path inside the storage root.
+// Throws when the resolved path would escape the root. (Century
+// resolveSafePath: the root + path.sep check also rejects a sibling
+// directory whose name merely starts with the root, e.g. /storage-evil.)
+const resolveSafePath = (sub = '') => {
+  const root = path.resolve(STORAGE_DIR);
+  const target = path.resolve(root, sub);
+  if (target !== root && !target.startsWith(root + path.sep)) {
+    throw new Error('Access denied: path traversal');
+  }
+  return target;
 };
+const safe = resolveSafePath;
 
 // 1. List directory
 app.get('/api/files', async (req, res) => {
@@ -101,7 +112,14 @@ app.get('/api/files', async (req, res) => {
 // 2. Create new folder
 app.post('/api/files/folder', async (req, res) => {
   try {
-    const target = safe(path.join(req.body.path || '', req.body.name || ''));
+    // Century parity: a folder name must be a single segment — reject
+    // '/', '\', '.', '..' with a 400 instead of silently creating
+    // nested folders (or surfacing a 500 for '..').
+    const name = String(req.body.name || '');
+    if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid folder name' });
+    }
+    const target = safe(path.join(req.body.path || '', name));
     await fs.mkdir(target, { recursive: true });
     res.json({ success: true });
   } catch (err) {
@@ -109,17 +127,80 @@ app.post('/api/files/folder', async (req, res) => {
   }
 });
 
-// 3. Upload files
+// 3. Upload files (Century bridge: folder upload via a parallel `paths`
+// form field — one webkitRelativePath per file, in the same order as the
+// `files`. The client must append all `paths` BEFORE any `files` so the
+// field is parsed before the first file's destination runs.)
+// A per-request file index (req._uploadFileIndex) pairs each file with its
+// path. Without a path, the file lands by basename in the destination
+// (the previous behaviour). A path that escapes the destination is SKIPPED
+// (not saved, not counted) — matching Century's `continue`, and the
+// PORT-PLAN ("a path that escapes the destination is skipped, not an
+// error"). The fileFilter below enforces the skip; the destination
+// fallback is defense-in-depth only.
+function isUnsafeRelPath(relPath) {
+  if (!relPath) return false;
+  if (relPath.startsWith('/') || relPath.startsWith('\\')) return true;
+  return relPath.split(/[/\\]/).some((seg) => seg === '..');
+}
+
 const upload = multer({
+  fileFilter: (req, file, cb) => {
+    // Pair this file with its `paths` entry (same index). The index is
+    // incremented here so destination/filename see (index - 1) for it.
+    const idx = req._uploadFileIndex || 0;
+    req._uploadFileIndex = idx + 1;
+    const paths = req.body?.paths;
+    const pathsList = Array.isArray(paths) ? paths : (paths ? [paths] : []);
+    const relPath = pathsList[idx] ? String(pathsList[idx]).trim() : '';
+    // Unsafe path (absolute, or a `..` segment): skip the file entirely.
+    if (isUnsafeRelPath(relPath)) return cb(null, false);
+    return cb(null, true);
+  },
   storage: multer.diskStorage({
     destination: (req, f, cb) => {
       try {
-        cb(null, safe(req.query.path || ''));
+        const dest = safe(req.query.path || '');
+        const idx = (req._uploadFileIndex || 1) - 1;
+        const paths = req.body?.paths;
+        const pathsList = Array.isArray(paths) ? paths : (paths ? [paths] : []);
+        const relPath = pathsList[idx] ? String(pathsList[idx]).trim() : '';
+        let dir = dest;
+        if (relPath) {
+          if (isUnsafeRelPath(relPath)) {
+            // Defense-in-depth (fileFilter already rejects these): fall
+            // back to basename in the destination.
+            fsSync.mkdirSync(dest, { recursive: true });
+            return cb(null, dest);
+          }
+          let target;
+          try {
+            target = safe(path.join(dest, relPath));
+          } catch {
+            fsSync.mkdirSync(dest, { recursive: true });
+            return cb(null, dest);
+          }
+          if (target === dest || !target.startsWith(dest + path.sep)) {
+            fsSync.mkdirSync(dest, { recursive: true });
+            return cb(null, dest);
+          }
+          dir = path.dirname(target);
+        }
+        fsSync.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
       } catch (err) {
         cb(err);
       }
     },
-    filename: (req, f, cb) => cb(null, f.originalname),
+    filename: (req, f, cb) => {
+      // The file whose destination was just computed is index (count - 1).
+      const idx = (req._uploadFileIndex || 1) - 1;
+      const paths = req.body?.paths;
+      const pathsList = Array.isArray(paths) ? paths : (paths ? [paths] : []);
+      const relPath = pathsList[idx] ? String(pathsList[idx]).trim() : '';
+      const name = relPath ? path.basename(relPath) : path.basename(f.originalname);
+      cb(null, name && name !== '.' && name !== '..' ? name : 'file');
+    },
   }),
 });
 

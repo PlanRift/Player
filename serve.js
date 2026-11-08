@@ -14,7 +14,6 @@ const MIME_TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
-  '.env': 'text/plain; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -53,6 +52,13 @@ const server = http.createServer((req, res) => {
   if (!safePath.startsWith(__dirname)) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     res.end('403 Forbidden');
+    return;
+  }
+
+  // Never serve dotfiles (e.g. .env) — credentials live in localStorage / Settings, not on disk.
+  if (path.basename(safePath).startsWith('.')) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('404 Not Found');
     return;
   }
 

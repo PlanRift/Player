@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Plenrip Audio</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="vendor/tailwind-play-3.4.16.js"></script><!-- Tailwind Play 3.4.16, vendored (was cdn.tailwindcss.com, unpinned) -->
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -17,6 +17,12 @@
             display: ['"Geist Serif"', 'Georgia', 'serif']
           },
           colors: {
+            // `primary` is the sage accent (#8ab8a0) — Century's
+            // --color-primary. Without it, `text-primary` /
+            // `ring-primary` generate no CSS rule in Tailwind Play,
+            // so the mobile tab bar's active state rendered near-white
+            // instead of sage.
+            primary: 'var(--primary)',
             zinc: {
               950: 'var(--background)',
               900: 'var(--card)',
@@ -40,8 +46,8 @@
       }
     };
   </script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="./vendor/crypto-js-4.1.1.min.js"></script>
+  <script src="vendor/lucide.min.js"></script><!-- lucide 1.70.0, vendored (was unpkg lucide@latest) -->
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" type="image/png" href="/img/logo.png">
 </head>
@@ -233,9 +239,6 @@
           class="studio-panel max-w-7xl mx-auto pointer-events-auto shadow-2xl bg-zinc-900/95 backdrop-blur-md border border-zinc-700">
           <!-- Mobile Mini-Player (< md) -->
           <div class="md:hidden flex flex-col">
-            <div class="w-full h-1 bg-zinc-800 relative">
-              <div id="mobile-mini-progress" class="h-full bg-emerald-400 w-0"></div>
-            </div>
             <div class="p-2 flex items-center justify-between gap-2">
               <button id="mobile-mini-track-btn" type="button"
                 class="flex items-center gap-2.5 min-w-0 flex-1 text-left">
@@ -263,6 +266,10 @@
                   <i data-lucide="skip-forward" class="w-4 h-4"></i>
                 </button>
               </div>
+            </div>
+            <!-- Thin progress line at the pill's BOTTOM edge (Century) -->
+            <div class="w-full h-1 bg-zinc-800 relative">
+              <div id="mobile-mini-progress" class="h-full bg-emerald-400 w-0"></div>
             </div>
           </div>
 
@@ -314,10 +321,16 @@
                     class="block max-w-full truncate text-xs font-medium text-zinc-100 hover:text-emerald-400 text-left">
                     No track selected
                   </button>
-                  <button id="player-artist-btn" type="button"
-                    class="block max-w-full truncate text-[11px] text-zinc-400 hover:text-zinc-200 text-left">
-                    Select any song or album to begin playback
-                  </button>
+                  <div class="flex items-center gap-1 min-w-0 text-[11px] text-zinc-400">
+                    <button id="player-artist-btn" type="button" title="Open Artist Page"
+                      class="truncate hover:text-zinc-200 text-left shrink-0 max-w-[45%]">
+                      Select any song or album to begin playback
+                    </button>
+                    <span id="player-album-sep" aria-hidden="true" class="hidden shrink-0">—</span>
+                    <button id="player-album-btn" type="button" title="Open Album"
+                      class="truncate hover:text-zinc-200 text-left hidden">
+                    </button>
+                  </div>
                 </div>
 
                 <button id="player-star-btn" type="button" aria-label="Star current track" title="Star current track"
@@ -326,11 +339,13 @@
                 </button>
               </div>
 
-              <!-- Right: Context Menu, Lyrics Drawer, Signature Room, Queue Drawer, Volume -->
+              <!-- Right: Queue, Lyrics Drawer, Signature Room, Volume, Context Menu (Century order) -->
               <div class="flex items-center justify-end gap-1 shrink-0">
-                <button id="player-more-btn" type="button" aria-label="Current track options" title="Track options"
-                  class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
-                  <i data-lucide="more-horizontal" class="w-4 h-4"></i>
+                <button id="btn-queue" type="button" aria-label="Toggle playback queue drawer" title="Toggle Queue (Q)"
+                  class="h-8 px-2 flex items-center gap-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+                  <i data-lucide="list-music" class="w-4 h-4"></i>
+                  <span id="player-queue-count"
+                    class="px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-emerald-400">0</span>
                 </button>
 
                 <button id="btn-lyrics-drawer" type="button" aria-label="Toggle Lyrics Drawer"
@@ -345,13 +360,6 @@
                   <i data-lucide="maximize-2" class="w-4 h-4"></i>
                 </button>
 
-                <button id="btn-queue" type="button" aria-label="Toggle playback queue drawer" title="Toggle Queue (Q)"
-                  class="h-8 px-2 flex items-center gap-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
-                  <i data-lucide="list-music" class="w-4 h-4"></i>
-                  <span id="player-queue-count"
-                    class="px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-emerald-400">0</span>
-                </button>
-
                 <div class="flex items-center gap-1.5 pl-1 border-l border-zinc-800">
                   <button id="btn-mute" type="button" aria-label="Toggle mute" title="Mute / Unmute"
                     class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100">
@@ -361,6 +369,11 @@
                   <input id="volume-slider" type="range" min="0" max="1" step="0.01" value="0.85"
                     aria-label="Master volume" class="studio-range-thin w-16 sm:w-20" />
                 </div>
+
+                <button id="player-more-btn" type="button" aria-label="Current track options" title="Track options"
+                  class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+                  <i data-lucide="more-vertical" class="w-4 h-4"></i>
+                </button>
               </div>
             </div>
 
@@ -375,6 +388,40 @@
             </div>
           </div>
         </div>
+
+        <!-- Mobile Tab Bar (< md) — Home / Artists / Albums / Playlists / Search.
+             Sits at the very bottom, directly below the mini-player pill.
+             Desktop keeps the sidebar. (Century MobileTabBar.) -->
+        <nav id="mobile-tab-bar" aria-label="Mobile Navigation"
+          class="md:hidden max-w-7xl mx-auto pointer-events-auto mt-2">
+          <div class="bg-zinc-900/95 backdrop-blur-md border border-zinc-700 shadow-2xl flex items-stretch justify-between px-1 py-1.5">
+            <button type="button" data-route="home" aria-label="Home"
+              class="mobile-tab-btn flex-1 flex flex-col items-center gap-1.5 py-1 px-1 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary text-zinc-400 hover:text-zinc-100">
+              <i data-lucide="home" class="w-5 h-5"></i>
+              <span class="text-[10px] font-sans leading-none">Home</span>
+            </button>
+            <button type="button" data-route="artists" aria-label="Artists"
+              class="mobile-tab-btn flex-1 flex flex-col items-center gap-1.5 py-1 px-1 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary text-zinc-400 hover:text-zinc-100">
+              <i data-lucide="mic" class="w-5 h-5"></i>
+              <span class="text-[10px] font-sans leading-none">Artists</span>
+            </button>
+            <button type="button" data-route="albums" aria-label="Albums"
+              class="mobile-tab-btn flex-1 flex flex-col items-center gap-1.5 py-1 px-1 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary text-zinc-400 hover:text-zinc-100">
+              <i data-lucide="disc-3" class="w-5 h-5"></i>
+              <span class="text-[10px] font-sans leading-none">Albums</span>
+            </button>
+            <button type="button" data-route="playlists" aria-label="Playlists"
+              class="mobile-tab-btn flex-1 flex flex-col items-center gap-1.5 py-1 px-1 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary text-zinc-400 hover:text-zinc-100">
+              <i data-lucide="list-music" class="w-5 h-5"></i>
+              <span class="text-[10px] font-sans leading-none">Playlists</span>
+            </button>
+            <button type="button" data-route="search" aria-label="Search"
+              class="mobile-tab-btn flex-1 flex flex-col items-center gap-1.5 py-1 px-1 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary text-zinc-400 hover:text-zinc-100">
+              <i data-lucide="search" class="w-5 h-5"></i>
+              <span class="text-[10px] font-sans leading-none">Search</span>
+            </button>
+          </div>
+        </nav>
       </footer>
     </div>
 
@@ -598,6 +645,11 @@
       class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5">
       <i data-lucide="play" class="w-3.5 h-3.5 text-emerald-400"></i>
       <span>Play Now</span>
+    </button>
+    <button id="ctx-start-radio" type="button" role="menuitem"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5">
+      <i data-lucide="radio" class="w-3.5 h-3.5 text-zinc-400"></i>
+      <span>Start Radio</span>
     </button>
     <button id="ctx-play-next" type="button" role="menuitem"
       class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5">
