@@ -50,12 +50,22 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Require x-api-key header on all incoming requests
+// Authentication middleware:
+// Supports 'x-api-key' (or 'X-API-Key') in headers, or 'apiKey' / 'api-key' / 'key' in query parameters.
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return next();
-  const apiKey = req.headers['x-api-key'] || req.headers['X-API-Key'];
+
+  const apiKey =
+    req.headers['x-api-key'] ||
+    req.headers['X-API-Key'] ||
+    req.query.apiKey ||
+    req.query['api-key'] ||
+    req.query.key;
+
   if (!apiKey || apiKey !== NAS_API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid or missing x-api-key header' });
+    return res.status(401).json({
+      error: 'Unauthorized: Invalid or missing API key (provide x-api-key header or ?apiKey= parameter)'
+    });
   }
   next();
 });
@@ -129,6 +139,56 @@ app.delete('/api/files', async (req, res) => {
     else await fs.unlink(target);
     res.json({ success: true });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Download file
+app.get('/api/files/download', async (req, res) => {
+  try {
+    const rawPath = req.query.path;
+    if (!rawPath) {
+      return res.status(400).json({ error: 'Missing path query parameter' });
+    }
+    const target = safe(rawPath);
+    const stat = await fs.stat(target);
+    if (stat.isDirectory()) {
+      return res.status(400).json({ error: 'Cannot download a directory directly' });
+    }
+    if (req.query.inline === '1' || req.query.inline === 'true') {
+      return res.sendFile(target);
+    }
+    const filename = path.basename(target);
+    res.download(target, filename, (err) => {
+      if (err && !res.headersSent) {
+        res.status(500).json({ error: 'Failed to stream file' });
+      }
+    });
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Raw file view (for image preview lightbox, inline audio, etc.)
+app.get(['/api/files/raw', '/api/files/view'], async (req, res) => {
+  try {
+    const rawPath = req.query.path;
+    if (!rawPath) {
+      return res.status(400).json({ error: 'Missing path query parameter' });
+    }
+    const target = safe(rawPath);
+    const stat = await fs.stat(target);
+    if (stat.isDirectory()) {
+      return res.status(400).json({ error: 'Cannot view a directory directly' });
+    }
+    res.sendFile(target);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return res.status(404).json({ error: 'File not found' });
+    }
     res.status(500).json({ error: err.message });
   }
 });

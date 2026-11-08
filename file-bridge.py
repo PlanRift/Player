@@ -1,7 +1,7 @@
 # file-bridge.py - Lightweight local storage file manager bridge for Plenrip Audio (Python Flask)
 import os, shutil
 from pathlib import Path
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -14,9 +14,15 @@ NAS_API_KEY = os.environ.get("NAS_API_KEY") or os.environ.get("FILE_BRIDGE_KEY")
 def require_api_key():
     if request.method == "OPTIONS":
         return
-    api_key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+    api_key = (
+        request.headers.get("x-api-key")
+        or request.headers.get("X-API-Key")
+        or request.args.get("apiKey")
+        or request.args.get("api-key")
+        or request.args.get("key")
+    )
     if not api_key or api_key != NAS_API_KEY:
-        return jsonify({"error": "Unauthorized: Invalid or missing x-api-key header"}), 401
+        return jsonify({"error": "Unauthorized: Invalid or missing API key (provide x-api-key header or ?apiKey= parameter)"}), 401
 _script_dir = Path(__file__).resolve().parent
 _raw_music = os.environ.get("ND_MUSICFOLDER", os.environ.get("MUSIC_DIR", ""))
 
@@ -93,6 +99,34 @@ def delete_file():
         else:
             target.unlink()
         return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/files/download", methods=["GET"])
+def download_file():
+    try:
+        raw = request.args.get("path")
+        if not raw:
+            return jsonify({"error": "Missing path query parameter"}), 400
+        target = safe_path(raw)
+        if not target.exists() or not target.is_file():
+            return jsonify({"error": "File not found"}), 404
+        inline = request.args.get("inline") in ("1", "true")
+        return send_file(target, as_attachment=(not inline), download_name=target.name)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/files/raw", methods=["GET"])
+@app.route("/api/files/view", methods=["GET"])
+def view_raw_file():
+    try:
+        raw = request.args.get("path")
+        if not raw:
+            return jsonify({"error": "Missing path query parameter"}), 400
+        target = safe_path(raw)
+        if not target.exists() or not target.is_file():
+            return jsonify({"error": "File not found"}), 404
+        return send_file(target, as_attachment=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

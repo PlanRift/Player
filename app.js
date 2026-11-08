@@ -1846,7 +1846,12 @@
   }
 
   function getFileBridgeApiKey() {
-    return (localStorage.getItem('century.nas_api_key') || filesState.apiKey || '').trim();
+    return (
+      localStorage.getItem('century.nas_api_key') ||
+      localStorage.getItem('nas_api_key') ||
+      filesState.apiKey ||
+      ''
+    ).trim();
   }
 
   function getFileBridgeHeaders(customHeaders = {}) {
@@ -1882,11 +1887,17 @@
     }
   }
 
+  function isImageFile(name) {
+    if (!name || typeof name !== 'string') return false;
+    const ext = name.split('.').pop().toLowerCase();
+    return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg', 'bmp', 'ico', 'avif'].includes(ext);
+  }
+
   function getFileIcon(name, isDir) {
     if (isDir) return 'folder';
+    if (isImageFile(name)) return 'image';
     const ext = name.split('.').pop().toLowerCase();
     if (['mp3', 'flac', 'm4a', 'wav', 'ogg', 'aac', 'opus', 'wma', 'alac', 'aiff'].includes(ext)) return 'music';
-    if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext)) return 'image';
     if (['lrc', 'txt', 'cue', 'log'].includes(ext)) return 'file-text';
     return 'file';
   }
@@ -2063,6 +2074,7 @@
 
       const iconName = getFileIcon(item.name, item.isDirectory);
       const iconColor = item.isDirectory ? 'text-emerald-400' : 'text-zinc-400';
+      const isImg = !item.isDirectory && isImageFile(item.name);
 
       tr.innerHTML = `
         <td class="py-2.5 px-4 text-center font-mono text-[11px] text-zinc-500">${idx + 1}</td>
@@ -2072,7 +2084,9 @@
             <button
               type="button"
               class="file-item-btn text-left truncate font-sans text-xs ${
-                item.isDirectory ? 'font-medium text-zinc-100 hover:text-emerald-400 hover:underline' : 'text-zinc-200 select-text cursor-default'
+                item.isDirectory || isImg
+                  ? 'font-medium text-zinc-100 hover:text-emerald-400 hover:underline cursor-pointer'
+                  : 'text-zinc-200 select-text cursor-default'
               }"
               title="${escapeHtml(item.name)}"
             >
@@ -2083,13 +2097,33 @@
         <td class="py-2.5 px-4 text-right font-mono text-[11px] text-zinc-400">${formatFileSize(item.size)}</td>
         <td class="py-2.5 px-4 text-right font-mono text-[11px] text-zinc-400 whitespace-nowrap">${formatFileDate(item.mtime)}</td>
         <td class="py-2.5 px-4 text-center">
-          <button
-            type="button"
-            title="Delete ${item.isDirectory ? 'folder' : 'file'}"
-            class="file-delete-btn w-7 h-7 inline-flex items-center justify-center text-zinc-500 hover:text-[#f0605a] hover:bg-zinc-800 transition-colors"
-          >
-            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-          </button>
+          <div class="inline-flex items-center justify-center gap-1">
+            ${isImg ? `
+              <button
+                type="button"
+                title="Preview image ${escapeHtml(item.name)}"
+                class="file-view-btn w-7 h-7 inline-flex items-center justify-center text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition-colors"
+              >
+                <i data-lucide="eye" class="w-3.5 h-3.5"></i>
+              </button>
+            ` : ''}
+            ${!item.isDirectory ? `
+              <button
+                type="button"
+                title="Download ${escapeHtml(item.name)}"
+                class="file-download-btn w-7 h-7 inline-flex items-center justify-center text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition-colors"
+              >
+                <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              </button>
+            ` : ''}
+            <button
+              type="button"
+              title="Delete ${item.isDirectory ? 'folder' : 'file'}"
+              class="file-delete-btn w-7 h-7 inline-flex items-center justify-center text-zinc-500 hover:text-[#f0605a] hover:bg-zinc-800 transition-colors"
+            >
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
         </td>
       `;
 
@@ -2097,6 +2131,27 @@
         tr.querySelector('.file-item-btn').onclick = () => {
           const next = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
           loadFilesView(next);
+        };
+      } else if (isImg) {
+        tr.querySelector('.file-item-btn').onclick = () => {
+          openImageViewer(item);
+        };
+      }
+
+      const viewBtn = tr.querySelector('.file-view-btn');
+      if (viewBtn) {
+        viewBtn.onclick = (e) => {
+          e.stopPropagation();
+          openImageViewer(item);
+        };
+      }
+
+      const downloadBtn = tr.querySelector('.file-download-btn');
+      if (downloadBtn) {
+        downloadBtn.onclick = (e) => {
+          e.stopPropagation();
+          const target = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+          downloadFile(target, item.name);
         };
       }
 
@@ -2189,6 +2244,219 @@
     } catch (err) {
       showToast(`Failed to delete: ${err.message}`, 'error');
     }
+  }
+
+  function downloadFile(relativeFilePath, fileName) {
+    if (!relativeFilePath) return;
+    const base = getFileBridgeBase();
+    const apiKey = getFileBridgeApiKey();
+
+    if (!apiKey) {
+      showToast('NAS API Key is missing. Please set your API key in Settings.', 'error');
+    }
+
+    try {
+      const downloadUrl = new URL(`${base}/api/files/download`);
+      downloadUrl.searchParams.set('path', relativeFilePath);
+      if (apiKey) {
+        downloadUrl.searchParams.set('apiKey', apiKey);
+      }
+
+      const link = document.createElement('a');
+      link.href = downloadUrl.toString();
+      if (fileName) {
+        link.download = fileName;
+      }
+      link.style.display = 'none';
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      showToast(`Failed to download: ${err.message}`, 'error');
+    }
+  }
+
+  // ============================================================================
+  // Image Viewer Modal Lightbox
+  // ============================================================================
+  const imageViewerState = {
+    images: [],
+    currentIndex: 0,
+    zoom: 1,
+    active: false,
+    initialized: false,
+  };
+
+  function openImageViewer(targetItem) {
+    const images = filesState.items.filter((i) => !i.isDirectory && isImageFile(i.name));
+    if (!images.length) return;
+
+    let idx = images.findIndex((i) => i.name === targetItem.name);
+    if (idx === -1) idx = 0;
+
+    imageViewerState.images = images;
+    imageViewerState.currentIndex = idx;
+    imageViewerState.zoom = 1;
+    imageViewerState.active = true;
+
+    const modal = $('files-image-modal');
+    if (modal) {
+      modal.classList.remove('hidden');
+    }
+
+    renderImageViewer();
+    refreshIcons();
+  }
+
+  function closeImageViewer() {
+    imageViewerState.active = false;
+    const modal = $('files-image-modal');
+    if (modal) {
+      modal.classList.add('hidden');
+    }
+    const img = $('files-image-element');
+    if (img) {
+      img.src = '';
+    }
+  }
+
+  function renderImageViewer() {
+    const { images, currentIndex, zoom } = imageViewerState;
+    if (!images.length || currentIndex < 0 || currentIndex >= images.length) return;
+
+    const item = images[currentIndex];
+    const titleEl = $('files-image-title');
+    const metaEl = $('files-image-meta');
+    const counterEl = $('files-image-counter');
+    const img = $('files-image-element');
+    const spinner = $('files-image-spinner');
+    const resetBtn = $('files-image-zoom-reset');
+    const prevBtn = $('files-image-prev-btn');
+    const nextBtn = $('files-image-next-btn');
+
+    if (titleEl) titleEl.textContent = item.name;
+    if (counterEl) counterEl.textContent = `${currentIndex + 1} of ${images.length}`;
+    if (metaEl) metaEl.textContent = `Loading · ${formatFileSize(item.size)}`;
+    if (resetBtn) resetBtn.textContent = `${Math.round(zoom * 100)}%`;
+
+    if (prevBtn) prevBtn.style.visibility = images.length > 1 ? 'visible' : 'hidden';
+    if (nextBtn) nextBtn.style.visibility = images.length > 1 ? 'visible' : 'hidden';
+
+    if (spinner) spinner.classList.remove('hidden');
+
+    const relativePath = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+    const base = getFileBridgeBase();
+    const apiKey = getFileBridgeApiKey();
+
+    const rawUrl = new URL(`${base}/api/files/raw`);
+    rawUrl.searchParams.set('path', relativePath);
+    if (apiKey) rawUrl.searchParams.set('apiKey', apiKey);
+
+    if (img) {
+      img.onload = () => {
+        if (spinner) spinner.classList.add('hidden');
+        if (metaEl) {
+          metaEl.textContent = `${img.naturalWidth} × ${img.naturalHeight} px · ${formatFileSize(item.size)}`;
+        }
+      };
+      img.onerror = () => {
+        if (spinner) spinner.classList.add('hidden');
+        if (metaEl) {
+          metaEl.textContent = `Failed to load preview · ${formatFileSize(item.size)}`;
+        }
+      };
+      img.src = rawUrl.toString();
+      img.style.transform = `scale(${zoom})`;
+    }
+  }
+
+  function navigateImageViewer(step) {
+    const { images } = imageViewerState;
+    if (!images.length) return;
+    imageViewerState.currentIndex = (imageViewerState.currentIndex + step + images.length) % images.length;
+    imageViewerState.zoom = 1;
+    renderImageViewer();
+  }
+
+  function setImageViewerZoom(delta, absolute = null) {
+    if (absolute !== null) {
+      imageViewerState.zoom = absolute;
+    } else {
+      const next = Math.round((imageViewerState.zoom + delta) * 100) / 100;
+      imageViewerState.zoom = Math.max(0.25, Math.min(4.0, next));
+    }
+    const img = $('files-image-element');
+    if (img) {
+      img.style.transform = `scale(${imageViewerState.zoom})`;
+    }
+    const resetBtn = $('files-image-zoom-reset');
+    if (resetBtn) {
+      resetBtn.textContent = `${Math.round(imageViewerState.zoom * 100)}%`;
+    }
+  }
+
+  function downloadCurrentViewerImage() {
+    const { images, currentIndex } = imageViewerState;
+    if (!images.length) return;
+    const item = images[currentIndex];
+    const target = filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name;
+    downloadFile(target, item.name);
+  }
+
+  function initImageViewerEvents() {
+    if (imageViewerState.initialized) return;
+    imageViewerState.initialized = true;
+
+    on('files-image-close-btn', 'click', closeImageViewer);
+    on('files-image-prev-btn', 'click', () => navigateImageViewer(-1));
+    on('files-image-next-btn', 'click', () => navigateImageViewer(1));
+    on('files-image-zoom-in', 'click', () => setImageViewerZoom(0.25));
+    on('files-image-zoom-out', 'click', () => setImageViewerZoom(-0.25));
+    on('files-image-zoom-reset', 'click', () => setImageViewerZoom(0, 1));
+    on('files-image-download-btn', 'click', downloadCurrentViewerImage);
+
+    const modal = $('files-image-modal');
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal || e.target.id === 'files-image-viewport') {
+          closeImageViewer();
+        }
+      });
+    }
+
+    const viewport = $('files-image-viewport');
+    if (viewport) {
+      viewport.addEventListener('wheel', (e) => {
+        if (!imageViewerState.active) return;
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.2 : -0.2;
+        setImageViewerZoom(delta);
+      }, { passive: false });
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (!imageViewerState.active) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeImageViewer();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigateImageViewer(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navigateImageViewer(1);
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        setImageViewerZoom(0.25);
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        setImageViewerZoom(-0.25);
+      } else if (e.key === '0') {
+        e.preventDefault();
+        setImageViewerZoom(0, 1);
+      }
+    });
   }
 
   function navigateFilesUp() {
@@ -2298,6 +2566,8 @@
         }
       });
     }
+
+    initImageViewerEvents();
   }
 
   // ============================================================================
