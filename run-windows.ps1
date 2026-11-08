@@ -6,6 +6,7 @@ Set-Location -LiteralPath $ProjectDir
 $BackendProcess = $null
 $DevProcess = $null
 $BridgeProcess = $null
+$RelayProcess = $null
 $RunnerExitCode = 0
 
 function Write-Log {
@@ -36,6 +37,7 @@ $env:ND_PORT = Get-EnvOrDefault "ND_PORT" "4533"
 $env:ND_ADDRESS = Get-EnvOrDefault "ND_ADDRESS" "127.0.0.1"
 
 $WebPort = Get-EnvOrDefault "WEB_PORT" "5500"
+$LyricsPort = Get-EnvOrDefault "LYRICS_PORT" "3005"
 $BridgePort = Get-EnvOrDefault "FILE_BRIDGE_PORT" "3001"
 
 if ([string]::IsNullOrWhiteSpace($env:ND_MUSICFOLDER)) {
@@ -271,7 +273,7 @@ try {
     }
     $JsRuntime = if ($NodeCommand) { $NodeCommand } else { $BunCommand }
 
-    foreach ($Port in @([int]$WebPort, [int]$BridgePort)) {
+    foreach ($Port in @([int]$WebPort, [int]$LyricsPort, [int]$BridgePort)) {
         if (Test-PortInUse -Port $Port) {
             Show-PortOwner -Port $Port
 
@@ -394,15 +396,58 @@ VITE_NAVIDROME_PASSWORD=
     Write-Log ""
     Write-Log "Backend reachability verified; account credentials NOT verified."
     Write-Log ""
-    Write-Log "Starting File Bridge and Web Player..."
-    Write-Log "  Web Player:  $WebUrl"
-    Write-Log "  File Bridge: http://localhost:$BridgePort"
-    Write-Log "  Navidrome:   $BackendUrl"
-    Write-Log "  NAS Root:    $($env:STORAGE_DIR)"
-    Write-Log "  Music:       $($env:ND_MUSICFOLDER)"
+    Write-Log "Starting Lyrics Relay, File Bridge and Web Player..."
+    Write-Log "  Web Player:   $WebUrl"
+    Write-Log "  Lyrics Relay: http://localhost:$LyricsPort"
+    Write-Log "  File Bridge:  http://localhost:$BridgePort"
+    Write-Log "  Navidrome:    $BackendUrl"
+    Write-Log "  NAS Root:     $($env:STORAGE_DIR)"
+    Write-Log "  Music:        $($env:ND_MUSICFOLDER)"
     Write-Log ""
     Write-Log "Press Ctrl+C to stop all services."
     Write-Log "--------------------------------------------------------"
+
+    # The lyrics relay is a Bun project (plenrip-relay). It must run or
+    # every provider in the Lyrics Sources picker shows "Unreachable".
+    if ($null -eq $BunCommand) {
+        throw "Bun is required for the lyrics relay but was not found in PATH. Install Bun and reopen the terminal."
+    }
+
+    $RelayProcess = Start-Process `
+        -FilePath $BunCommand.Source `
+        -ArgumentList @("relay/src/index.ts") `
+        -WorkingDirectory $ProjectDir `
+        -NoNewWindow `
+        -PassThru `
+        -Environment @{ PORT = "$LyricsPort" }
+
+    $RelayReady = $false
+    for ($Attempt = 1; $Attempt -le 60; $Attempt++) {
+        $RelayProcess.Refresh()
+        if ($RelayProcess.HasExited) {
+            throw "Lyrics relay exited during startup."
+        }
+        try {
+            $RelayCheck = Invoke-WebRequest `
+                -Uri "http://localhost:$LyricsPort/api/health" `
+                -UseBasicParsing `
+                -TimeoutSec 2 `
+                -ErrorAction Stop
+            if ($RelayCheck.StatusCode -eq 200) {
+                $RelayReady = $true
+                break
+            }
+        } catch {
+            # Not up yet; keep waiting.
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    if (-not $RelayReady) {
+        throw "Lyrics relay did not respond within the startup timeout."
+    }
+
+    Write-Log "Lyrics relay is responding."
 
     $BridgeProcess = Start-Process `
         -FilePath $JsRuntime.Source `
@@ -421,6 +466,13 @@ VITE_NAVIDROME_PASSWORD=
     while (-not $DevProcess.HasExited) {
         Start-Sleep -Milliseconds 300
         $DevProcess.Refresh()
+
+        if ($null -ne $RelayProcess) {
+            $RelayProcess.Refresh()
+            if ($RelayProcess.HasExited) {
+                throw "Lyrics relay stopped unexpectedly."
+            }
+        }
 
         if ($null -ne $BridgeProcess) {
             $BridgeProcess.Refresh()
@@ -453,6 +505,7 @@ finally {
     Write-Log "Cleaning up services started by this runner..."
 
     Stop-OwnedProcess -Process $BridgeProcess -Label "File Bridge"
+    Stop-OwnedProcess -Process $RelayProcess -Label "Lyrics Relay"
     Stop-OwnedProcess -Process $DevProcess -Label "Web Player"
     Stop-OwnedProcess -Process $BackendProcess -Label "Navidrome"
 

@@ -197,7 +197,7 @@
       <main id="main-content" class="flex-1 h-full overflow-y-auto relative">
         <!-- StatusCard (Connection Error Banner) -->
         <div id="error-banner"
-          class="hidden mx-6 mt-6 studio-panel p-4 border-l-2 border-l-[#f0605a] bg-zinc-900/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 max-w-7xl lg:mx-auto">
+          class="hidden mx-6 mt-6 studio-panel p-4 border-l-2 border-l-[#f0605a] bg-zinc-900/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div class="flex items-center gap-3 min-w-0">
             <i data-lucide="alert-circle" class="w-5 h-5 text-[#f0605a] shrink-0"></i>
             <div class="min-w-0">
@@ -236,7 +236,7 @@
       <footer id="bottom-player-bar" aria-label="Audio Player Controls"
         class="absolute bottom-0 left-0 right-0 p-2 sm:p-3.5 pointer-events-none z-30">
         <div
-          class="studio-panel max-w-7xl mx-auto pointer-events-auto shadow-2xl bg-zinc-900/95 backdrop-blur-md border border-zinc-700">
+          class="studio-panel max-w-[1920px] mx-auto pointer-events-auto shadow-2xl bg-zinc-900/95 backdrop-blur-md border border-zinc-700">
           <!-- Mobile Mini-Player (< md) -->
           <div class="md:hidden flex flex-col">
             <div class="p-2 flex items-center justify-between gap-2">
@@ -276,9 +276,12 @@
           <!-- Desktop Two-Row Player (>= md) -->
           <div class="hidden md:flex flex-col px-3.5 pt-2.5 pb-2 gap-2">
             <!-- Row 1: Left Transport, Center Track Pill, Right Utilities -->
-            <div class="flex items-center justify-between gap-4">
+            <!-- True centering: left and right are equal flex-1 columns, so
+                 the center track block sits at the exact middle of the bar
+                 (Century has no star here and the title is centered). -->
+            <div class="flex items-center gap-4">
               <!-- Left: Transport Controls -->
-              <div class="flex items-center gap-1 shrink-0">
+              <div class="flex flex-1 items-center gap-1">
                 <button id="btn-shuffle" type="button" aria-label="Toggle shuffle" title="Shuffle (S)"
                   class="w-9 h-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
                   <i data-lucide="shuffle" class="w-4 h-4"></i>
@@ -309,7 +312,7 @@
 
               <!-- Center: Active Track Button (Fades out when scrubbing seek bar; clicks to open /now-playing) -->
               <div id="player-center-track-wrap"
-                class="flex items-center gap-2.5 min-w-0 max-w-md mx-auto flex-1 justify-center transition-opacity duration-150">
+                class="flex items-center gap-2.5 min-w-0 max-w-md shrink grow-0 justify-center transition-opacity duration-150">
                 <button id="player-cover-btn" type="button" title="Open Now Playing View"
                   class="w-10 h-10 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center">
                   <img id="player-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
@@ -332,15 +335,10 @@
                     </button>
                   </div>
                 </div>
-
-                <button id="player-star-btn" type="button" aria-label="Star current track" title="Star current track"
-                  class="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100 shrink-0">
-                  <i data-lucide="star" class="w-3.5 h-3.5"></i>
-                </button>
               </div>
 
               <!-- Right: Queue, Lyrics Drawer, Signature Room, Volume, Context Menu (Century order) -->
-              <div class="flex items-center justify-end gap-1 shrink-0">
+              <div class="flex flex-1 items-center justify-end gap-1">
                 <button id="btn-queue" type="button" aria-label="Toggle playback queue drawer" title="Toggle Queue (Q)"
                   class="h-8 px-2 flex items-center gap-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
                   <i data-lucide="list-music" class="w-4 h-4"></i>
@@ -393,7 +391,7 @@
              Sits at the very bottom, directly below the mini-player pill.
              Desktop keeps the sidebar. (Century MobileTabBar.) -->
         <nav id="mobile-tab-bar" aria-label="Mobile Navigation"
-          class="md:hidden max-w-7xl mx-auto pointer-events-auto mt-2">
+          class="md:hidden max-w-[1920px] mx-auto pointer-events-auto mt-2">
           <div class="bg-zinc-900/95 backdrop-blur-md border border-zinc-700 shadow-2xl flex items-stretch justify-between px-1 py-1.5">
             <button type="button" data-route="home" aria-label="Home"
               class="mobile-tab-btn flex-1 flex flex-col items-center gap-1.5 py-1 px-1 cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary text-zinc-400 hover:text-zinc-100">

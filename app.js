@@ -461,6 +461,10 @@
 
     const row = document.createElement('div');
     row.setAttribute('data-song-id', song.id);
+    // The global contextmenu handler (Century Phase 3) reads the song
+    // off the row it was opened on. Stored on the element, like Century's
+    // __contextData, so a right-click anywhere on the row finds its song.
+    row.__song = song;
     row.className =
       'song-row group flex items-center justify-between gap-3 px-3 py-2 border-b border-zinc-700 hover:bg-zinc-800/70 transition-colors';
 
@@ -3115,6 +3119,10 @@
       const item = document.createElement('div');
       item.draggable = true;
       item.setAttribute('data-active', isCurrent ? 'true' : 'false');
+      // The global contextmenu handler reads the song + queue index off
+      // the row it was opened on (same pattern as track rows).
+      item.__song = song;
+      item.__queueIdx = idx;
       item.className = `queue-row group flex items-center justify-between gap-2 px-3 py-2 text-xs border-b border-zinc-700 transition-colors ${
         isCurrent ? 'bg-zinc-800' : 'hover:bg-zinc-800/60'
       }`;
@@ -4036,7 +4044,9 @@
     }
 
     const starred = state.starredSongIds.has(song.id);
-    ['player-star-btn', 'np-star-btn', 'np-mobile-star-btn'].forEach((id) => {
+    // No star in the bottom player bar (Century has none there; the star
+    // lives in Now Playing only). Kept for np-star-btn / np-mobile-star-btn.
+    ['np-star-btn', 'np-mobile-star-btn'].forEach((id) => {
       const b = $(id);
       if (!b) return;
       b.classList.toggle('text-emerald-400', starred);
@@ -4450,7 +4460,7 @@
       if (id) openAlbumDetail(id);
     });
     const starCurrent = () => audioEngine?.currentSong && toggleStarTrack(audioEngine.currentSong);
-    ['player-star-btn', 'np-star-btn', 'np-mobile-star-btn'].forEach((id) => on(id, 'click', starCurrent));
+    ['np-star-btn', 'np-mobile-star-btn'].forEach((id) => on(id, 'click', starCurrent));
     ['player-more-btn', 'np-more-btn', 'np-mobile-more-btn'].forEach((id) =>
       on(id, 'click', (e) => {
         e.stopPropagation();
@@ -4619,6 +4629,33 @@
       document.querySelectorAll('[id$="-sort-menu"], #album-more-menu, #playlist-more-menu').forEach((m) => {
         if (!m.classList.contains('hidden') && !m.contains(e.target)) m.classList.add('hidden');
       });
+    });
+
+    // Global right-click menu (Century Phase 3): the browser menu never
+    // appears inside the app. Text inputs keep the native menu so the
+    // user can still copy/paste there.
+    document.addEventListener('contextmenu', (e) => {
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.closest('input, textarea, select, [contenteditable="true"]')) return;
+      e.preventDefault();
+
+      // 1. A track row or queue row carries its song on the element.
+      const row = target.closest('[data-song-id], .queue-row');
+      const song = row?.__song;
+      if (song) {
+        const queueIdx = typeof row.__queueIdx === 'number' ? row.__queueIdx : null;
+        openTrackContextMenu(e, song, queueIdx);
+        return;
+      }
+
+      // 2. The bottom player bar, Now Playing and the Listening Room act
+      // on the song that is currently playing.
+      if (target.closest('#bottom-player-bar, #view-now-playing, #signature-modal')) {
+        if (audioEngine?.currentSong) openTrackContextMenu(e, audioEngine.currentSong, null);
+        return;
+      }
+      // Anywhere else: no menu, but the browser menu stays suppressed.
     });
 
     // Settings

@@ -6,12 +6,13 @@
   aria-label="Listening Room and Synced Lyrics"
   class="hidden fixed inset-0 z-50 bg-zinc-950 flex flex-col overflow-hidden"
 >
-  <!-- Blurred Album Cover Ambient Backdrop -->
+  <!-- Blurred Album Cover Ambient Backdrop (Century SignatureView "full":
+       opacity-35 + flat wash bg-zinc-950/45, NOT a gradient) -->
   <div
     id="sig-backdrop-art"
-    class="absolute -inset-16 bg-cover bg-center scale-110 blur-[80px] opacity-25 pointer-events-none transition-all duration-700"
+    class="absolute -inset-16 bg-cover bg-center scale-110 blur-[80px] opacity-35 pointer-events-none transition-all duration-700"
   ></div>
-  <div class="absolute inset-0 bg-gradient-to-b from-zinc-950/80 via-zinc-950/65 to-zinc-950/90 pointer-events-none"></div>
+  <div class="absolute inset-0 bg-zinc-950/45 pointer-events-none"></div>
 
   <!-- Top Header (Auto-hides after 4s of mouse inactivity when playing) -->
   <header class="signature-chrome relative z-10 h-14 px-6 border-b border-zinc-800/80 flex items-center justify-between shrink-0">
@@ -81,10 +82,10 @@
   </header>
 
   <!-- Body: 2-Column Layout (Artwork & Metadata Left, Ambient Synced Lyrics Right) -->
-  <div class="relative z-10 flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-8 px-6 md:px-10 py-6 max-w-7xl w-full mx-auto overflow-hidden">
+  <div class="relative z-10 flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-8 px-6 md:px-10 py-6 max-w-[1800px] w-full mx-auto overflow-hidden">
     <!-- Left Column (5 cols) -->
     <div class="lg:col-span-5 flex flex-col justify-center items-center lg:items-start space-y-5">
-      <div class="w-full max-w-[min(420px,42dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
+      <div class="w-full max-w-[min(460px,44dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
         <img id="sig-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
         <i id="sig-cover-fallback" data-lucide="disc" class="w-16 h-16 text-zinc-400"></i>
       </div>
