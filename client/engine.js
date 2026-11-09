@@ -1648,16 +1648,28 @@ class LyricsManager {
     }
   }
 
-  // Lyrics relay base URL (plenrip-relay, default http://localhost:3005).
-  // Overridable via localStorage (Settings > Lyrics in a later phase).
+  // Lyrics relay base URL (plenrip-relay, defaults to '' for relative paths like /api/lyrics).
+  // Overridable via localStorage (STORAGE_KEYS.LYRICS_RELAY_URL).
   getRelayBaseUrl() {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.LYRICS_RELAY_URL);
-      if (saved) return saved.replace(/\/+$/, '');
+      if (saved && saved.trim()) {
+        const trimmed = saved.trim().replace(/\/+$/, '');
+        // On HTTPS, strip plain http://localhost:3005 to prevent mixed content & macOS IPv6 drops
+        if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(trimmed)) {
+          return '';
+        }
+        // If explicitly saved as the old default http://localhost:3005, use relative path
+        if (/^http:\/\/(localhost|127\.0\.0\.1):3005$/i.test(trimmed)) {
+          return '';
+        }
+        return trimmed;
+      }
     } catch {
       // Ignore storage errors
     }
-    return 'http://localhost:3005';
+    // Return empty string to swap to relative path (/api/lyrics?...)
+    return '';
   }
 
   // One relay request. providerId null = auto (the relay picks the winner).
