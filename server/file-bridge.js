@@ -53,8 +53,30 @@ const STORAGE_DIR = path.resolve(resolveStorageRoot());
 
 if (!fsSync.existsSync(STORAGE_DIR)) fsSync.mkdirSync(STORAGE_DIR, { recursive: true });
 
+const ALLOWED_ORIGINS = [
+  'https://plenrip.planrift.me',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3001',
+];
+
 app.use(cors({
-  origin: '*',
+  origin: (origin, callback) => {
+    // Non-browser / curl / same-origin requests have no origin header
+    if (!origin) return callback(null, true);
+    if (
+      ALLOWED_ORIGINS.includes(origin) ||
+      origin.endsWith('.planrift.me') ||
+      /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-api-key', 'X-API-Key'],
 }));

@@ -17,11 +17,38 @@ const PORT = parseInt(process.env.PORT || '3005', 10);
 // its word-synced QRC never reached auto mode. Measured 2026-11-08.
 const PROVIDER_TIMEOUT_MS = 5000;
 
-function corsHeaders(): Record<string, string> {
+const ALLOWED_ORIGINS = [
+  'https://plenrip.planrift.me',
+  'http://localhost:5500',
+  'http://127.0.0.1:5500',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:3005',
+  'http://127.0.0.1:3005',
+];
+
+function corsHeaders(req?: Request): Record<string, string> {
+  const origin = req?.headers.get('origin');
+  let allowOrigin = 'https://plenrip.planrift.me';
+
+  if (origin) {
+    if (
+      ALLOWED_ORIGINS.includes(origin) ||
+      origin.endsWith('.planrift.me') ||
+      /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+    ) {
+      allowOrigin = origin;
+    }
+  } else {
+    allowOrigin = '*';
+  }
+
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key, X-API-Key',
+    'Access-Control-Allow-Credentials': 'true',
+    'Vary': 'Origin',
   };
 }
 
@@ -972,51 +999,47 @@ async function handleTranslateBatchRequest(req: Request): Promise<Response> {
 
 const server = Bun.serve({
   port: PORT,
-  fetch(req) {
+  async fetch(req) {
     const url = new URL(req.url);
 
     if (req.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders() });
+      return new Response(null, { status: 204, headers: corsHeaders(req) });
     }
 
+    let res: Response;
     if (url.pathname === '/api/lyrics') {
-      return handleLyricsRequest(url);
-    }
-
-    if (url.pathname === '/api/romaji') {
-      return handleRomajiRequest(req, url);
-    }
-
-    if (url.pathname === '/api/translate-en') {
-      return handleTranslateEnRequest(req, url);
-    }
-
-    if (url.pathname === '/api/translate-title') {
-      return handleTranslateTitleRequest(url);
-    }
-
-    if (url.pathname === '/api/translate-batch' && req.method === 'POST') {
-      return handleTranslateBatchRequest(req);
-    }
-
-    if (url.pathname === '/api/translate-cache') {
+      res = await handleLyricsRequest(url);
+    } else if (url.pathname === '/api/romaji') {
+      res = await handleRomajiRequest(req, url);
+    } else if (url.pathname === '/api/translate-en') {
+      res = await handleTranslateEnRequest(req, url);
+    } else if (url.pathname === '/api/translate-title') {
+      res = await handleTranslateTitleRequest(url);
+    } else if (url.pathname === '/api/translate-batch' && req.method === 'POST') {
+      res = await handleTranslateBatchRequest(req);
+    } else if (url.pathname === '/api/translate-cache') {
       const obj: Record<string, TitleTranslationEntry> = {};
       for (const [k, v] of titleTranslationCache.entries()) {
         obj[k] = v;
       }
-      return jsonResponse({ translations: obj });
-    }
-
-    if (url.pathname === '/api/health') {
-      return jsonResponse({
+      res = jsonResponse({ translations: obj });
+    } else if (url.pathname === '/api/health') {
+      res = jsonResponse({
         status: 'ok',
         service: 'plenrip-lyrics-relay',
         providers: Object.keys(PROVIDERS_BY_ID),
         features: ['lyrics', 'romaji', 'translate-title', 'translate-batch', 'translate-cache'],
       });
+    } else {
+      res = errorResponse(404, 'not_found', `Route not found: ${url.pathname}`);
     }
 
-    return errorResponse(404, 'not_found', `Route not found: ${url.pathname}`);
+    // Ensure all responses include CORS headers tailored to the request
+    const headers = corsHeaders(req);
+    for (const [k, v] of Object.entries(headers)) {
+      res.headers.set(k, v);
+    }
+    return res;
   },
 });
 

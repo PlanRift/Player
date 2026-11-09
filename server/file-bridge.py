@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*", "allow_headers": ["Content-Type", "x-api-key", "X-API-Key"]}})
+CORS(app, resources={r"/api/*": {"origins": ["https://plenrip.planrift.me", "http://localhost:5500", "http://127.0.0.1:5500", "http://localhost:3001", "http://127.0.0.1:3001", "*"], "allow_headers": ["Content-Type", "x-api-key", "X-API-Key"]}})
 
 _script_dir = Path(__file__).resolve().parent
 
