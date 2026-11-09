@@ -2,8 +2,6 @@
 
 A lightweight, zero-framework web player for streaming music from a self-hosted Navidrome instance via the Subsonic API.
 
-The project is finished and fully functional.
-
 ## Features
 
 - Apple Music-style collapsible sidebar
@@ -15,14 +13,25 @@ The project is finished and fully functional.
 
 ## Setup & Running
 
-Serve the directory using any static web server:
+Start all services (Navidrome, lyrics relay, file bridge, and frontend):
 
 ```bash
-# Python
-python -m http.server 8080 --directory client
+# Linux / macOS
+./scripts/run.sh
 
-# Node (http-server / npx serve)
-npx serve client
+# Windows
+./scripts/run-windows.cmd
+```
+
+Or run the web client standalone:
+
+```bash
+# Node
+npm start
+# or: npx serve client
+
+# Python
+python -m http.server 5500 --directory client
 ```
 
 Open the local address in your browser, head to Settings, and connect your Navidrome server credentials.

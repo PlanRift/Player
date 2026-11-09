@@ -13,3 +13,6 @@ scratch
 __pycache__
 *.pyc
 plenripbackup
+.nas-api-key
+storage
+music

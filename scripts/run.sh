@@ -20,6 +20,9 @@ export ND_ADDRESS="${ND_ADDRESS:-127.0.0.1}"
 # Set BRIDGE=0 to skip the NAS file bridge (lyrics + frontend still run).
 BRIDGE="${BRIDGE:-1}"
 
+# Set KILL_PORTS=1 to automatically terminate any processes occupying required ports.
+KILL_PORTS="${KILL_PORTS:-1}"
+
 # Do not force scanner purge behavior here.
 # Existing Navidrome configuration/environment remains authoritative.
 
@@ -184,6 +187,46 @@ port_in_use() {
     [[ -n "$listeners" ]]
 }
 
+kill_port() {
+    local port="$1"
+    local pids
+    pids="$(ss -ltnp "sport = :${port}" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u)"
+    if [[ -z "$pids" ]] && command -v fuser >/dev/null 2>&1; then
+        pids="$(fuser "${port}/tcp" 2>/dev/null || true)"
+    fi
+
+    if [[ -n "$pids" ]]; then
+        log "Port $port is occupied by PID(s): $pids. Stopping existing process..."
+        for pid in $pids; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -TERM "$pid" 2>/dev/null || true
+            fi
+        done
+
+        local attempt
+        for ((attempt = 1; attempt <= 15; attempt++)); do
+            if ! port_in_use "$port"; then
+                log "Port $port is now free."
+                return 0
+            fi
+            sleep 0.2
+        done
+
+        for pid in $pids; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
+
+        sleep 0.5
+        if port_in_use "$port"; then
+            fail "Failed to free port $port (occupied by PID: $pids)."
+        else
+            log "Port $port has been forcefully freed."
+        fi
+    fi
+}
+
 # The bridge requires x-api-key auth, so an unauthenticated request gets
 # 401 — that still proves the server is up. Accept 200 or 401 here.
 http_bridge_up() {
@@ -238,13 +281,17 @@ for port in "$WEB_PORT" "$LYRICS_PORT" "$BRIDGE_PORT"; do
         continue
     fi
     if port_in_use "$port"; then
-        log ""
-        log "A process is already listening on port $port:"
-        ss -ltnp "sport = :${port}" || true
-        log ""
-        log "Your previous runner may still be running."
-        log "Open $WEB_URL, or stop the previous runner with Ctrl+C."
-        fail "Stop the existing services before starting a new run."
+        if [[ "$KILL_PORTS" == "1" ]]; then
+            kill_port "$port"
+        else
+            log ""
+            log "A process is already listening on port $port:"
+            ss -ltnp "sport = :${port}" || true
+            log ""
+            log "Your previous runner may still be running."
+            log "Open $WEB_URL, or stop the previous runner with Ctrl+C."
+            fail "Stop the existing services before starting a new run."
+        fi
     fi
 done
 
