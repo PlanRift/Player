@@ -48,13 +48,43 @@ const server = http.createServer((req, res) => {
   let rawUrl = req.url || '/';
   let pathname = decodeURI(rawUrl.split('?')[0]);
 
-  // Reverse proxy for lyrics relay (/api/lyrics, /api/romaji, /api/translate-*, /api/health)
+  // Reverse proxy for NAS file bridge (/bridge/* or /api/files/*)
   if (
-    pathname.startsWith('/api/lyrics') ||
-    pathname.startsWith('/api/romaji') ||
-    pathname.startsWith('/api/translate-') ||
-    pathname === '/api/health'
+    pathname === '/bridge' ||
+    pathname.startsWith('/bridge/') ||
+    pathname === '/api/files' ||
+    pathname.startsWith('/api/files/')
   ) {
+    const bridgePort = Number(process.env.FILE_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001);
+    const targetPath = rawUrl.startsWith('/bridge') ? (rawUrl.replace(/^\/bridge/, '') || '/') : rawUrl;
+    const proxyReq = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: bridgePort,
+        path: targetPath,
+        method: req.method,
+        headers: {
+          ...req.headers,
+          host: `127.0.0.1:${bridgePort}`,
+        },
+      },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res);
+      }
+    );
+
+    proxyReq.on('error', (err) => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'file_bridge_unavailable', message: err.message }));
+    });
+
+    req.pipe(proxyReq);
+    return;
+  }
+
+  // Reverse proxy for lyrics relay (/api/*)
+  if (pathname === '/api' || pathname.startsWith('/api/')) {
     const relayPort = Number(process.env.LYRICS_PORT || 3005);
     const proxyReq = http.request(
       {
@@ -82,35 +112,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Reverse proxy for NAS file bridge (/api/files)
-  if (pathname.startsWith('/api/files')) {
-    const bridgePort = Number(process.env.FILE_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001);
-    const proxyReq = http.request(
-      {
-        hostname: '127.0.0.1',
-        port: bridgePort,
-        path: rawUrl,
-        method: req.method,
-        headers: {
-          ...req.headers,
-          host: `127.0.0.1:${bridgePort}`,
-        },
-      },
-      (proxyRes) => {
-        res.writeHead(proxyRes.statusCode, proxyRes.headers);
-        proxyRes.pipe(res);
-      }
-    );
-
-    proxyReq.on('error', (err) => {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'file_bridge_unavailable', message: err.message }));
-    });
-
-    req.pipe(proxyReq);
-    return;
-  }
-
   if (pathname === '/' || pathname === '') pathname = '/index.html';
 
   const safePath = path.normalize(path.join(WEB_ROOT, pathname));
@@ -120,7 +121,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Never serve dotfiles (e.g. .env) — credentials live in localStorage / Settings, not on disk.
+  // Never serve dotfiles (e.g. .env): credentials live in localStorage / Settings, not on disk.
   if (path.basename(safePath).startsWith('.')) {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('404 Not Found');

@@ -1,4 +1,4 @@
-import type { LyricsProvider } from './base';
+import { ProviderError, type LyricsProvider } from './base';
 import type { LyricsQuery, UnifiedLyrics } from '../types';
 import { cleanTitle, findBestCandidate, scoreCandidate } from '../scoring';
 import { parseTtml } from '../normalize/ttml';
@@ -46,7 +46,10 @@ export const amllProvider: LyricsProvider = {
         signal,
       });
 
-      if (!searchRes.ok) return null;
+      if (!searchRes.ok) {
+        if (searchRes.status === 404) return null;
+        throw new ProviderError(`AMLL search failed with HTTP ${searchRes.status}`, searchRes.status);
+      }
 
       const data = (await searchRes.json()) as AmllSearchResponse;
       const items = data?.data?.items;
@@ -86,7 +89,10 @@ export const amllProvider: LyricsProvider = {
         signal,
       });
 
-      if (!getRes.ok) return null;
+      if (!getRes.ok) {
+        if (getRes.status === 404) return null;
+        throw new ProviderError(`AMLL get failed with HTTP ${getRes.status}`, getRes.status);
+      }
 
       const getData = (await getRes.json()) as AmllGetResponse;
       const ttml = getData?.data?.lyrics;
@@ -111,6 +117,8 @@ export const amllProvider: LyricsProvider = {
       }
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') throw err;
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError((err as Error).message);
     }
 
     return null;

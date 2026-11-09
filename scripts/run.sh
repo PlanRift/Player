@@ -228,7 +228,7 @@ kill_port() {
 }
 
 # The bridge requires x-api-key auth, so an unauthenticated request gets
-# 401 — that still proves the server is up. Accept 200 or 401 here.
+# 401: that still proves the server is up. Accept 200 or 401 here.
 http_bridge_up() {
     local code
     code="$(curl -sS --max-time 2 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null)" || return 1
@@ -240,6 +240,12 @@ wait_for_http() {
     local url="$1" timeout="$2" name="$3" logfile="$4"
     local attempt
     for ((attempt = 1; attempt <= timeout * 2; attempt++)); do
+        if [[ "$name" == "Lyrics relay" && -n "${RELAY_PID:-}" ]] && ! kill -0 "$RELAY_PID" 2>/dev/null; then
+            log ""
+            log "$name exited during startup:"
+            tail -n 40 "$logfile" 2>/dev/null || true
+            fail "$name exited during startup."
+        fi
         if http_ok "$url"; then
             log "$name is responding."
             return 0

@@ -1,4 +1,4 @@
-import type { LyricsProvider } from './base';
+import { ProviderError, type LyricsProvider } from './base';
 import type { LyricsQuery, UnifiedLyrics } from '../types';
 import { cleanTitle, findBestCandidate } from '../scoring';
 import { parseLrc, parsePlainLyrics, hasWordTimings } from '../normalize/lrc';
@@ -24,9 +24,9 @@ export const lrclibProvider: LyricsProvider = {
     const getParams = new URLSearchParams({
       track_name: cleaned,
       artist_name: query.artist || '',
-      album_name: query.album || '',
-      duration: query.duration ? String(Math.round(query.duration)) : '',
     });
+    if (query.album) getParams.set('album_name', query.album);
+    if (query.duration) getParams.set('duration', String(Math.round(query.duration)));
 
     try {
       const getRes = await fetch(`https://lrclib.net/api/get?${getParams.toString()}`, {
@@ -61,9 +61,13 @@ export const lrclibProvider: LyricsProvider = {
             return { lines, synced: false, source: 'lrclib', provider: 'LRCLIB', match };
           }
         }
+      } else if (getRes.status !== 404 && getRes.status !== 400) {
+        throw new ProviderError(`LRCLIB get failed with HTTP ${getRes.status}`, getRes.status);
       }
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') throw err;
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError((err as Error).message);
     }
 
     // 2. Try search fallback with candidate scoring
@@ -115,9 +119,13 @@ export const lrclibProvider: LyricsProvider = {
             }
           }
         }
+      } else if (searchRes.status !== 404) {
+        throw new ProviderError(`LRCLIB search failed with HTTP ${searchRes.status}`, searchRes.status);
       }
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') throw err;
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError((err as Error).message);
     }
 
     return null;

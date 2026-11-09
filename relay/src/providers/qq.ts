@@ -1,4 +1,4 @@
-import type { LyricsProvider } from './base';
+import { ProviderError, type LyricsProvider } from './base';
 import type { LyricsQuery, UnifiedLyrics } from '../types';
 import { cleanTitle, findBestCandidate, stripCreditLines } from '../scoring';
 import { parseLrc, hasWordTimings } from '../normalize/lrc';
@@ -97,7 +97,10 @@ async function fetchLyricData(
     signal,
   });
 
-  if (!lyricRes.ok) return null;
+  if (!lyricRes.ok) {
+    if (lyricRes.status === 404) return null;
+    throw new ProviderError(`QQ lyric failed with HTTP ${lyricRes.status}`, lyricRes.status);
+  }
   const lyricData = (await lyricRes.json()) as QqLyricResponse;
   return lyricData?.req_0?.data ?? null;
 }
@@ -236,7 +239,10 @@ export const qqProvider: LyricsProvider = {
 
     try {
       const searchRes = await fetch(searchUrl, { headers: QQ_HEADERS, signal });
-      if (!searchRes.ok) return null;
+      if (!searchRes.ok) {
+        if (searchRes.status === 404) return null;
+        throw new ProviderError(`QQ search failed with HTTP ${searchRes.status}`, searchRes.status);
+      }
 
       const searchData = (await searchRes.json()) as QqSearchResponse;
       const list = searchData?.data?.song?.list;
@@ -270,6 +276,8 @@ export const qqProvider: LyricsProvider = {
       }
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') throw err;
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError((err as Error).message);
     }
 
     return null;

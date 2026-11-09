@@ -1,4 +1,4 @@
-import type { LyricsProvider } from './base';
+import { ProviderError, type LyricsProvider } from './base';
 import type { LyricsQuery, UnifiedLyrics } from '../types';
 import { cleanTitle } from '../scoring';
 import { parseTtml } from '../normalize/ttml';
@@ -20,9 +20,9 @@ export const unisonProvider: LyricsProvider = {
     const params = new URLSearchParams({
       song: cleaned,
       artist: query.artist || '',
-      album: query.album || '',
-      duration: query.duration ? String(Math.round(query.duration)) : '',
     });
+    if (query.album) params.set('album', query.album);
+    if (query.duration) params.set('duration', String(Math.round(query.duration)));
 
     try {
       const res = await fetch(`https://unison.boidu.dev/lyrics?${params.toString()}`, {
@@ -30,7 +30,10 @@ export const unisonProvider: LyricsProvider = {
         signal,
       });
 
-      if (!res.ok) return null;
+      if (!res.ok) {
+        if (res.status === 404) return null;
+        throw new ProviderError(`Unison fetch failed with HTTP ${res.status}`, res.status);
+      }
 
       const data = (await res.json()) as UnisonResponse;
       if (!data?.success || !data?.data?.lyrics) return null;
@@ -48,6 +51,8 @@ export const unisonProvider: LyricsProvider = {
       }
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') throw err;
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError((err as Error).message);
     }
 
     return null;

@@ -38,7 +38,7 @@ const NAS_API_KEY = process.env.NAS_API_KEY || process.env.FILE_BRIDGE_KEY || ''
 const PLACEHOLDER_KEYS = new Set(['your-secret-api-key-here', 'change-me', 'secret']);
 if (!NAS_API_KEY || PLACEHOLDER_KEYS.has(NAS_API_KEY)) {
   console.error('ERROR: A real NAS API key is required. Set NAS_API_KEY to a long random value (not the placeholder).');
-  console.error('The bridge refuses to start without one — an unauthenticated file bridge exposes your storage.');
+  console.error('The bridge refuses to start without one: an unauthenticated file bridge exposes your storage.');
   process.exit(1);
 }
 
@@ -191,7 +191,7 @@ function normalizeUploadRelPath(rawPath, fallbackFilename = '') {
   for (const rawSeg of rawSegments) {
     // Single dot is current dir (ignore)
     if (rawSeg === '.') continue;
-    // 2 or more dots ("..", "...", ".........") is a traversal / Win32 collapse hazard — abort!
+    // 2 or more dots ("..", "...", ".........") is a traversal / Win32 collapse hazard: abort!
     if (/^\.{2,}$/.test(rawSeg)) {
       throw new Error(`Security boundary violation: illegal dot-segment "${rawSeg}" in path`);
     }
@@ -269,14 +269,20 @@ function resolveSafePath(sub = '', { forbidRoot = false, forbidProtected = false
     throw new Error(`FATAL SECURITY BOUNDARY: Target "${target}" escapes storage root "${STORAGE_DIR}"`);
   }
 
-  // 2. Must NEVER touch the Player application directory or temp chunks directory
+  // 2. Must NEVER touch internal directories (staging or server source)
   if (
-    canonicalTarget === CANONICAL_PROJECT_ROOT ||
-    canonicalTarget.startsWith(CANONICAL_PROJECT_ROOT + path.sep) ||
     canonicalTarget === CANONICAL_SERVER_ROOT ||
     canonicalTarget.startsWith(CANONICAL_SERVER_ROOT + path.sep) ||
     canonicalTarget === CANONICAL_TMP_ROOT ||
     canonicalTarget.startsWith(CANONICAL_TMP_ROOT + path.sep)
+  ) {
+    throw new Error(`FATAL SECURITY BOUNDARY: Access to application/internal directory "${target}" is forbidden`);
+  }
+
+  // If STORAGE_DIR is located outside PROJECT_DIR, forbid any touch into PROJECT_DIR
+  if (
+    !CANONICAL_STORAGE_ROOT.startsWith(CANONICAL_PROJECT_ROOT + path.sep) &&
+    (canonicalTarget === CANONICAL_PROJECT_ROOT || canonicalTarget.startsWith(CANONICAL_PROJECT_ROOT + path.sep))
   ) {
     throw new Error(`FATAL SECURITY BOUNDARY: Access to application/internal directory "${target}" is forbidden`);
   }

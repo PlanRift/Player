@@ -214,12 +214,11 @@ export function timingAgreement(hit: UnifiedLyrics, others: UnifiedLyrics[]): nu
 /**
  * Auto-mode winner selection (extracted from the relay race so it is
  * unit-testable). Gate-passing hits rank first, then sync rank (word above
- * line above plain), then metadata score. When rank and score tie, a hit
- * carrying romaji / translation sidecars wins over one without them (the
- * sidecars power the Romaji / Translated sub-lines). The timing-agreement
- * tie-breaker picks the hit whose line timings agree most with the other
- * candidates; remaining ties keep provider order (stable sort). Returns
- * null when no hit is eligible.
+ * line above plain), then metadata score. When rank and score tie, the
+ * sidecar tie-breaker prefers hits carrying romaji / translation sidecars,
+ * then the timing-agreement tie-breaker picks the hit whose line timings agree most
+ * with the other candidates; remaining ties keep provider order (stable
+ * sort). Returns null when no hit is eligible.
  */
 export function selectAutoWinner(hits: UnifiedLyrics[], query: LyricsQuery): UnifiedLyrics | null {
   const scored = hits.map((hit) => ({
@@ -244,7 +243,7 @@ export function selectAutoWinner(hits: UnifiedLyrics[], query: LyricsQuery): Uni
     // Sidecar tie-breaker: a word-synced hit that also carries romaji /
     // translation sidecars wins over one that does not. This keeps AUTO
     // from picking a bare word-sync hit (e.g. lrcred) over QQ when both
-    // tie on match score — the sidecars are what power the Romaji /
+    // tie on match score - the sidecars are what power the Romaji /
     // Translated sub-lines, so losing them to a tie-break means the
     // client must derive readings separately (and shows nothing until it
     // does). Sidecars never outrank match score, only break ties.

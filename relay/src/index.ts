@@ -1,21 +1,25 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 // @ts-ignore
 import Kuroshiro from 'kuroshiro';
 // @ts-ignore
 import KuromojiAnalyzer from 'kuroshiro-analyzer-kuromoji';
 import { ALL_PROVIDERS, PROVIDERS_BY_ID } from './providers';
+import { ProviderError, type LyricsProvider } from './providers/base';
 import { lyricsCache } from './cache';
 import { selectAutoWinner, stripCreditLines } from './scoring';
 import type { LyricsQuery, UnifiedLyrics } from './types';
-import { translateLyricsWithGemini, isGeminiConfigured } from './translation/gemini';
+import { translateLyricsWithGemini, romanizeLyricsWithGemini, isGeminiConfigured } from './translation/gemini';
 import { applyInlineBackgroundSplit } from './normalize/split-bg';
 
 const PORT = parseInt(process.env.PORT || '3005', 10);
-// Per-provider timeout. QQ needs ~4s from the VPS (search ~1.7-2.5s + lyric
-// ~1.5-1.7s, two sequential round trips); 3500ms cut it off mid-flight and
-// its word-synced QRC never reached auto mode. Measured 2026-11-08.
-const PROVIDER_TIMEOUT_MS = 5000;
+// Every provider call has a 10s timeout per spec
+const PROVIDER_TIMEOUT_MS = 10000;
+
+function sha256(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
 
 const ALLOWED_ORIGINS = [
   'https://plenrip.planrift.me',
@@ -66,26 +70,33 @@ function errorResponse(status: number, error: string, message?: string): Respons
   return jsonResponse({ error, message: message || error }, status);
 }
 
+type ProviderResult =
+  | { status: 'found'; lyrics: UnifiedLyrics; provider: LyricsProvider }
+  | { status: 'not_found'; provider: LyricsProvider }
+  | { status: 'error'; message: string; provider: LyricsProvider };
+
 async function fetchProviderWithTimeout(
-  provider: typeof ALL_PROVIDERS[number],
+  provider: LyricsProvider,
   query: LyricsQuery,
   timeoutMs = PROVIDER_TIMEOUT_MS
-): Promise<UnifiedLyrics | null> {
+): Promise<ProviderResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const result = await provider.fetch(query, controller.signal);
     clearTimeout(timer);
-    return result ? applyInlineBackgroundSplit(result) : null;
+    if (result && Array.isArray(result.lines) && result.lines.length > 0) {
+      const split = applyInlineBackgroundSplit(result);
+      return { status: 'found', lyrics: split, provider };
+    }
+    return { status: 'not_found', provider };
   } catch (err: unknown) {
     clearTimeout(timer);
-    if ((err as Error).name === 'AbortError') {
-      console.warn(`[Relay] Provider ${provider.id} timed out after ${timeoutMs}ms`);
-    } else {
-      console.warn(`[Relay] Provider ${provider.id} fetch error:`, (err as Error).message);
-    }
-    return null;
+    const isAbort = (err as Error).name === 'AbortError';
+    const message = isAbort ? `timeout after ${timeoutMs}ms` : (err as Error).message;
+    console.warn(`[Relay] Provider ${provider.id} error:`, message);
+    return { status: 'error', message, provider };
   }
 }
 
@@ -120,83 +131,92 @@ async function handleLyricsRequest(url: URL): Promise<Response> {
     const cached = lyricsCache.get(query.title, query.artist, query.duration, providerParam);
     if (cached !== undefined) {
       if (cached === null) {
-        return errorResponse(404, 'not_found', 'No lyrics found for this provider');
+        return jsonResponse({ error: 'not_found' }, 404);
       }
       return jsonResponse(cached);
     }
 
-    let hit = await fetchProviderWithTimeout(provider, query);
+    let outcome = await fetchProviderWithTimeout(provider, query);
 
     // Retry with albumArtist if provided and different
-    if (!hit && albumArtist && albumArtist.toLowerCase() !== query.artist.toLowerCase()) {
-      hit = await fetchProviderWithTimeout(provider, { ...query, artist: albumArtist.trim() });
+    if (outcome.status === 'not_found' && albumArtist && albumArtist.toLowerCase() !== query.artist.toLowerCase()) {
+      outcome = await fetchProviderWithTimeout(provider, { ...query, artist: albumArtist.trim() });
     }
 
-    // Credits are never sung; strip leading credit lines before caching.
-    if (hit) hit = stripCreditLines(hit, query);
+    if (outcome.status === 'found') {
+      const cleaned = stripCreditLines(outcome.lyrics, query);
+      if (cleaned) {
+        lyricsCache.setSuccess(query.title, query.artist, query.duration, providerParam, cleaned);
+        return jsonResponse(cleaned);
+      }
+      // If stripping credits emptied it, honest miss
+      lyricsCache.setMiss(query.title, query.artist, query.duration, providerParam);
+      return jsonResponse({ error: 'not_found' }, 404);
+    }
 
-    if (hit) {
-      lyricsCache.setSuccess(query.title, query.artist, query.duration, providerParam, hit);
-      return jsonResponse(hit);
+    if (outcome.status === 'error') {
+      return jsonResponse({ error: 'provider_error', provider: provider.id, message: outcome.message }, 502);
     }
 
     // Honest miss: cache briefly
     lyricsCache.setMiss(query.title, query.artist, query.duration, providerParam);
-    return errorResponse(404, 'not_found', 'No lyrics found for this provider');
+    return jsonResponse({ error: 'not_found' }, 404);
   }
 
   // 2. Auto Mode: parallel fetch across all providers
   const cachedAuto = lyricsCache.get(query.title, query.artist, query.duration, 'auto');
   if (cachedAuto !== undefined) {
     if (cachedAuto === null) {
-      return errorResponse(404, 'not_found', 'No lyrics found');
+      return jsonResponse({ error: 'not_found' }, 404);
     }
     return jsonResponse(cachedAuto);
   }
 
   // Launch all providers in parallel
-  const fetchPromises = ALL_PROVIDERS.map(async (p) => {
-    let result = await fetchProviderWithTimeout(p, query);
-    if (!result && albumArtist && albumArtist.toLowerCase() !== query.artist.toLowerCase()) {
-      result = await fetchProviderWithTimeout(p, { ...query, artist: albumArtist.trim() });
+  const outcomes = await Promise.all(
+    ALL_PROVIDERS.map(async (p) => {
+      let res = await fetchProviderWithTimeout(p, query);
+      if (res.status === 'not_found' && albumArtist && albumArtist.toLowerCase() !== query.artist.toLowerCase()) {
+        res = await fetchProviderWithTimeout(p, { ...query, artist: albumArtist.trim() });
+      }
+      return res;
+    })
+  );
+
+  const foundHits = outcomes.filter(
+    (o): o is { status: 'found'; lyrics: UnifiedLyrics; provider: LyricsProvider } => o.status === 'found'
+  );
+
+  if (foundHits.length > 0) {
+    const hits: UnifiedLyrics[] = [];
+    for (const h of foundHits) {
+      const cleaned = stripCreditLines(h.lyrics, query);
+      if (cleaned) hits.push(cleaned);
     }
-    return result;
-  });
 
-  const settled = await Promise.all(fetchPromises);
-  const rawHits = settled.filter((h): h is UnifiedLyrics => h !== null && Array.isArray(h.lines) && h.lines.length > 0);
-
-  if (rawHits.length === 0) {
-    // Honest miss: cache briefly
-    lyricsCache.setMiss(query.title, query.artist, query.duration, 'auto');
-    return errorResponse(404, 'not_found', 'No lyrics found');
+    if (hits.length > 0) {
+      const winner = selectAutoWinner(hits, query);
+      if (winner) {
+        lyricsCache.setSuccess(query.title, query.artist, query.duration, 'auto', winner);
+        return jsonResponse(winner);
+      }
+    }
   }
 
-  // Credits are never sung; strip leading credit lines from every hit
-  // before selection so they never paint and never skew the tie-breaker.
-  const hits: UnifiedLyrics[] = [];
-  for (const raw of rawHits) {
-    const cleaned = stripCreditLines(raw, query);
-    if (cleaned) hits.push(cleaned);
+  // No lyrics could be selected / found.
+  // Check if any provider had an error:
+  const errors = outcomes.filter(
+    (o): o is { status: 'error'; message: string; provider: LyricsProvider } => o.status === 'error'
+  );
+
+  if (errors.length > 0) {
+    const firstErr = errors[0];
+    return jsonResponse({ error: 'provider_error', provider: firstErr.provider.id, message: firstErr.message }, 502);
   }
 
-  if (hits.length === 0) {
-    lyricsCache.setMiss(query.title, query.artist, query.duration, 'auto');
-    return errorResponse(404, 'not_found', 'No lyrics found');
-  }
-
-  // Winner selection lives in scoring.ts (gate + sync rank + score, with a
-  // timing-agreement tie-breaker so same-song score ties do not fall back
-  // to provider order alone).
-  const winner = selectAutoWinner(hits, query);
-
-  if (!winner) {
-    lyricsCache.setMiss(query.title, query.artist, query.duration, 'auto');
-    return errorResponse(404, 'not_found', 'No lyrics found');
-  }
-
-  lyricsCache.setSuccess(query.title, query.artist, query.duration, 'auto', winner);
-  return jsonResponse(winner);
+  // Every tried provider answered not_found
+  lyricsCache.setMiss(query.title, query.artist, query.duration, 'auto');
+  return jsonResponse({ error: 'not_found' }, 404);
 }
 
 const CACHE_DIR = join(import.meta.dir, '..', '.cache');
@@ -222,8 +242,8 @@ try {
       }
     }
   }
-} catch {
-  // Ignore corrupt cache file
+} catch (err: unknown) {
+  console.warn('[Relay] Discarding corrupt cache file:', (err as Error).message);
 }
 
 let saveDerivationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -244,23 +264,85 @@ function scheduleSaveDerivationCache(): void {
   }, 500);
 }
 
+function resolveKuromojiDictPath(): string {
+  if (process.env.KUROMOJI_DICT_PATH) {
+    return process.env.KUROMOJI_DICT_PATH;
+  }
+  const baseDir = import.meta.dir;
+  const candidates: string[] = [];
+
+  try {
+    const AnalyzerClass = KuromojiAnalyzer.default || KuromojiAnalyzer;
+    const test = new AnalyzerClass();
+    if (test._dictPath) candidates.push(test._dictPath);
+  } catch {}
+
+  candidates.push(
+    join(baseDir, '..', 'node_modules', 'kuromoji', 'dict'),
+    join(baseDir, '..', '..', 'node_modules', 'kuromoji', 'dict'),
+    join(baseDir, '..', 'node_modules', 'kuroshiro-analyzer-kuromoji', 'node_modules', 'kuromoji', 'dict'),
+    join(baseDir, '..', '..', 'node_modules', 'kuroshiro-analyzer-kuromoji', 'node_modules', 'kuromoji', 'dict')
+  );
+
+  const bunDirs = [
+    join(baseDir, '..', 'node_modules', '.bun'),
+    join(baseDir, '..', '..', 'node_modules', '.bun'),
+  ];
+  for (const bDir of bunDirs) {
+    if (existsSync(bDir)) {
+      try {
+        const entries = readdirSync(bDir);
+        for (const entry of entries) {
+          if (entry.startsWith('kuromoji@') || entry.startsWith('kuroshiro-analyzer-kuromoji@')) {
+            candidates.push(join(bDir, entry, 'node_modules', 'kuromoji', 'dict'));
+          }
+        }
+      } catch {}
+    }
+  }
+
+  for (const c of candidates) {
+    if (existsSync(c)) return c;
+  }
+
+  return candidates[0] || join(baseDir, '..', 'node_modules', 'kuromoji', 'dict');
+}
+
 let kuroshiroInstance: any = null;
 let kuroshiroInitPromise: Promise<any> | null = null;
+// Last init failure, surfaced in the 503 body so a failing relay can be diagnosed
+let kuroshiroLastError: string | null = null;
 
 async function getKuroshiro(): Promise<any> {
   if (kuroshiroInstance) return kuroshiroInstance;
   if (!kuroshiroInitPromise) {
     kuroshiroInitPromise = (async () => {
+      let triedDictPath: string | null = null;
       try {
         const KuroClass = Kuroshiro.default || Kuroshiro;
         const AnalyzerClass = KuromojiAnalyzer.default || KuromojiAnalyzer;
+        triedDictPath = resolveKuromojiDictPath();
+
+        if (!triedDictPath || !existsSync(triedDictPath)) {
+          const err = new Error(`Kuromoji dict path not found or does not exist: ${triedDictPath}`);
+          kuroshiroLastError = `dictPath: ${triedDictPath} - ${err.message}`;
+          console.error('[Relay] Failed to initialize Kuroshiro:', kuroshiroLastError);
+          kuroshiroInitPromise = null;
+          return null;
+        }
+
+        const analyzer = new AnalyzerClass({ dictPath: triedDictPath });
         const kuro = new KuroClass();
-        await kuro.init(new AnalyzerClass());
+        await kuro.init(analyzer);
         kuroshiroInstance = kuro;
-        console.log('[Relay] Kuroshiro + Kuromoji analyzer initialized successfully');
+        kuroshiroLastError = null;
+        console.log(`[Relay] Kuroshiro + Kuromoji analyzer initialized successfully (dictPath: ${triedDictPath})`);
         return kuro;
-      } catch (err) {
-        console.error('[Relay] Failed to initialize Kuroshiro:', err);
+      } catch (err: unknown) {
+        const errStr = err instanceof Error ? `${err.message}${err.stack ? ` at ${err.stack.replace(/\n/g, ' ')}` : ''}` : String(err);
+        kuroshiroLastError = `dictPath: ${triedDictPath} - ${errStr}`;
+        console.error('[Relay] Failed to initialize Kuroshiro:', kuroshiroLastError);
+        kuroshiroInitPromise = null;
         return null;
       }
     })();
@@ -277,61 +359,165 @@ async function handleRomajiRequest(req: Request, url: URL): Promise<Response> {
       const body = (await req.json()) as { lines?: string[]; songId?: string };
       const lines = Array.isArray(body?.lines) ? body.lines : [];
       if (lines.length === 0) {
-        return jsonResponse({ lines: [] });
+        return jsonResponse({ lines: [], failedLines: 0, totalLines: 0, source: 'empty' });
       }
 
       const songId = typeof body?.songId === 'string' ? body.songId.trim() : '';
-      const linesHash = Bun.hash(lines.join('\n')).toString(16);
-      const hashKey = `romaji:hash:${linesHash}`;
-      const songKey = songId ? `romaji:song:${songId}` : null;
+      const contentHash = sha256(lines.join('\n'));
+      const hashKey = `romaji:${contentHash}`;
+      const songKey = songId ? `romaji:${songId}|${contentHash}` : null;
 
       if (songKey) {
         const cachedBySong = derivationCache.get(songKey);
-        if (cachedBySong?.lines && cachedBySong.lines.length === lines.length) {
-          return jsonResponse({ lines: cachedBySong.lines, source: 'cache' });
+        if (cachedBySong) {
+          if (
+            cachedBySong.lines &&
+            cachedBySong.lines.length === lines.length &&
+            !cachedBySong.lines.some((l) => /[\u4e00-\u9faf]/.test(l))
+          ) {
+            return jsonResponse({
+              lines: cachedBySong.lines,
+              source: 'cache',
+              failedLines: 0,
+              totalLines: lines.length,
+            });
+          }
+          derivationCache.delete(songKey);
         }
       }
+
       const cachedByHash = derivationCache.get(hashKey);
-      if (cachedByHash?.lines && cachedByHash.lines.length === lines.length) {
-        return jsonResponse({ lines: cachedByHash.lines, source: 'cache' });
+      if (cachedByHash) {
+        if (
+          cachedByHash.lines &&
+          cachedByHash.lines.length === lines.length &&
+          !cachedByHash.lines.some((l) => /[\u4e00-\u9faf]/.test(l))
+        ) {
+          return jsonResponse({
+            lines: cachedByHash.lines,
+            source: 'cache',
+            failedLines: 0,
+            totalLines: lines.length,
+          });
+        }
+        derivationCache.delete(hashKey);
       }
 
       const kuro = await getKuroshiro();
-      const romajiLines = await Promise.all(
-        lines.map(async (line) => {
+      const kuroWasNull = kuro === null;
+      let failedLines = 0;
+      let convertedKanjiLines = 0;
+      let japaneseLinesCount = 0;
+      let convertedJapaneseLinesCount = 0;
+      let convertedLines: string[] | null = null;
+      let source: 'kuroshiro' | 'gemini' = 'kuroshiro';
+
+      if (kuro) {
+        const results: string[] = [];
+        for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || !JAPANESE_CHAR_REGEX.test(trimmed)) {
-            return trimmed;
+            results.push(trimmed);
+            continue;
           }
-          const cached = derivationCache.get(trimmed);
-          if (cached?.romaji) {
-            return cached.romaji;
+          japaneseLinesCount++;
+          const lineKey = `romaji:line:${sha256(trimmed)}`;
+          const cachedLine = derivationCache.get(lineKey);
+          if (cachedLine?.romaji && !/[\u4e00-\u9faf]/.test(cachedLine.romaji)) {
+            results.push(cachedLine.romaji);
+            convertedJapaneseLinesCount++;
+            continue;
           }
-          if (kuro) {
-            try {
-              const converted = await kuro.convert(trimmed, {
-                to: 'romaji',
-                mode: 'spaced',
-                romajiSystem: 'hepburn',
-              });
-              if (converted && typeof converted === 'string') {
-                const res = converted.trim();
-                derivationCache.set(trimmed, { ...(cached || {}), romaji: res });
-                return res;
-              }
-            } catch {
-              // fallback
-            }
-          }
-          return trimmed;
-        })
-      );
 
-      const entry: DerivationEntry = { lines: romajiLines, source: 'kuroshiro' };
-      if (songKey) derivationCache.set(songKey, entry);
-      derivationCache.set(hashKey, entry);
-      scheduleSaveDerivationCache();
-      return jsonResponse({ lines: romajiLines, source: 'kuroshiro' });
+          try {
+            const res = await kuro.convert(trimmed, {
+              to: 'romaji',
+              mode: 'spaced',
+              romajiSystem: 'hepburn',
+            });
+            if (res && typeof res === 'string') {
+              const cleaned = res.trim();
+              if (!/[\u4e00-\u9faf]/.test(cleaned)) {
+                derivationCache.set(lineKey, { romaji: cleaned });
+                results.push(cleaned);
+                convertedJapaneseLinesCount++;
+                continue;
+              }
+            }
+            failedLines++;
+            console.error(
+              '[Relay] per-line conversion failed for:',
+              JSON.stringify(trimmed.slice(0, 80)),
+              'conversion incomplete or contains kanji'
+            );
+            results.push(trimmed);
+          } catch (err: unknown) {
+            failedLines++;
+            console.error(
+              '[Relay] per-line conversion failed for:',
+              JSON.stringify(trimmed.slice(0, 80)),
+              (err as Error).message
+            );
+            results.push(trimmed);
+          }
+        }
+
+        convertedKanjiLines = results.filter((l) => /[\u4e00-\u9faf]/.test(l)).length;
+
+        // Batch succeeds if at least one Japanese line converted to romaji (or if 0 Japanese lines existed)
+        if (japaneseLinesCount === 0 || convertedJapaneseLinesCount > 0) {
+          convertedLines = results;
+          source = 'kuroshiro';
+        }
+      }
+
+      // If Kuroshiro produced 0 usable Japanese conversions, try optional Gemini fallback
+      if (!convertedLines && isGeminiConfigured()) {
+        try {
+          const geminiResult = await romanizeLyricsWithGemini(lines);
+          if (
+            geminiResult &&
+            geminiResult.length === lines.length &&
+            !geminiResult.some((l) => /[\u4e00-\u9faf]/.test(l))
+          ) {
+            convertedLines = geminiResult;
+            source = 'gemini';
+            failedLines = 0;
+            convertedKanjiLines = 0;
+          }
+        } catch (err: unknown) {
+          console.error('[Relay] Gemini romaji fallback failed:', (err as Error).message);
+        }
+      }
+
+      if (convertedLines) {
+        if (failedLines === 0) {
+          const entry: DerivationEntry = { lines: convertedLines, source };
+          if (songKey) derivationCache.set(songKey, entry);
+          derivationCache.set(hashKey, entry);
+          scheduleSaveDerivationCache();
+        }
+        return jsonResponse({
+          lines: convertedLines,
+          source,
+          failedLines,
+          totalLines: lines.length,
+        });
+      }
+
+      // Both Kuroshiro and optional Gemini failed or were unavailable
+      return jsonResponse(
+        {
+          error: 'romaji_unavailable',
+          reason: 'kuroshiro_not_initialized',
+          detail: kuroshiroLastError,
+          kuroWasNull,
+          convertedKanjiLines,
+          totalLines: lines.length,
+          geminiConfigured: isGeminiConfigured(),
+        },
+        503
+      );
     } catch (err: unknown) {
       return errorResponse(400, 'invalid_batch_request', (err as Error).message);
     }
@@ -437,20 +623,26 @@ async function handleTranslateEnRequest(req: Request, url: URL): Promise<Respons
       }
 
       const songId = typeof body?.songId === 'string' ? body.songId.trim() : '';
-      const linesHash = Bun.hash(lines.join('\n')).toString(16);
-      const hashKey = `lines:${linesHash}`;
-      const songKey = songId ? `song:${songId}` : null;
+      const contentHash = sha256(lines.join('\n'));
+      const hashKey = `translate:${contentHash}`;
+      const songKey = songId ? `translate:${songId}|${contentHash}` : null;
 
-      // 1. Check disk cache by songId or lines content hash
+      // 1. Check disk cache
       if (songKey) {
         const cachedBySong = derivationCache.get(songKey);
-        if (cachedBySong?.lines && cachedBySong.lines.length === lines.length) {
-          return jsonResponse({ lines: cachedBySong.lines, source: cachedBySong.source || 'cache' });
+        if (cachedBySong) {
+          if (cachedBySong.lines && cachedBySong.lines.length === lines.length) {
+            return jsonResponse({ lines: cachedBySong.lines, source: cachedBySong.source || 'cache' });
+          }
+          derivationCache.delete(songKey);
         }
       }
       const cachedByHash = derivationCache.get(hashKey);
-      if (cachedByHash?.lines && cachedByHash.lines.length === lines.length) {
-        return jsonResponse({ lines: cachedByHash.lines, source: cachedByHash.source || 'cache' });
+      if (cachedByHash) {
+        if (cachedByHash.lines && cachedByHash.lines.length === lines.length) {
+          return jsonResponse({ lines: cachedByHash.lines, source: cachedByHash.source || 'cache' });
+        }
+        derivationCache.delete(hashKey);
       }
 
       // 2. Try Gemini Flash-Lite first if configured
@@ -997,50 +1189,89 @@ async function handleTranslateBatchRequest(req: Request): Promise<Response> {
   }
 }
 
-const server = Bun.serve({
-  port: PORT,
-  async fetch(req) {
-    const url = new URL(req.url);
+function getPidHoldingPort(port: number): string | null {
+  try {
+    const fuser = Bun.spawnSync(['fuser', `${port}/tcp`]);
+    const fuserOut = (fuser.stdout.toString() || fuser.stderr.toString()).trim();
+    const pids = fuserOut.split(/\s+/).filter(Boolean);
+    if (pids.length > 0) return pids[0];
+  } catch {}
+  try {
+    const ss = Bun.spawnSync(['ss', '-tlpn']);
+    const text = ss.stdout.toString();
+    const match = text.match(new RegExp(`:${port}\\s+.*users:\\(\\([^)]*pid=(\\d+)`));
+    if (match?.[1]) return match[1];
+  } catch {}
+  return null;
+}
 
-    if (req.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders(req) });
-    }
+const existingPid = getPidHoldingPort(PORT);
+if (existingPid && existingPid !== String(process.pid)) {
+  console.error(`[Relay] Port ${PORT} already in use by PID ${existingPid} - exiting`);
+  process.exit(1);
+}
 
-    let res: Response;
-    if (url.pathname === '/api/lyrics') {
-      res = await handleLyricsRequest(url);
-    } else if (url.pathname === '/api/romaji') {
-      res = await handleRomajiRequest(req, url);
-    } else if (url.pathname === '/api/translate-en') {
-      res = await handleTranslateEnRequest(req, url);
-    } else if (url.pathname === '/api/translate-title') {
-      res = await handleTranslateTitleRequest(url);
-    } else if (url.pathname === '/api/translate-batch' && req.method === 'POST') {
-      res = await handleTranslateBatchRequest(req);
-    } else if (url.pathname === '/api/translate-cache') {
-      const obj: Record<string, TitleTranslationEntry> = {};
-      for (const [k, v] of titleTranslationCache.entries()) {
-        obj[k] = v;
+let server: ReturnType<typeof Bun.serve>;
+try {
+  server = Bun.serve({
+    port: PORT,
+    async fetch(req) {
+      try {
+        const url = new URL(req.url);
+
+        if (req.method === 'OPTIONS') {
+          return new Response(null, { status: 204, headers: corsHeaders(req) });
+        }
+
+        let res: Response;
+        if (url.pathname === '/api/lyrics') {
+          res = await handleLyricsRequest(url);
+        } else if (url.pathname === '/api/romaji') {
+          res = await handleRomajiRequest(req, url);
+        } else if (url.pathname === '/api/translate-en') {
+          res = await handleTranslateEnRequest(req, url);
+        } else if (url.pathname === '/api/translate-title') {
+          res = await handleTranslateTitleRequest(url);
+        } else if (url.pathname === '/api/translate-batch' && req.method === 'POST') {
+          res = await handleTranslateBatchRequest(req);
+        } else if (url.pathname === '/api/translate-cache') {
+          const obj: Record<string, TitleTranslationEntry> = {};
+          for (const [k, v] of titleTranslationCache.entries()) {
+            obj[k] = v;
+          }
+          res = jsonResponse({ translations: obj });
+        } else if (url.pathname === '/api/health') {
+          res = jsonResponse({
+            status: 'ok',
+            service: 'plenrip-lyrics-relay',
+            pid: process.pid,
+            providers: Object.keys(PROVIDERS_BY_ID),
+            features: ['lyrics', 'romaji', 'translate-title', 'translate-batch', 'translate-cache'],
+          });
+        } else {
+          res = errorResponse(404, 'not_found', `Route not found: ${url.pathname}`);
+        }
+
+        const headers = corsHeaders(req);
+        for (const [k, v] of Object.entries(headers)) {
+          res.headers.set(k, v);
+        }
+        return res;
+      } catch (err: unknown) {
+        console.error('[Relay] Uncaught request error:', err);
+        const res = errorResponse(500, 'internal_error', (err as Error).message);
+        const headers = corsHeaders(req);
+        for (const [k, v] of Object.entries(headers)) {
+          res.headers.set(k, v);
+        }
+        return res;
       }
-      res = jsonResponse({ translations: obj });
-    } else if (url.pathname === '/api/health') {
-      res = jsonResponse({
-        status: 'ok',
-        service: 'plenrip-lyrics-relay',
-        providers: Object.keys(PROVIDERS_BY_ID),
-        features: ['lyrics', 'romaji', 'translate-title', 'translate-batch', 'translate-cache'],
-      });
-    } else {
-      res = errorResponse(404, 'not_found', `Route not found: ${url.pathname}`);
-    }
+    },
+  });
+} catch (err: unknown) {
+  const pid = getPidHoldingPort(PORT) || 'unknown';
+  console.error(`[Relay] Port ${PORT} already in use by PID ${pid} - exiting`);
+  process.exit(1);
+}
 
-    // Ensure all responses include CORS headers tailored to the request
-    const headers = corsHeaders(req);
-    for (const [k, v] of Object.entries(headers)) {
-      res.headers.set(k, v);
-    }
-    return res;
-  },
-});
-
-console.log(`[Relay] Century Lyrics Relay active on http://127.0.0.1:${server.port}`);
+console.log(`[Relay] PID ${process.pid} active on http://127.0.0.1:${server.port}`);

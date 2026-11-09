@@ -694,3 +694,65 @@ describe('KuGou KRC decrypt + parse (real 夜に駆ける fixtures)', () => {
     expect(parseKrc('[ti:only metadata]\n[ar:artist]\n')).toEqual([]);
   });
 });
+
+describe('Relay Total Rework (R1-R6)', () => {
+  it('R1: romaji endpoint returns per-line conversion with failedLines and totalLines', async () => {
+    const res = await fetch('http://127.0.0.1:3005/api/romaji', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lines: ['未だ道は乾かないだろう', 'Hello World', '雨の降る街'],
+        songId: 'rework-test-song-1',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(Array.isArray(data.lines)).toBe(true);
+    expect(data.lines.length).toBe(3);
+    expect(data.totalLines).toBe(3);
+    expect(typeof data.failedLines).toBe('number');
+    expect(data.failedLines).toBe(0);
+    // Non-Japanese line is preserved
+    expect(data.lines[1]).toBe('Hello World');
+    // Japanese lines are converted to romaji
+    expect(data.lines[0]).toContain('imada');
+  });
+
+  it('R3: explicit 404 not_found when all providers find no match', async () => {
+    const res = await fetch('http://127.0.0.1:3005/api/lyrics?title=completely_nonexistent_track_xyz_9999&artist=nobody_known_xyz_9999');
+    expect(res.status).toBe(404);
+    const data = await res.json();
+    expect(data.error).toBe('not_found');
+    // CORS headers must always be present
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  }, 20000);
+
+  it('R4: cache retrieval matches hash and length', async () => {
+    const lines = ['桜舞い散る夜に', '君の手を握りしめた'];
+    const res1 = await fetch('http://127.0.0.1:3005/api/romaji', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lines,
+        songId: 'rework-cache-test-2',
+      }),
+    });
+    expect(res1.status).toBe(200);
+
+    const res2 = await fetch('http://127.0.0.1:3005/api/romaji', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lines,
+        songId: 'rework-cache-test-2',
+      }),
+    });
+    expect(res2.status).toBe(200);
+    const data2 = await res2.json();
+    expect(data2.source).toBe('cache');
+    expect(data2.lines.length).toBe(2);
+    expect(data2.failedLines).toBe(0);
+    expect(data2.totalLines).toBe(2);
+  });
+});

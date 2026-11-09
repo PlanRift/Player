@@ -1,4 +1,4 @@
-import type { LyricsProvider } from './base';
+import { ProviderError, type LyricsProvider } from './base';
 import type { LyricsQuery, UnifiedLyrics, LyricLine } from '../types';
 import { cleanTitle, findBestCandidate, stripCreditLines } from '../scoring';
 import { parseLrc, hasWordTimings } from '../normalize/lrc';
@@ -37,7 +37,10 @@ async function downloadLyrics(
 ): Promise<string | null> {
   const downloadUrl = `https://lyrics.kugou.com/download?ver=1&client=pc&fmt=${fmt}&charset=utf8&id=${best.id}&accesskey=${best.accesskey}`;
   const downRes = await fetch(downloadUrl, { headers: KUGOU_HEADERS, signal });
-  if (!downRes.ok) return null;
+  if (!downRes.ok) {
+    if (downRes.status === 404) return null;
+    throw new ProviderError(`KuGou download failed with HTTP ${downRes.status}`, downRes.status);
+  }
   const downData = (await downRes.json()) as KugouDownloadResponse;
   return downData?.content ?? null;
 }
@@ -142,7 +145,10 @@ export const kugouProvider: LyricsProvider = {
 
     try {
       const searchRes = await fetch(searchUrl, { headers: KUGOU_HEADERS, signal });
-      if (!searchRes.ok) return null;
+      if (!searchRes.ok) {
+        if (searchRes.status === 404) return null;
+        throw new ProviderError(`KuGou search failed with HTTP ${searchRes.status}`, searchRes.status);
+      }
 
       const data = (await searchRes.json()) as KugouSearchResponse;
       const candidatesRaw = data?.candidates;
@@ -170,6 +176,8 @@ export const kugouProvider: LyricsProvider = {
       return buildFromLrc(lrcContent, best);
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') throw err;
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError((err as Error).message);
     }
 
     return null;

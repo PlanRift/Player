@@ -1,4 +1,4 @@
-import type { LyricsProvider } from './base';
+import { ProviderError, type LyricsProvider } from './base';
 import type { LyricsQuery, UnifiedLyrics } from '../types';
 import { cleanTitle, findBestCandidate } from '../scoring';
 import { parseTtml } from '../normalize/ttml';
@@ -67,17 +67,21 @@ export const lrcredProvider: LyricsProvider = {
                   },
                 });
               }
+            } else if (ttmlRes.status !== 404) {
+              throw new ProviderError(`lrc.red ttml get failed with HTTP ${ttmlRes.status}`, ttmlRes.status);
             }
           }
         }
+      } else if (searchRes.status !== 404) {
+        throw new ProviderError(`lrc.red search failed with HTTP ${searchRes.status}`, searchRes.status);
       }
 
       // Fallback via lyrics-api.binimum.org redirect
       const binimumParams = new URLSearchParams({
         track: cleaned,
-        artist: query.artist || '',
-        duration: query.duration ? String(Math.round(query.duration)) : '',
       });
+      if (query.artist) binimumParams.set('artist', query.artist);
+      if (query.duration) binimumParams.set('duration', String(Math.round(query.duration)));
       const binimumRes = await fetch(`https://lyrics-api.binimum.org/?${binimumParams.toString()}`, {
         redirect: 'follow',
         headers: { 'User-Agent': 'Century/1.0' },
@@ -105,11 +109,17 @@ export const lrcredProvider: LyricsProvider = {
                 hasWordSync,
               });
             }
+          } else if (lyricsRes.status !== 404) {
+            throw new ProviderError(`binimum lyrics get failed with HTTP ${lyricsRes.status}`, lyricsRes.status);
           }
         }
+      } else if (binimumRes.status !== 404 && binimumRes.status !== 400) {
+        throw new ProviderError(`binimum search failed with HTTP ${binimumRes.status}`, binimumRes.status);
       }
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') throw err;
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError((err as Error).message);
     }
 
     return null;

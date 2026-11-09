@@ -1,4 +1,4 @@
-import type { LyricsProvider } from './base';
+import { ProviderError, type LyricsProvider } from './base';
 import type { LyricsQuery, UnifiedLyrics } from '../types';
 import { cleanTitle, findBestCandidate } from '../scoring';
 import { parseLrc, hasWordTimings } from '../normalize/lrc';
@@ -44,7 +44,10 @@ export const neteaseProvider: LyricsProvider = {
 
     try {
       const searchRes = await fetch(searchUrl, { headers: NETEASE_HEADERS, signal });
-      if (!searchRes.ok) return null;
+      if (!searchRes.ok) {
+        if (searchRes.status === 404) return null;
+        throw new ProviderError(`NetEase search failed with HTTP ${searchRes.status}`, searchRes.status);
+      }
 
       const data = (await searchRes.json()) as NeteaseSearchResponse;
       const songs = data?.result?.songs;
@@ -62,7 +65,10 @@ export const neteaseProvider: LyricsProvider = {
 
       const lyricUrl = `https://music.163.com/api/song/lyric?id=${best.id}&lv=-1&kv=-1&tv=-1&rv=-1`;
       const lyricRes = await fetch(lyricUrl, { headers: NETEASE_HEADERS, signal });
-      if (!lyricRes.ok) return null;
+      if (!lyricRes.ok) {
+        if (lyricRes.status === 404) return null;
+        throw new ProviderError(`NetEase lyric failed with HTTP ${lyricRes.status}`, lyricRes.status);
+      }
 
       const lyricData = (await lyricRes.json()) as NeteaseLyricResponse;
 
@@ -114,6 +120,8 @@ export const neteaseProvider: LyricsProvider = {
       }
     } catch (err: unknown) {
       if ((err as Error).name === 'AbortError') throw err;
+      if (err instanceof ProviderError) throw err;
+      throw new ProviderError((err as Error).message);
     }
 
     return null;

@@ -195,12 +195,15 @@ def safe_path(sub: str = "", forbid_root: bool = False, forbid_protected: bool =
         raise PermissionError(f'FATAL SECURITY BOUNDARY: Target "{target}" escapes storage root "{STORAGE_DIR}"')
 
     if (
-        canonical_target == CANONICAL_PROJECT_ROOT
-        or canonical_target.startswith(CANONICAL_PROJECT_ROOT + os.sep)
-        or canonical_target == CANONICAL_SERVER_ROOT
+        canonical_target == CANONICAL_SERVER_ROOT
         or canonical_target.startswith(CANONICAL_SERVER_ROOT + os.sep)
         or canonical_target == CANONICAL_TMP_ROOT
         or canonical_target.startswith(CANONICAL_TMP_ROOT + os.sep)
+    ):
+        raise PermissionError(f'FATAL SECURITY BOUNDARY: Access to application/internal directory "{target}" is forbidden')
+
+    if not CANONICAL_STORAGE_ROOT.startswith(CANONICAL_PROJECT_ROOT + os.sep) and (
+        canonical_target == CANONICAL_PROJECT_ROOT or canonical_target.startswith(CANONICAL_PROJECT_ROOT + os.sep)
     ):
         raise PermissionError(f'FATAL SECURITY BOUNDARY: Access to application/internal directory "{target}" is forbidden')
 

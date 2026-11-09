@@ -2331,7 +2331,7 @@
     // every subdirectory, each with its relative path.
     searchResults: null,
     searchRunning: false,
-    bridgeUrl: localStorage.getItem('century.nas_url') || localStorage.getItem('century.file_bridge_url') || 'http://localhost:3001',
+    bridgeUrl: localStorage.getItem('century.nas_url') || localStorage.getItem('century.file_bridge_url') || '',
     apiKey: localStorage.getItem('century.nas_api_key') || '',
     isOnline: false,
     initialized: false,
@@ -2339,17 +2339,19 @@
 
   function getFileBridgeBase() {
     const saved = localStorage.getItem('century.nas_url') || localStorage.getItem('century.file_bridge_url');
-    if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
-
-    // Automatically infer from client.baseUrl (Navidrome's IP / hostname on Windows PC)
-    try {
-      if (client?.baseUrl) {
-        const u = new URL(client.baseUrl);
-        return `${u.protocol}//${u.hostname}:3001`;
+    if (saved && saved.trim()) {
+      const trimmed = saved.trim().replace(/\/+$/, '');
+      // On HTTPS, strip plain http://localhost:3001 or 127.0.0.1:3001 to prevent mixed content & macOS IPv6 drops
+      if (typeof window !== 'undefined' && window.location?.protocol === 'https:' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(trimmed)) {
+        return '/bridge';
       }
-    } catch (_) {}
-
-    return (filesState.bridgeUrl || 'http://localhost:3001').trim().replace(/\/+$/, '');
+      // If explicitly saved as the old default http://localhost:3001, use relative path
+      if (/^http:\/\/(localhost|127\.0\.0\.1):3001$/i.test(trimmed)) {
+        return '/bridge';
+      }
+      return trimmed;
+    }
+    return '/bridge';
   }
 
   function getFileBridgeApiKey() {
@@ -2841,9 +2843,8 @@
         const file = await new Promise((resolve, reject) => {
           entry.file(resolve, reject);
         });
-        // Map entry.fullPath (e.g. "/Artist/Album/Track.mp3") to custom property file.preservePath
-        file.preservePath = String(entry.fullPath || file.name).normalize('NFC');
-        files.push(file);
+        const relPath = String(entry.fullPath || file.name).replace(/^[/\\]+/, '').normalize('NFC');
+        files.push({ file, relativePath: relPath });
       } catch (err) {
         console.warn(`[FileBridge] Could not read file "${entry.fullPath}":`, err);
       }
@@ -2879,8 +2880,7 @@
         } else {
           const file = item.getAsFile();
           if (file) {
-            file.preservePath = file.name;
-            entryPromises.push(Promise.resolve([file]));
+            entryPromises.push(Promise.resolve([{ file, relativePath: file.name }]));
           }
         }
       }
@@ -2900,72 +2900,172 @@
     if (dataTransfer?.files?.length) {
       for (let i = 0; i < dataTransfer.files.length; i++) {
         const f = dataTransfer.files[i];
-        f.preservePath = f.webkitRelativePath || f.name;
-        fallbackList.push(f);
+        fallbackList.push({
+          file: f,
+          relativePath: f.webkitRelativePath || f.name,
+        });
       }
     }
     return fallbackList;
   }
 
-  // Upload files (and folders) to the bridge.
-  // Preserves internal directory structure (e.g. Artist/Album/Track.mp3) via FormData preservePaths.
-  // Batches under 80MB use single FormData POST; files > 20MB stream 20MB chunks to bypass Cloudflare 100MB limit.
+  // Upload files and folders in sequential batches (U1 + U2)
+  // Max 8 files AND max 40MB per batch (single file > 40MB uploaded alone; > 100MB rejected up front)
   async function uploadFiles(files) {
-    if (!files || files.length === 0) return;
+    if (!files) return;
+    const rawList = Array.isArray(files) ? files : Array.from(files);
+    if (rawList.length === 0) return;
+
     const base = getFileBridgeBase();
-    // Filter out macOS/Windows metadata files (.DS_Store, ._*, __MACOSX, Thumbs.db)
-    const fileList = Array.from(files).filter((f) => {
-      const rel = f.preservePath || f.webkitRelativePath || f.name || '';
-      return !isClientIgnoredUploadPath(rel);
-    });
-    if (fileList.length === 0) {
-      showToast('No uploadable files found (ignored system metadata files)', 'error');
+    let unsafeCount = 0;
+    const validItems = [];
+
+    for (const item of rawList) {
+      let file = null;
+      let relPath = '';
+
+      if (item && item.file instanceof File) {
+        file = item.file;
+        relPath = item.relativePath || file.webkitRelativePath || file.name || '';
+      } else if (item instanceof File) {
+        file = item;
+        relPath = item.webkitRelativePath || item.preservePath || item.name || '';
+      } else {
+        continue;
+      }
+
+      relPath = String(relPath).replace(/^[/\\]+/, '').normalize('NFC');
+
+      if (isClientIgnoredUploadPath(relPath)) {
+        continue;
+      }
+
+      const segments = relPath.split(/[/\\]/).map((s) => s.trim());
+      const isUnsafe =
+        relPath.startsWith('/') ||
+        relPath.startsWith('\\') ||
+        /^[a-zA-Z]:/.test(relPath) ||
+        segments.some((seg) => seg === '..');
+
+      if (isUnsafe) {
+        unsafeCount++;
+        continue;
+      }
+
+      validItems.push({ file, relativePath: relPath });
+    }
+
+    if (unsafeCount > 0) {
+      showToast(`Skipped ${unsafeCount} file${unsafeCount === 1 ? '' : 's'} with unsafe path(s)`, 'error');
+    }
+
+    if (validItems.length === 0) {
+      if (unsafeCount === 0) {
+        showToast('No uploadable files found (system metadata ignored)', 'error');
+      }
       return;
     }
-    const totalFiles = fileList.length;
-    const totalBytes = fileList.reduce((acc, f) => acc + (f.size || 0), 0);
 
-    const isFolder = fileList.some((f) => f.preservePath || f.webkitRelativePath);
-    let overallUploadedBytes = 0;
+    // U2: Reject single files over 100MB up front (Cloudflare limit)
+    const MAX_SINGLE_FILE = 100 * 1024 * 1024;
+    for (const item of validItems) {
+      if ((item.file.size || 0) > MAX_SINGLE_FILE) {
+        showToast(`Cannot upload "${item.file.name}": exceeds Cloudflare 100MB limit (${formatFileSize(item.file.size)})`, 'error');
+        return;
+      }
+    }
 
-    const CHUNK_SIZE = 20 * 1024 * 1024;
-    const anyLargeFile = fileList.some((f) => (f.size || 0) > CHUNK_SIZE);
-    const useDirectFormData = !anyLargeFile && totalBytes <= 80 * 1024 * 1024;
+    // U2: Split into sequential batches (at most 8 files AND at most 40MB per batch)
+    const MAX_BATCH_FILES = 8;
+    const MAX_BATCH_BYTES = 40 * 1024 * 1024;
 
-    const label = isFolder
-      ? `Uploading folder (${totalFiles} files)...`
-      : `Uploading ${totalFiles} file${totalFiles === 1 ? '' : 's'}...`;
-    showToast(label);
-    showUploadProgress(0, label);
+    const batches = [];
+    let currentBatch = [];
+    let currentBatchBytes = 0;
+
+    for (const item of validItems) {
+      const size = item.file.size || 0;
+
+      if (size > MAX_BATCH_BYTES) {
+        if (currentBatch.length > 0) {
+          batches.push(currentBatch);
+          currentBatch = [];
+          currentBatchBytes = 0;
+        }
+        batches.push([item]);
+        continue;
+      }
+
+      if (currentBatch.length >= MAX_BATCH_FILES || (currentBatchBytes + size) > MAX_BATCH_BYTES) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentBatchBytes = 0;
+      }
+
+      currentBatch.push(item);
+      currentBatchBytes += size;
+    }
+
+    if (currentBatch.length > 0) {
+      batches.push(currentBatch);
+    }
+
+    const totalFiles = validItems.length;
+    const totalBytes = validItems.reduce((acc, it) => acc + (it.file.size || 0), 0);
+    const isFolder = validItems.some((it) => it.relativePath && it.relativePath.includes('/'));
+
+    let bytesSentSoFar = 0;
+    let filesUploadedSoFar = 0;
 
     const formatBytes = (b) => {
       if (!b || b <= 0) return '0 B';
       return formatFileSize(b);
     };
 
+    const destPath = filesState.currentPath || '';
+    let currentBatchIndex = 0;
+
     try {
-      if (useDirectFormData) {
-        // Append raw files and their corresponding preservePath strings to FormData
+      for (let bIndex = 0; bIndex < batches.length; bIndex++) {
+        currentBatchIndex = bIndex + 1;
+        const batch = batches[bIndex];
+        const batchBytes = batch.reduce((acc, it) => acc + (it.file.size || 0), 0);
+
+        // Build FormData: paths field appended BEFORE files field (bridge requires paths-first ordering)
         const formData = new FormData();
-        for (const f of fileList) {
-          const preserved = String(f.preservePath || f.webkitRelativePath || f.name || '').normalize('NFC');
-          formData.append('preservePaths', preserved);
-          formData.append('paths', preserved);
+        for (const item of batch) {
+          const p = item.relativePath || item.file.webkitRelativePath || item.file.name || '';
+          formData.append('paths', p);
+          formData.append('preservePaths', p);
         }
-        for (const f of fileList) {
-          formData.append('files', f);
+        for (const item of batch) {
+          formData.append('files', item.file);
         }
+
+        const getBatchLabel = (batchLoaded = 0) => {
+          const curTotal = bytesSentSoFar + batchLoaded;
+          const baseLabel = isFolder
+            ? `Uploading folder (${totalFiles} files, batch ${currentBatchIndex} of ${batches.length})...`
+            : `Uploading ${totalFiles} file${totalFiles === 1 ? '' : 's'} (batch ${currentBatchIndex} of ${batches.length})...`;
+          return `${baseLabel} (${formatBytes(curTotal)} / ${formatBytes(totalBytes)})`;
+        };
+
+        const pctStart = totalBytes > 0 ? Math.min(99, Math.round((bytesSentSoFar / totalBytes) * 100)) : 0;
+        showUploadProgress(pctStart, getBatchLabel(0));
 
         await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          xhr.open('POST', `${base}/api/files/upload?path=${encodeURIComponent(filesState.currentPath || '')}`);
+          xhr.open('POST', `${base}/api/files/upload?path=${encodeURIComponent(destPath)}`);
           const headers = getFileBridgeHeaders();
-          for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+          for (const [k, v] of Object.entries(headers)) {
+            xhr.setRequestHeader(k, v);
+          }
 
           xhr.upload.addEventListener('progress', (e) => {
             if (e.lengthComputable) {
-              const pct = totalBytes > 0 ? Math.min(99, Math.round((e.loaded / totalBytes) * 100)) : 0;
-              showUploadProgress(pct, `${label} (${formatBytes(e.loaded)} / ${formatBytes(totalBytes)})`);
+              const curTotal = bytesSentSoFar + e.loaded;
+              const pct = totalBytes > 0 ? Math.min(99, Math.round((curTotal / totalBytes) * 100)) : 0;
+              showUploadProgress(pct, getBatchLabel(e.loaded));
             }
           });
 
@@ -2988,105 +3088,9 @@
           xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
           xhr.send(formData);
         });
-      } else {
-        // Chunked streaming for large files / multi-gigabyte collections
-        let filesCompleted = 0;
 
-        for (let fi = 0; fi < totalFiles; fi++) {
-          const file = fileList[fi];
-          const relPath = String(file.preservePath || file.webkitRelativePath || file.name || '').normalize('NFC');
-          const fileSize = file.size || 0;
-          const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
-          const uploadId = `up_${Date.now()}_${Math.random().toString(36).slice(2, 9)}_${fi}`;
-
-          let fileUploadedBytes = 0;
-
-          for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-            const start = chunkIdx * CHUNK_SIZE;
-            const end = Math.min(start + CHUNK_SIZE, fileSize);
-            const chunkBlob = file.slice(start, end);
-            const chunkSize = end - start;
-
-            const query = new URLSearchParams({
-              path: filesState.currentPath || '',
-              name: relPath,
-              preservePath: relPath,
-              uploadId,
-              chunkIndex: String(chunkIdx),
-              totalChunks: String(totalChunks),
-              totalSize: String(fileSize),
-            });
-
-            // Upload chunk with auto-retry on transient errors
-            let attempt = 0;
-            const maxAttempts = 3;
-            let chunkSuccess = false;
-            let lastErr = null;
-
-            while (attempt < maxAttempts && !chunkSuccess) {
-              attempt++;
-              try {
-                await new Promise((resolve, reject) => {
-                  const xhr = new XMLHttpRequest();
-                  xhr.open('POST', `${base}/api/files/upload-chunk?${query.toString()}`);
-                  const headers = getFileBridgeHeaders();
-                  for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
-                  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-
-                  xhr.upload.addEventListener('progress', (e) => {
-                    if (e.lengthComputable) {
-                      const curTotal = overallUploadedBytes + e.loaded;
-                      const pct = totalBytes > 0 ? Math.min(99, Math.round((curTotal / totalBytes) * 100)) : 0;
-                      const prefix = totalFiles > 1 ? `[${fi + 1}/${totalFiles}] ` : '';
-                      showUploadProgress(pct, `${prefix}${file.name} (${formatBytes(curTotal)} / ${formatBytes(totalBytes)})`);
-                    }
-                  });
-
-                  xhr.addEventListener('load', () => {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                      resolve();
-                    } else if (xhr.status === 401) {
-                      reject(new Error('401 Unauthorized: Invalid or missing NAS API Key.'));
-                    } else {
-                      try {
-                        const err = JSON.parse(xhr.responseText || '{}');
-                        reject(new Error(err.error || `HTTP ${xhr.status}`));
-                      } catch {
-                        reject(new Error(`HTTP ${xhr.status}`));
-                      }
-                    }
-                  });
-
-                  xhr.addEventListener('error', () => reject(new Error(`Network error while uploading ${file.name}`)));
-                  xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
-                  xhr.send(chunkBlob);
-                });
-                chunkSuccess = true;
-              } catch (err) {
-                lastErr = err;
-                if (err.message && err.message.includes('401')) {
-                  throw err;
-                }
-                if (attempt < maxAttempts) {
-                  await new Promise((r) => setTimeout(r, 1000 * attempt));
-                }
-              }
-            }
-
-            if (!chunkSuccess) {
-              throw lastErr || new Error(`Failed to upload chunk ${chunkIdx + 1} of ${file.name}`);
-            }
-
-            fileUploadedBytes += chunkSize;
-            overallUploadedBytes += chunkSize;
-
-            const pct = totalBytes > 0 ? Math.round((overallUploadedBytes / totalBytes) * 100) : 100;
-            const prefix = totalFiles > 1 ? `[${fi + 1}/${totalFiles}] ` : '';
-            showUploadProgress(pct, `${prefix}${file.name} (${formatBytes(overallUploadedBytes)} / ${formatBytes(totalBytes)})`);
-          }
-
-          filesCompleted++;
-        }
+        bytesSentSoFar += batchBytes;
+        filesUploadedSoFar += batch.length;
       }
 
       showUploadProgress(100, `Completed ${totalFiles} file${totalFiles === 1 ? '' : 's'}`);
@@ -3096,7 +3100,10 @@
       loadFilesView();
     } catch (err) {
       hideUploadProgress();
-      showToast(`Upload failed: ${err.message}`, 'error');
+      showToast(
+        `Upload failed at batch ${currentBatchIndex} of ${batches.length} (${filesUploadedSoFar} of ${totalFiles} files uploaded): ${err.message}`,
+        'error'
+      );
     }
   }
 
@@ -4833,7 +4840,8 @@
 
     const nasUrlInput = $('settings-nas-url');
     if (nasUrlInput) {
-      nasUrlInput.value = getFileBridgeBase();
+      const savedNas = (localStorage.getItem('century.nas_url') || localStorage.getItem('century.file_bridge_url') || '').trim();
+      nasUrlInput.value = /^http:\/\/(localhost|127\.0\.0\.1):3001$/i.test(savedNas) ? '' : savedNas;
     }
     const nasKeyInput = $('settings-nas-key');
     if (nasKeyInput) {
@@ -5407,14 +5415,23 @@
       e.preventDefault();
       const rawUrl = $('settings-nas-url')?.value?.trim() || '';
       const rawKey = $('settings-nas-key')?.value?.trim() || '';
-      const cleanUrl = rawUrl.replace(/\/+$/, '') || 'http://localhost:3001';
+      const cleanUrl = /^http:\/\/(localhost|127\.0\.0\.1):3001$/i.test(rawUrl) ? '' : rawUrl.replace(/\/+$/, '');
 
       filesState.bridgeUrl = cleanUrl;
       filesState.apiKey = rawKey;
 
-      localStorage.setItem('century.nas_url', cleanUrl);
-      localStorage.setItem('century.file_bridge_url', cleanUrl);
-      localStorage.setItem('century.nas_api_key', rawKey);
+      if (cleanUrl) {
+        localStorage.setItem('century.nas_url', cleanUrl);
+        localStorage.setItem('century.file_bridge_url', cleanUrl);
+      } else {
+        localStorage.removeItem('century.nas_url');
+        localStorage.removeItem('century.file_bridge_url');
+      }
+      if (rawKey) {
+        localStorage.setItem('century.nas_api_key', rawKey);
+      } else {
+        localStorage.removeItem('century.nas_api_key');
+      }
 
       const bridgeUrlInput = $('files-bridge-url-input');
       if (bridgeUrlInput) bridgeUrlInput.value = cleanUrl;
@@ -5426,7 +5443,7 @@
       }
     });
     on('settings-reset-nas-btn', 'click', async () => {
-      filesState.bridgeUrl = 'http://localhost:3001';
+      filesState.bridgeUrl = '';
       filesState.apiKey = '';
       localStorage.removeItem('century.nas_url');
       localStorage.removeItem('century.file_bridge_url');
