@@ -72,7 +72,13 @@ def safe_path(sub=""):
         raise PermissionError("Access denied: path traversal")
     return target
 
+@app.route("/api/health", methods=["GET"])
+@app.route("/api/files/health", methods=["GET"])
+def bridge_health():
+    return jsonify({"status": "ok", "service": "file-bridge"})
+
 @app.route("/api/files", methods=["GET"])
+@app.route("/api/files/list", methods=["GET"])
 def list_files():
     try:
         p = safe_path(request.args.get("path", ""))

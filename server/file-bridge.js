@@ -97,8 +97,13 @@ const resolveSafePath = (sub = '') => {
 };
 const safe = resolveSafePath;
 
+// Health check endpoint
+app.get(['/api/health', '/api/files/health'], (req, res) => {
+  res.json({ status: 'ok', service: 'file-bridge', storage: STORAGE_DIR });
+});
+
 // 1. List directory
-app.get('/api/files', async (req, res) => {
+app.get(['/api/files', '/api/files/list'], async (req, res) => {
   try {
     const dir = safe(req.query.path || '');
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -263,7 +268,7 @@ app.get('/api/files/download', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, () => {
   console.log(`\n  Plenrip Audio File Bridge (NAS)`);
   console.log(`  Local:   http://localhost:${PORT}`);
   console.log(`  NAS:     ${STORAGE_DIR}`);

@@ -189,6 +189,18 @@ function Kill-Port {
         $Pids = @($Listeners | Select-Object -ExpandProperty OwningProcess -Unique | Where-Object { $_ -gt 0 })
     } catch {}
 
+    if ($Pids.Count -eq 0) {
+        try {
+            $NetstatLines = netstat -ano | Select-String ":$Port\s+.*LISTENING\s+(\d+)"
+            foreach ($Line in $NetstatLines) {
+                if ($Line.Matches[0].Groups[1].Value) {
+                    $Pids += [int]$Line.Matches[0].Groups[1].Value
+                }
+            }
+            $Pids = @($Pids | Select-Object -Unique | Where-Object { $_ -gt 0 })
+        } catch {}
+    }
+
     if ($Pids.Count -gt 0) {
         Write-Log ("Port {0} is occupied by PID(s): {1}. Stopping existing process..." -f $Port, ($Pids -join ", "))
         foreach ($PidToKill in $Pids) {
@@ -243,30 +255,60 @@ function Test-Backend {
 function Test-HttpOk {
     param([string]$Url)
 
-    try {
-        $Response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-        return ($Response.StatusCode -eq 200)
-    } catch {
-        if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
-            return ([int]$_.Exception.Response.StatusCode -eq 200)
-        }
-        return $false
+    $Urls = @($Url)
+    if ($Url -match "localhost") {
+        $Urls += $Url -replace "localhost", "127.0.0.1"
     }
+
+    foreach ($U in $Urls) {
+        try {
+            $Response = Invoke-WebRequest -Uri $U -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
+            if ($Response.StatusCode -ge 200 -and $Response.StatusCode -lt 400) {
+                return $true
+            }
+        } catch {
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                $Code = [int]$_.Exception.Response.StatusCode
+                if ($Code -ge 200 -and $Code -lt 400) {
+                    return $true
+                }
+            }
+        }
+    }
+    return $false
 }
 
 function Test-BridgeUp {
-    param([string]$Url)
+    param([string]$Url, [int]$Port = 0)
 
-    try {
-        $Response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
-        return ($Response.StatusCode -eq 200 -or $Response.StatusCode -eq 401)
-    } catch {
-        if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
-            $Code = [int]$_.Exception.Response.StatusCode
-            return ($Code -eq 200 -or $Code -eq 401)
-        }
-        return $false
+    if ($Port -gt 0) {
+        try {
+            $Client = New-Object System.Net.Sockets.TcpClient
+            $Client.Connect("127.0.0.1", $Port)
+            $Client.Close()
+            return $true
+        } catch {}
     }
+
+    $Urls = @($Url)
+    if ($Url -match "localhost") {
+        $Urls += $Url -replace "localhost", "127.0.0.1"
+    }
+
+    foreach ($U in $Urls) {
+        try {
+            $Response = Invoke-WebRequest -Uri $U -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
+            if ($Response.StatusCode -ge 200 -and $Response.StatusCode -lt 500) {
+                return $true
+            }
+        } catch {
+            if ($_.Exception.Response) {
+                # Any HTTP response from the bridge (200, 401, 404, etc.) proves the server is listening
+                return $true
+            }
+        }
+    }
+    return $false
 }
 
 function Wait-ForService {
@@ -278,6 +320,11 @@ function Wait-ForService {
         [System.Diagnostics.Process]$Process = $null,
         [switch]$IsBridge
     )
+
+    $Port = 0
+    if ($Url -match ':(\d+)') {
+        $Port = [int]$Matches[1]
+    }
 
     for ($Attempt = 1; $Attempt -le ($TimeoutSec * 2); $Attempt++) {
         if ($null -ne $Process) {
@@ -293,10 +340,10 @@ function Wait-ForService {
             }
         }
 
-        $IsUp = if ($IsBridge) { Test-BridgeUp -Url $Url } else { Test-HttpOk -Url $Url }
+        $IsUp = if ($IsBridge) { Test-BridgeUp -Url $Url -Port $Port } else { Test-HttpOk -Url $Url }
         if ($IsUp) {
             Write-Log "$Name is responding."
-            return $true
+            return
         }
         Start-Sleep -Milliseconds 500
     }
@@ -625,7 +672,7 @@ try {
             -RedirectStandardOutput $BridgeStdout `
             -RedirectStandardError $BridgeStderr
 
-        Wait-ForService -Url "http://localhost:$BridgePort/api/files/list?path=" -TimeoutSec 30 -Name "File bridge" -LogFile $BridgeStderr -Process $BridgeProcess -IsBridge
+        Wait-ForService -Url "http://127.0.0.1:$BridgePort/api/files?path=" -TimeoutSec 30 -Name "File bridge" -LogFile $BridgeStderr -Process $BridgeProcess -IsBridge
     } else {
         Write-Log "File bridge skipped (BRIDGE=0)."
     }
