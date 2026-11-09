@@ -6,7 +6,7 @@
 # directly and is health-checked before the runner reports ready.
 set -Eeuo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
 # Ports (override with env vars).
@@ -112,8 +112,8 @@ done
 [[ -f "$PROJECT_DIR/package.json" ]] ||
     fail "package.json not found in $PROJECT_DIR"
 
-[[ -f "$PROJECT_DIR/index.html" ]] ||
-    fail "index.html not found in $PROJECT_DIR"
+[[ -f "$PROJECT_DIR/client/index.html" ]] ||
+    fail "client/index.html not found in $PROJECT_DIR"
 
 [[ -d "$PROJECT_DIR/relay" ]] ||
     fail "relay/ not found in $PROJECT_DIR"
@@ -307,6 +307,15 @@ log "Sign in from the app: Settings > Navidrome Server."
 log ""
 
 # --- Lyrics relay (Bun, port 3005) ---
+# The relay is a Bun project with real dependencies (kuroshiro + kuromoji
+# dict, 3DES for QRC, ...). A fresh unzip has no node_modules, and the
+# relay then dies at startup with "Cannot find package 'kuroshiro'" and
+# every Lyrics Source shows Unreachable. Install once when the deps are
+# missing; a present node_modules is left untouched.
+if [[ ! -d "$PROJECT_DIR/relay/node_modules" ]]; then
+    log "Installing lyrics relay dependencies (bun install)..."
+    (cd "$PROJECT_DIR/relay" && bun install) || fail "bun install failed for the lyrics relay"
+fi
 log "Starting lyrics relay..."
 log "  Log: $RELAY_LOG"
 PORT="$LYRICS_PORT" bun "$PROJECT_DIR/relay/src/index.ts" >"$RELAY_LOG" 2>&1 &
@@ -315,9 +324,25 @@ wait_for_http "$RELAY_URL/api/health" 30 "Lyrics relay" "$RELAY_LOG"
 
 # --- NAS file bridge (Node, port 3001) ---
 if [[ "$BRIDGE" != "0" ]]; then
+    # The bridge requires a real NAS API key (it refuses the placeholder).
+    # If none is set, generate one once and persist it, so the key stays
+    # stable across runs. Enter it in the app under Settings > NAS Storage.
+    NAS_KEY_FILE="$PROJECT_DIR/.nas-api-key"
+    if [[ -z "${NAS_API_KEY:-}" ]]; then
+        if [[ -f "$NAS_KEY_FILE" ]]; then
+            NAS_API_KEY="$(cat "$NAS_KEY_FILE")"
+        else
+            NAS_API_KEY="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+            (umask 077; printf '%s' "$NAS_API_KEY" > "$NAS_KEY_FILE")
+            log "Generated a NAS API key and saved it to .nas-api-key (mode 600)."
+        fi
+    fi
+    export NAS_API_KEY
     log "Starting file bridge..."
     log "  Log: $BRIDGE_LOG"
-    FILE_BRIDGE_PORT="$BRIDGE_PORT" node "$PROJECT_DIR/file-bridge.js" >"$BRIDGE_LOG" 2>&1 &
+    log "  NAS API key: $NAS_API_KEY"
+    log "  (Enter this key in the app under Settings > NAS Storage.)"
+    FILE_BRIDGE_PORT="$BRIDGE_PORT" node "$PROJECT_DIR/server/file-bridge.js" >"$BRIDGE_LOG" 2>&1 &
     BRIDGE_PID=$!
     wait_for_bridge "$BRIDGE_URL/api/files/list?path=" 30 "File bridge" "$BRIDGE_LOG"
 else
@@ -327,7 +352,7 @@ fi
 # --- Frontend (Node static server) ---
 log "Starting frontend..."
 log "  Log: $FRONTEND_LOG"
-WEB_PORT="$WEB_PORT" node "$PROJECT_DIR/serve.js" >"$FRONTEND_LOG" 2>&1 &
+WEB_PORT="$WEB_PORT" node "$PROJECT_DIR/server/serve.js" >"$FRONTEND_LOG" 2>&1 &
 FRONTEND_PID=$!
 wait_for_http "$WEB_URL/" 30 "Frontend" "$FRONTEND_LOG"
 

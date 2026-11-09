@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$ProjectDir = $PSScriptRoot
+$ProjectDir = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $ProjectDir
 
 $BackendProcess = $null
@@ -81,7 +81,6 @@ $LogDir = Join-Path $ProjectDir ".runner-logs"
 $BackendStdout = Join-Path $LogDir "navidrome.stdout.log"
 $BackendStderr = Join-Path $LogDir "navidrome.stderr.log"
 
-$WebDir = $ProjectDir
 $EnvFile = Join-Path $ProjectDir ".env"
 $EnvExample = Join-Path $ProjectDir ".env.example"
 
@@ -413,6 +412,22 @@ VITE_NAVIDROME_PASSWORD=
         throw "Bun is required for the lyrics relay but was not found in PATH. Install Bun and reopen the terminal."
     }
 
+    # A fresh unzip has no relay/node_modules, and the relay then dies at
+    # startup with "Cannot find package 'kuroshiro'". Install once when
+    # the deps are missing; a present node_modules is left untouched.
+    if (-not (Test-Path (Join-Path $ProjectDir "relay/node_modules"))) {
+        Write-Log "Installing lyrics relay dependencies (bun install)..."
+        Push-Location (Join-Path $ProjectDir "relay")
+        try {
+            & $BunCommand.Source install
+            if ($LASTEXITCODE -ne 0) {
+                throw "bun install failed for the lyrics relay (exit code $LASTEXITCODE)."
+            }
+        } finally {
+            Pop-Location
+        }
+    }
+
     $RelayProcess = Start-Process `
         -FilePath $BunCommand.Source `
         -ArgumentList @("relay/src/index.ts") `
@@ -451,14 +466,14 @@ VITE_NAVIDROME_PASSWORD=
 
     $BridgeProcess = Start-Process `
         -FilePath $JsRuntime.Source `
-        -ArgumentList @("file-bridge.js") `
+        -ArgumentList @("server/file-bridge.js") `
         -WorkingDirectory $ProjectDir `
         -NoNewWindow `
         -PassThru
 
     $DevProcess = Start-Process `
         -FilePath $JsRuntime.Source `
-        -ArgumentList @("serve.js") `
+        -ArgumentList @("server/serve.js") `
         -WorkingDirectory $ProjectDir `
         -NoNewWindow `
         -PassThru

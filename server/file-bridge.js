@@ -9,34 +9,25 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Load .env if present
-const envPath = path.join(__dirname, '.env');
-if (fsSync.existsSync(envPath)) {
-  try {
-    const envLines = fsSync.readFileSync(envPath, 'utf-8').split(/\r?\n/);
-    for (const line of envLines) {
-      const match = line.trim().match(/^([^#=]+)=(.*)$/);
-      if (match && !process.env[match[1].trim()]) {
-        process.env[match[1].trim()] = match[2].trim().replace(/^['"]|['"]$/g, '');
-      }
-    }
-  } catch (_) {}
-}
-
+// No .env file is ever read (Century bridge rule). Configuration comes from
+// the environment only.
 const app = express();
 const PORT = process.env.FILE_BRIDGE_PORT || process.env.PORT || 3001;
-const NAS_API_KEY = process.env.NAS_API_KEY || process.env.FILE_BRIDGE_KEY || 'your-secret-api-key-here';
+const NAS_API_KEY = process.env.NAS_API_KEY || process.env.FILE_BRIDGE_KEY || '';
+const PLACEHOLDER_KEYS = new Set(['your-secret-api-key-here', 'change-me', 'secret']);
+if (!NAS_API_KEY || PLACEHOLDER_KEYS.has(NAS_API_KEY)) {
+  console.error('ERROR: A real NAS API key is required. Set NAS_API_KEY to a long random value (not the placeholder).');
+  console.error('The bridge refuses to start without one — an unauthenticated file bridge exposes your storage.');
+  process.exit(1);
+}
 
-// Storage root for NAS (e.g. G:\Server).
-// When Player is at G:\Server\Player, automatically uses parent G:\Server.
+// Storage root: only STORAGE_DIR / NAS_ROOT, else ./storage at the
+// project root (Century bridge rule). No auto-detection of G:\\Server or the
+// music folder's parent.
 function resolveStorageRoot() {
   if (process.env.STORAGE_DIR) return path.resolve(process.env.STORAGE_DIR);
   if (process.env.NAS_ROOT) return path.resolve(process.env.NAS_ROOT);
-  if (fsSync.existsSync('G:\\Server')) return 'G:\\Server';
-  if (process.env.ND_MUSICFOLDER) return path.resolve(process.env.ND_MUSICFOLDER, '..');
-  const parent = path.resolve(__dirname, '..');
-  if (path.basename(__dirname).toLowerCase() === 'player') return parent;
-  return './storage';
+  return path.resolve(__dirname, '..', 'storage');
 }
 
 const STORAGE_DIR = path.resolve(resolveStorageRoot());
@@ -245,27 +236,6 @@ app.get('/api/files/download', async (req, res) => {
         res.status(500).json({ error: 'Failed to stream file' });
       }
     });
-  } catch (err) {
-    if (err.code === 'ENOENT') {
-      return res.status(404).json({ error: 'File not found' });
-    }
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 6. Raw file view (for image preview lightbox, inline audio, etc.)
-app.get(['/api/files/raw', '/api/files/view'], async (req, res) => {
-  try {
-    const rawPath = req.query.path;
-    if (!rawPath) {
-      return res.status(400).json({ error: 'Missing path query parameter' });
-    }
-    const target = safe(rawPath);
-    const stat = await fs.stat(target);
-    if (stat.isDirectory()) {
-      return res.status(400).json({ error: 'Cannot view a directory directly' });
-    }
-    res.sendFile(target);
   } catch (err) {
     if (err.code === 'ENOENT') {
       return res.status(404).json({ error: 'File not found' });

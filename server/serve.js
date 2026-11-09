@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const WEB_ROOT = path.resolve(__dirname, '..', 'client');
 const PORT = Number(process.env.WEB_PORT || process.env.PORT || 5500);
 
 const MIME_TYPES = {
@@ -48,8 +49,8 @@ const server = http.createServer((req, res) => {
   let pathname = decodeURI(rawUrl.split('?')[0]);
   if (pathname === '/' || pathname === '') pathname = '/index.html';
 
-  const safePath = path.normalize(path.join(__dirname, pathname));
-  if (!safePath.startsWith(__dirname)) {
+  const safePath = path.normalize(path.join(WEB_ROOT, pathname));
+  if (!safePath.startsWith(WEB_ROOT)) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     res.end('403 Forbidden');
     return;

@@ -19,10 +19,10 @@ Serve the directory using any static web server:
 
 ```bash
 # Python
-python -m http.server 8080
+python -m http.server 8080 --directory client
 
 # Node (http-server / npx serve)
-npx serve .
+npx serve client
 ```
 
 Open the local address in your browser, head to Settings, and connect your Navidrome server credentials.

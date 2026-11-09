@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node serve.js",
-    "start": "node serve.js",
-    "serve": "node serve.js",
-    "serve:python": "python3 -m http.server 5500",
-    "serve:bun": "bun serve.js",
-    "bridge": "node file-bridge.js",
-    "bridge:python": "python3 file-bridge.py"
+    "dev": "node server/serve.js",
+    "start": "node server/serve.js",
+    "serve": "node server/serve.js",
+    "serve:python": "python3 -m http.server 5500 --directory client",
+    "serve:bun": "bun server/serve.js",
+    "bridge": "node server/file-bridge.js",
+    "bridge:python": "python3 server/file-bridge.py"
   },
   "dependencies": {
     "cors": "^2.8.5",

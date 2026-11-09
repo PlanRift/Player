@@ -8,7 +8,10 @@ app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*", "allow_headers": ["Content-Type", "x-api-key", "X-API-Key"]}})
 
 PORT = int(os.environ.get("FILE_BRIDGE_PORT", 3001))
-NAS_API_KEY = os.environ.get("NAS_API_KEY") or os.environ.get("FILE_BRIDGE_KEY") or "your-secret-api-key-here"
+NAS_API_KEY = os.environ.get("NAS_API_KEY") or os.environ.get("FILE_BRIDGE_KEY") or ""
+PLACEHOLDER_KEYS = {"your-secret-api-key-here", "change-me", "secret"}
+if not NAS_API_KEY or NAS_API_KEY in PLACEHOLDER_KEYS:
+    raise SystemExit("ERROR: A real NAS API key is required. Set NAS_API_KEY to a long random value (not the placeholder). The bridge refuses to start without one.")
 
 @app.before_request
 def require_api_key():
@@ -21,23 +24,19 @@ def require_api_key():
     api_key = (
         request.headers.get("x-api-key")
         or request.headers.get("X-API-Key")
-        or (request.args.get("apiKey") or request.args.get("key") if is_download else None)
+        or (request.args.get("apiKey") or request.args.get("key") or request.args.get("x-api-key") if is_download else None)
     )
     if not api_key or api_key != NAS_API_KEY:
         return jsonify({"error": "Unauthorized: Invalid or missing API key (provide x-api-key header" + (" or ?apiKey= parameter" if is_download else "") + ")"}), 401
 _script_dir = Path(__file__).resolve().parent
-_raw_music = os.environ.get("ND_MUSICFOLDER", os.environ.get("MUSIC_DIR", ""))
 
+# Storage root: only STORAGE_DIR / NAS_ROOT, else ./storage at the
+# project root (Century bridge rule). No auto-detection of G:/Server or the
+# music folder's parent.
 if os.environ.get("STORAGE_DIR") or os.environ.get("NAS_ROOT"):
     STORAGE_DIR = Path(os.environ.get("STORAGE_DIR") or os.environ.get("NAS_ROOT")).resolve()
-elif Path("G:/Server").exists():
-    STORAGE_DIR = Path("G:/Server").resolve()
-elif _raw_music:
-    STORAGE_DIR = Path(_raw_music).resolve().parent
-elif _script_dir.name.lower() == "player":
-    STORAGE_DIR = _script_dir.parent
 else:
-    STORAGE_DIR = Path("./storage").resolve()
+    STORAGE_DIR = (_script_dir.parent / "storage").resolve()
 
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -152,19 +151,6 @@ def download_file():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/files/raw", methods=["GET"])
-@app.route("/api/files/view", methods=["GET"])
-def view_raw_file():
-    try:
-        raw = request.args.get("path")
-        if not raw:
-            return jsonify({"error": "Missing path query parameter"}), 400
-        target = safe_path(raw)
-        if not target.exists() or not target.is_file():
-            return jsonify({"error": "File not found"}), 404
-        return send_file(target, as_attachment=False)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     print(f"\n  Plenrip Audio File Bridge (Python NAS)\n  Local:   http://localhost:{PORT}\n  NAS:     {STORAGE_DIR}\n")
