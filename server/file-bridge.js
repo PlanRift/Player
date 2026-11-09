@@ -80,7 +80,8 @@ app.use(cors({
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'x-api-key', 'X-API-Key'],
 }));
-app.use(express.json());
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Authentication middleware (Century bridge):
 // x-api-key header on EVERY request. Native browser downloads cannot set
@@ -182,6 +183,10 @@ function isUnsafeRelPath(relPath) {
 }
 
 const upload = multer({
+  limits: {
+    fileSize: Infinity,
+    fieldSize: 50 * 1024 * 1024,
+  },
   fileFilter: (req, file, cb) => {
     // Pair this file with its `paths` entry (same index). The index is
     // incremented here so destination/filename see (index - 1) for it.
@@ -245,6 +250,118 @@ app.post('/api/files/upload', upload.array('files'), (req, res) => {
   res.json({ success: true, count: req.files?.length || 0 });
 });
 
+// 3b. Chunked upload (streams 20MB chunks to bypass Cloudflare's 100MB proxy limit and support 1GB+ / unlimited uploads)
+const TMP_CHUNKS_DIR = path.join(STORAGE_DIR, '.tmp_chunks');
+
+function cleanOldTempChunks() {
+  try {
+    if (!fsSync.existsSync(TMP_CHUNKS_DIR)) return;
+    const now = Date.now();
+    const files = fsSync.readdirSync(TMP_CHUNKS_DIR);
+    for (const f of files) {
+      const full = path.join(TMP_CHUNKS_DIR, f);
+      const st = fsSync.statSync(full);
+      // Prune part files older than 2 hours
+      if (now - st.mtimeMs > 2 * 3600 * 1000) {
+        fsSync.unlinkSync(full);
+      }
+    }
+  } catch (_) {}
+}
+
+app.post('/api/files/upload-chunk', async (req, res) => {
+  try {
+    const destDir = safe(req.query.path || '');
+    const relName = String(req.query.name || '').trim();
+    const uploadId = String(req.query.uploadId || '').trim();
+    const chunkIndex = parseInt(req.query.chunkIndex, 10);
+    const totalChunks = parseInt(req.query.totalChunks, 10);
+
+    if (!relName || isUnsafeRelPath(relName)) {
+      return res.status(400).json({ error: 'Invalid file name or path' });
+    }
+    if (!uploadId || !/^[a-zA-Z0-9_\-]+$/.test(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID' });
+    }
+    if (isNaN(chunkIndex) || isNaN(totalChunks) || chunkIndex < 0 || chunkIndex >= totalChunks) {
+      return res.status(400).json({ error: 'Invalid chunk index or total chunks' });
+    }
+
+    const finalTarget = safe(path.join(destDir, relName));
+    if (finalTarget === STORAGE_DIR || finalTarget === __dirname) {
+      return res.status(400).json({ error: 'Cannot overwrite server root or Player application folder' });
+    }
+
+    if (!fsSync.existsSync(TMP_CHUNKS_DIR)) {
+      fsSync.mkdirSync(TMP_CHUNKS_DIR, { recursive: true });
+    }
+
+    // Occasional cleanup of stale part files
+    if (chunkIndex === 0 && Math.random() < 0.2) {
+      cleanOldTempChunks();
+    }
+
+    const partFilePath = path.join(TMP_CHUNKS_DIR, `${uploadId}.part`);
+
+    // Stream the binary chunk into the .part file (write mode for chunk 0, append for subsequent)
+    await new Promise((resolve, reject) => {
+      const outStream = fsSync.createWriteStream(partFilePath, {
+        flags: chunkIndex === 0 ? 'w' : 'a',
+      });
+      req.pipe(outStream);
+      outStream.on('finish', resolve);
+      outStream.on('error', reject);
+      req.on('error', reject);
+    });
+
+    // If this is the final chunk, ensure destination directory exists and move part file into place
+    if (chunkIndex === totalChunks - 1) {
+      const parentDir = path.dirname(finalTarget);
+      if (!fsSync.existsSync(parentDir)) {
+        fsSync.mkdirSync(parentDir, { recursive: true });
+      }
+      try {
+        if (fsSync.existsSync(finalTarget)) {
+          fsSync.unlinkSync(finalTarget);
+        }
+      } catch (_) {}
+
+      // Move (or copy/unlink if cross-device boundary)
+      try {
+        await fs.rename(partFilePath, finalTarget);
+      } catch (moveErr) {
+        if (moveErr.code === 'EXDEV') {
+          await fs.copyFile(partFilePath, finalTarget);
+          await fs.unlink(partFilePath);
+        } else {
+          throw moveErr;
+        }
+      }
+
+      return res.json({ success: true, completed: true, name: path.basename(finalTarget) });
+    }
+
+    return res.json({ success: true, completed: false, chunkIndex });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/files/upload-chunk', async (req, res) => {
+  try {
+    const uploadId = String(req.query.uploadId || '').trim();
+    if (uploadId && /^[a-zA-Z0-9_\-]+$/.test(uploadId)) {
+      const partFilePath = path.join(TMP_CHUNKS_DIR, `${uploadId}.part`);
+      if (fsSync.existsSync(partFilePath)) {
+        fsSync.unlinkSync(partFilePath);
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 4. Delete file or directory
 app.delete('/api/files', async (req, res) => {
   try {
@@ -290,9 +407,17 @@ app.get('/api/files/download', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const bridgeServer = app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Plenrip Audio File Bridge (NAS)`);
   console.log(`  Local:   http://localhost:${PORT}`);
   console.log(`  NAS:     ${STORAGE_DIR}`);
   console.log(`  Music:   ${process.env.ND_MUSICFOLDER || path.join(STORAGE_DIR, 'Music')}\n`);
 });
+
+// Disable timeout limits for long-running / multi-gigabyte file transfers
+bridgeServer.timeout = 0;
+bridgeServer.keepAliveTimeout = 120000;
+bridgeServer.headersTimeout = 120000;
+if (typeof bridgeServer.requestTimeout !== 'undefined') {
+  bridgeServer.requestTimeout = 0;
+}

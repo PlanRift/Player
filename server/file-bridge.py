@@ -152,6 +152,57 @@ def upload_files():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/files/upload-chunk", methods=["POST", "DELETE"])
+def upload_chunk():
+    try:
+        tmp_chunks_dir = STORAGE_DIR / ".tmp_chunks"
+        tmp_chunks_dir.mkdir(parents=True, exist_ok=True)
+        upload_id = request.args.get("uploadId", "").strip()
+
+        if request.method == "DELETE":
+            if upload_id and upload_id.replace("_", "").replace("-", "").isalnum():
+                part_path = tmp_chunks_dir / f"{upload_id}.part"
+                if part_path.exists():
+                    part_path.unlink()
+            return jsonify({"success": True})
+
+        dest = safe_path(request.args.get("path", ""))
+        rel_name = request.args.get("name", "").strip()
+        chunk_index = int(request.args.get("chunkIndex", -1))
+        total_chunks = int(request.args.get("totalChunks", -1))
+
+        if not rel_name or rel_name.startswith("/") or rel_name.startswith("\\") or ".." in rel_name.split("/"):
+            return jsonify({"error": "Invalid file name or path"}), 400
+        if not upload_id or not upload_id.replace("_", "").replace("-", "").isalnum():
+            return jsonify({"error": "Invalid upload ID"}), 400
+        if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
+            return jsonify({"error": "Invalid chunk index or total"}), 400
+
+        target = safe_path(os.path.join(str(dest.relative_to(STORAGE_DIR)) if dest != STORAGE_DIR else "", rel_name))
+        part_path = tmp_chunks_dir / f"{upload_id}.part"
+
+        mode = "wb" if chunk_index == 0 else "ab"
+        with open(part_path, mode) as out:
+            while True:
+                chunk_bytes = request.stream.read(1024 * 1024)
+                if not chunk_bytes:
+                    break
+                out.write(chunk_bytes)
+
+        if chunk_index == total_chunks - 1:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            shutil.move(str(part_path), str(target))
+            return jsonify({"success": True, "completed": True, "name": target.name})
+
+        return jsonify({"success": True, "completed": False, "chunkIndex": chunk_index})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/files", methods=["DELETE"])
 def delete_file():
     try:

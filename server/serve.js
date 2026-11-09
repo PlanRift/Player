@@ -154,3 +154,11 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  Network: http://127.0.0.1:${PORT}/\n`);
 });
 
+// Disable timeout limits for long-running / multi-gigabyte uploads
+server.timeout = 0;
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 120000;
+if (typeof server.requestTimeout !== 'undefined') {
+  server.requestTimeout = 0;
+}
+

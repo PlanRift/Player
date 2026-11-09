@@ -2788,68 +2788,135 @@
     }
   }
 
-  // Upload files (and folders) to the bridge. Folder upload: each file's
-  // webkitRelativePath is sent as a parallel `paths` field (same order as
-  // `files`; the bridge recreates the folder structure with mkdir -p).
-  // Uses XMLHttpRequest so the upload shows a progress bar (fetch has no
-  // upload-progress events). The `paths` fields are appended BEFORE the
-  // files so the bridge parses them before the first file arrives.
+  // Upload files (and folders) to the bridge.
+  // Uses 20MB chunked streaming (/api/files/upload-chunk) so uploads of ANY size
+  // (100MB, 1GB, 5GB, unlimited) can pass through Cloudflare Tunnel's 100MB proxy
+  // limit without triggering HTTP 413 (Payload Too Large).
   async function uploadFiles(files) {
     if (!files || files.length === 0) return;
     const base = getFileBridgeBase();
-    const formData = new FormData();
     const fileList = Array.from(files);
-    // Paths first (folder upload), then the files, in the same order.
-    for (const f of fileList) {
-      const rel = f.webkitRelativePath || '';
-      formData.append('paths', rel);
-    }
-    for (const f of fileList) {
-      formData.append('files', f);
-    }
+    const totalFiles = fileList.length;
+    const totalBytes = fileList.reduce((acc, f) => acc + (f.size || 0), 0);
+
     const isFolder = fileList.some((f) => f.webkitRelativePath);
+    let overallUploadedBytes = 0;
+
+    // 20MB per chunk — safely under Cloudflare's 100MB edge ceiling
+    const CHUNK_SIZE = 20 * 1024 * 1024;
+
     const label = isFolder
-      ? `Uploading folder (${fileList.length} files)...`
-      : `Uploading ${fileList.length} file${fileList.length === 1 ? '' : 's'}...`;
+      ? `Uploading folder (${totalFiles} files)...`
+      : `Uploading ${totalFiles} file${totalFiles === 1 ? '' : 's'}...`;
     showToast(label);
     showUploadProgress(0, label);
 
+    const formatBytes = (b) => {
+      if (!b || b <= 0) return '0 B';
+      return formatFileSize(b);
+    };
+
     try {
-      const count = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', `${base}/api/files/upload?path=${encodeURIComponent(filesState.currentPath)}`);
-        const headers = getFileBridgeHeaders();
-        for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            showUploadProgress(Math.round((e.loaded / e.total) * 100), label);
-          }
-        });
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
+      let filesCompleted = 0;
+
+      for (let fi = 0; fi < totalFiles; fi++) {
+        const file = fileList[fi];
+        const relPath = file.webkitRelativePath || file.name;
+        const fileSize = file.size || 0;
+        const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
+        const uploadId = `up_${Date.now()}_${Math.random().toString(36).slice(2, 9)}_${fi}`;
+
+        let fileUploadedBytes = 0;
+
+        for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+          const start = chunkIdx * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, fileSize);
+          const chunkBlob = file.slice(start, end);
+          const chunkSize = end - start;
+
+          const query = new URLSearchParams({
+            path: filesState.currentPath || '',
+            name: relPath,
+            uploadId,
+            chunkIndex: String(chunkIdx),
+            totalChunks: String(totalChunks),
+            totalSize: String(fileSize),
+          });
+
+          // Upload chunk with auto-retry on transient errors
+          let attempt = 0;
+          const maxAttempts = 3;
+          let chunkSuccess = false;
+          let lastErr = null;
+
+          while (attempt < maxAttempts && !chunkSuccess) {
+            attempt++;
             try {
-              const data = JSON.parse(xhr.responseText || '{}');
-              resolve(data.count ?? fileList.length);
-            } catch {
-              resolve(fileList.length);
-            }
-          } else if (xhr.status === 401) {
-            reject(new Error('401 Unauthorized: Invalid or missing NAS API Key.'));
-          } else {
-            try {
-              const err = JSON.parse(xhr.responseText || '{}');
-              reject(new Error(err.error || `HTTP ${xhr.status}`));
-            } catch {
-              reject(new Error(`HTTP ${xhr.status}`));
+              await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', `${base}/api/files/upload-chunk?${query.toString()}`);
+                const headers = getFileBridgeHeaders();
+                for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+                xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+                xhr.upload.addEventListener('progress', (e) => {
+                  if (e.lengthComputable) {
+                    const currentTotal = overallUploadedBytes + e.loaded;
+                    const pct = totalBytes > 0 ? Math.min(99, Math.round((currentTotal / totalBytes) * 100)) : 0;
+                    const prefix = totalFiles > 1 ? `[${fi + 1}/${totalFiles}] ` : '';
+                    showUploadProgress(pct, `${prefix}${file.name} (${formatBytes(currentTotal)} / ${formatBytes(totalBytes)})`);
+                  }
+                });
+
+                xhr.addEventListener('load', () => {
+                  if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve();
+                  } else if (xhr.status === 401) {
+                    reject(new Error('401 Unauthorized: Invalid or missing NAS API Key.'));
+                  } else {
+                    try {
+                      const err = JSON.parse(xhr.responseText || '{}');
+                      reject(new Error(err.error || `HTTP ${xhr.status}`));
+                    } catch {
+                      reject(new Error(`HTTP ${xhr.status}`));
+                    }
+                  }
+                });
+
+                xhr.addEventListener('error', () => reject(new Error(`Network error while uploading ${file.name}`)));
+                xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
+                xhr.send(chunkBlob);
+              });
+              chunkSuccess = true;
+            } catch (err) {
+              lastErr = err;
+              if (err.message && err.message.includes('401')) {
+                throw err;
+              }
+              if (attempt < maxAttempts) {
+                await new Promise((r) => setTimeout(r, 1000 * attempt));
+              }
             }
           }
-        });
-        xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
-        xhr.addEventListener('abort', () => reject(new Error('Upload cancelled')));
-        xhr.send(formData);
-      });
-      hideUploadProgress();
-      showToast(`Successfully uploaded ${count} file${count === 1 ? '' : 's'}`);
+
+          if (!chunkSuccess) {
+            throw lastErr || new Error(`Failed to upload chunk ${chunkIdx + 1} of ${file.name}`);
+          }
+
+          fileUploadedBytes += chunkSize;
+          overallUploadedBytes += chunkSize;
+
+          const pct = totalBytes > 0 ? Math.round((overallUploadedBytes / totalBytes) * 100) : 100;
+          const prefix = totalFiles > 1 ? `[${fi + 1}/${totalFiles}] ` : '';
+          showUploadProgress(pct, `${prefix}${file.name} (${formatBytes(overallUploadedBytes)} / ${formatBytes(totalBytes)})`);
+        }
+
+        filesCompleted++;
+      }
+
+      showUploadProgress(100, `Completed ${filesCompleted} file${filesCompleted === 1 ? '' : 's'}`);
+      setTimeout(() => hideUploadProgress(), 1200);
+      showToast(`Successfully uploaded ${filesCompleted} file${filesCompleted === 1 ? '' : 's'}`);
       client.request('startScan').catch(() => {});
       loadFilesView();
     } catch (err) {
