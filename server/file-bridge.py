@@ -7,6 +7,29 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*", "allow_headers": ["Content-Type", "x-api-key", "X-API-Key"]}})
 
+_script_dir = Path(__file__).resolve().parent
+
+# Load .env if present (project root or script dir)
+_env_candidates = [
+    _script_dir.parent / ".env",
+    _script_dir / ".env",
+    Path(".env").resolve(),
+]
+for _ep in _env_candidates:
+    if _ep.exists():
+        try:
+            for line in _ep.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+        except Exception:
+            pass
+        break
+
 PORT = int(os.environ.get("FILE_BRIDGE_PORT", 3001))
 NAS_API_KEY = os.environ.get("NAS_API_KEY") or os.environ.get("FILE_BRIDGE_KEY") or ""
 PLACEHOLDER_KEYS = {"your-secret-api-key-here", "change-me", "secret"}

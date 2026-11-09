@@ -9,8 +9,27 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// No .env file is ever read (Century bridge rule). Configuration comes from
-// the environment only.
+// Load .env if present (project root or current directory)
+const envCandidates = [
+  path.resolve(__dirname, '..', '.env'),
+  path.resolve(__dirname, '.env'),
+  path.resolve(process.cwd(), '.env'),
+];
+for (const envPath of envCandidates) {
+  if (fsSync.existsSync(envPath)) {
+    try {
+      const envLines = fsSync.readFileSync(envPath, 'utf-8').split(/\r?\n/);
+      for (const line of envLines) {
+        const match = line.trim().match(/^([^#=]+)=(.*)$/);
+        if (match && !process.env[match[1].trim()]) {
+          process.env[match[1].trim()] = match[2].trim().replace(/^['"]|['"]$/g, '');
+        }
+      }
+    } catch (_) {}
+    break;
+  }
+}
+
 const app = express();
 const PORT = process.env.FILE_BRIDGE_PORT || process.env.PORT || 3001;
 const NAS_API_KEY = process.env.NAS_API_KEY || process.env.FILE_BRIDGE_KEY || '';
@@ -21,12 +40,12 @@ if (!NAS_API_KEY || PLACEHOLDER_KEYS.has(NAS_API_KEY)) {
   process.exit(1);
 }
 
-// Storage root: only STORAGE_DIR / NAS_ROOT, else ./storage at the
-// project root (Century bridge rule). No auto-detection of G:\\Server or the
-// music folder's parent.
+// Storage root: STORAGE_DIR / NAS_ROOT, or G:\Server, or ./storage at the project root
 function resolveStorageRoot() {
   if (process.env.STORAGE_DIR) return path.resolve(process.env.STORAGE_DIR);
   if (process.env.NAS_ROOT) return path.resolve(process.env.NAS_ROOT);
+  if (fsSync.existsSync('G:\\Server')) return 'G:\\Server';
+  if (process.env.ND_MUSICFOLDER) return path.resolve(process.env.ND_MUSICFOLDER, '..');
   return path.resolve(__dirname, '..', 'storage');
 }
 

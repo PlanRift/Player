@@ -1,7 +1,18 @@
 $ErrorActionPreference = "Stop"
 
-$ProjectDir = Split-Path -Parent $PSScriptRoot
+if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "package.json")) {
+    $ProjectDir = $PSScriptRoot
+} elseif (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) "package.json")) {
+    $ProjectDir = Split-Path -Parent $PSScriptRoot
+} else {
+    $ProjectDir = (Get-Item -LiteralPath "$PSScriptRoot\..").FullName
+}
 Set-Location -LiteralPath $ProjectDir
+
+$UserBunDir = Join-Path $HOME ".bun\bin"
+if ((Test-Path -LiteralPath $UserBunDir) -and ($env:PATH -notlike "*$UserBunDir*")) {
+    $env:PATH = "$UserBunDir;$env:PATH"
+}
 
 $BackendProcess = $null
 $DevProcess = $null
@@ -71,7 +82,13 @@ if ([string]::IsNullOrWhiteSpace($env:STORAGE_DIR)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($env:ND_DATAFOLDER)) {
-    $env:ND_DATAFOLDER = Join-Path $ProjectDir ".navidrome-data"
+    $ParentDir = Split-Path -Path $ProjectDir -Parent
+    $ExistingDbDir = Join-Path $ParentDir "navidrome"
+    if (Test-Path -LiteralPath (Join-Path $ExistingDbDir "navidrome.db")) {
+        $env:ND_DATAFOLDER = $ExistingDbDir
+    } else {
+        $env:ND_DATAFOLDER = Join-Path $ProjectDir ".navidrome-data"
+    }
 }
 
 $BackendUrl = "http://$($env:ND_ADDRESS):$($env:ND_PORT)"
@@ -87,45 +104,59 @@ $EnvExample = Join-Path $ProjectDir ".env.example"
 function Test-PortInUse {
     param([int]$Port)
 
-    $Listeners = @(
-        Get-NetTCPConnection `
-            -State Listen `
-            -LocalPort $Port `
-            -ErrorAction SilentlyContinue
-    )
-
-    return ($Listeners.Count -gt 0)
+    try {
+        $Listeners = @(
+            Get-NetTCPConnection `
+                -State Listen `
+                -LocalPort $Port `
+                -ErrorAction Stop
+        )
+        return ($Listeners.Count -gt 0)
+    }
+    catch {
+        try {
+            $Client = New-Object System.Net.Sockets.TcpClient
+            $Client.Connect("127.0.0.1", $Port)
+            $Client.Close()
+            return $true
+        } catch {
+            return $false
+        }
+    }
 }
 
 function Show-PortOwner {
     param([int]$Port)
 
-    $Listeners = @(
-        Get-NetTCPConnection `
-            -State Listen `
-            -LocalPort $Port `
-            -ErrorAction SilentlyContinue
-    )
-
-    foreach ($Listener in $Listeners) {
-        $OwnerProcess = Get-Process `
-            -Id $Listener.OwningProcess `
-            -ErrorAction SilentlyContinue
-
-        $ProcessName = if ($OwnerProcess) {
-            $OwnerProcess.ProcessName
-        }
-        else {
-            "unknown"
-        }
-
-        Write-Log (
-            "  Port {0}: {1}, PID {2}" -f `
-                $Port,
-                $ProcessName,
-                $Listener.OwningProcess
+    try {
+        $Listeners = @(
+            Get-NetTCPConnection `
+                -State Listen `
+                -LocalPort $Port `
+                -ErrorAction Stop
         )
+
+        foreach ($Listener in $Listeners) {
+            $OwnerProcess = Get-Process `
+                -Id $Listener.OwningProcess `
+                -ErrorAction SilentlyContinue
+
+            $ProcessName = if ($OwnerProcess) {
+                $OwnerProcess.ProcessName
+            }
+            else {
+                "unknown"
+            }
+
+            Write-Log (
+                "  Port {0}: {1}, PID {2}" -f `
+                    $Port,
+                    $ProcessName,
+                    $Listener.OwningProcess
+            )
+        }
     }
+    catch {}
 }
 
 function Test-Backend {
@@ -184,10 +215,13 @@ function Find-Navidrome {
         return $Command.Source
     }
 
+    $ParentDir = Split-Path -Path $ProjectDir -Parent
     $Candidates = @(
         (Join-Path $ProjectDir "navidrome.exe"),
         (Join-Path $ProjectDir "bin\navidrome.exe"),
-        (Join-Path $ProjectDir "tools\navidrome\navidrome.exe")
+        (Join-Path $ProjectDir "tools\navidrome\navidrome.exe"),
+        (Join-Path $ParentDir "navidrome\navidrome.exe"),
+        (Join-Path $ParentDir "navidrome.exe")
     )
 
     if ($env:ProgramFiles) {
@@ -257,22 +291,35 @@ try {
     if (-not (Test-Path -LiteralPath (
         Join-Path $ProjectDir "package.json"
     ))) {
-        throw "package.json not found. Put this script in the project root."
+        throw "package.json not found in project root ($ProjectDir)."
     }
 
-    if (-not (Test-Path -LiteralPath (Join-Path $ProjectDir "index.html"))) {
-        throw "index.html not found in project root."
+    $ClientIndex = Join-Path $ProjectDir "client\index.html"
+    $RootIndex = Join-Path $ProjectDir "index.html"
+    if (-not (Test-Path -LiteralPath $ClientIndex) -and -not (Test-Path -LiteralPath $RootIndex)) {
+        throw "client/index.html not found in project directory ($ProjectDir)."
     }
 
     $NodeCommand = Get-Command "node.exe" -CommandType Application -ErrorAction SilentlyContinue
     $BunCommand = Get-Command "bun.exe" -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $BunCommand) {
+        $UserBun = Join-Path $HOME ".bun\bin\bun.exe"
+        if (Test-Path -LiteralPath $UserBun -PathType Leaf) {
+            $BunCommand = [PSCustomObject]@{ Source = $UserBun; Name = "bun.exe" }
+        }
+    }
 
     if (-not $NodeCommand -and -not $BunCommand) {
         throw "Neither Node.js nor Bun is available in PATH. Install Node.js or Bun and reopen the terminal."
     }
     $JsRuntime = if ($NodeCommand) { $NodeCommand } else { $BunCommand }
 
-    foreach ($Port in @([int]$WebPort, [int]$LyricsPort, [int]$BridgePort)) {
+    $PortsToCheck = @([int]$WebPort, [int]$BridgePort)
+    if ($null -ne $BunCommand) {
+        $PortsToCheck += [int]$LyricsPort
+    }
+
+    foreach ($Port in $PortsToCheck) {
         if (Test-PortInUse -Port $Port) {
             Show-PortOwner -Port $Port
 
@@ -324,6 +371,20 @@ VITE_NAVIDROME_PASSWORD=
     }
     else {
         Write-Log "Keeping existing .env unchanged."
+    }
+
+    # Load .env variables into process environment
+    if (Test-Path -LiteralPath $EnvFile) {
+        Get-Content -LiteralPath $EnvFile | ForEach-Object {
+            $Line = $_.Trim()
+            if ($Line -and -not $Line.StartsWith("#") -and $Line -match '^([^=]+)=(.*)$') {
+                $Key = $Matches[1].Trim()
+                $Val = $Matches[2].Trim().Trim('"').Trim("'")
+                if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($Key, "Process"))) {
+                    [Environment]::SetEnvironmentVariable($Key, $Val, "Process")
+                }
+            }
+        }
     }
 
     Write-Log ""
@@ -406,64 +467,63 @@ VITE_NAVIDROME_PASSWORD=
     Write-Log "Press Ctrl+C to stop all services."
     Write-Log "--------------------------------------------------------"
 
-    # The lyrics relay is a Bun project (plenrip-relay). It must run or
-    # every provider in the Lyrics Sources picker shows "Unreachable".
-    if ($null -eq $BunCommand) {
-        throw "Bun is required for the lyrics relay but was not found in PATH. Install Bun and reopen the terminal."
-    }
-
-    # A fresh unzip has no relay/node_modules, and the relay then dies at
-    # startup with "Cannot find package 'kuroshiro'". Install once when
-    # the deps are missing; a present node_modules is left untouched.
-    if (-not (Test-Path (Join-Path $ProjectDir "relay/node_modules"))) {
-        Write-Log "Installing lyrics relay dependencies (bun install)..."
-        Push-Location (Join-Path $ProjectDir "relay")
-        try {
-            & $BunCommand.Source install
-            if ($LASTEXITCODE -ne 0) {
-                throw "bun install failed for the lyrics relay (exit code $LASTEXITCODE)."
+    # The lyrics relay is a Bun project (plenrip-relay). If Bun is available,
+    # start it; if not, skip it gracefully so Web Player, File Bridge and Navidrome run.
+    if ($null -ne $BunCommand) {
+        if (-not (Test-Path (Join-Path $ProjectDir "relay/node_modules"))) {
+            Write-Log "Installing lyrics relay dependencies (bun install)..."
+            Push-Location (Join-Path $ProjectDir "relay")
+            try {
+                & $BunCommand.Source install
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Log "bun install failed for the lyrics relay (exit code $LASTEXITCODE)."
+                }
+            } finally {
+                Pop-Location
             }
-        } finally {
-            Pop-Location
         }
-    }
 
-    $RelayProcess = Start-Process `
-        -FilePath $BunCommand.Source `
-        -ArgumentList @("relay/src/index.ts") `
-        -WorkingDirectory $ProjectDir `
-        -NoNewWindow `
-        -PassThru `
-        -Environment @{ PORT = "$LyricsPort" }
+        $env:PORT = "$LyricsPort"
+        $RelayProcess = Start-Process `
+            -FilePath $BunCommand.Source `
+            -ArgumentList @("relay/src/index.ts") `
+            -WorkingDirectory $ProjectDir `
+            -NoNewWindow `
+            -PassThru
 
-    $RelayReady = $false
-    for ($Attempt = 1; $Attempt -le 60; $Attempt++) {
-        $RelayProcess.Refresh()
-        if ($RelayProcess.HasExited) {
-            throw "Lyrics relay exited during startup."
-        }
-        try {
-            $RelayCheck = Invoke-WebRequest `
-                -Uri "http://localhost:$LyricsPort/api/health" `
-                -UseBasicParsing `
-                -TimeoutSec 2 `
-                -ErrorAction Stop
-            if ($RelayCheck.StatusCode -eq 200) {
-                $RelayReady = $true
+        $RelayReady = $false
+        for ($Attempt = 1; $Attempt -le 60; $Attempt++) {
+            $RelayProcess.Refresh()
+            if ($RelayProcess.HasExited) {
+                Write-Log "Lyrics relay exited during startup (skipping relay)."
+                $RelayProcess = $null
                 break
             }
-        } catch {
-            # Not up yet; keep waiting.
+            try {
+                $RelayCheck = Invoke-WebRequest `
+                    -Uri "http://localhost:$LyricsPort/api/health" `
+                    -UseBasicParsing `
+                    -TimeoutSec 2 `
+                    -ErrorAction Stop
+                if ($RelayCheck.StatusCode -eq 200) {
+                    $RelayReady = $true
+                    break
+                }
+            } catch {
+                # Not up yet; keep waiting.
+            }
+            Start-Sleep -Milliseconds 500
         }
-        Start-Sleep -Milliseconds 500
+
+        if ($RelayReady) {
+            Write-Log "Lyrics relay is responding."
+        }
+    } else {
+        Write-Log "Notice: Bun is not installed; lyrics relay skipped."
+        Write-Log "        (Navidrome music server, file bridge & web player will run normally)."
     }
 
-    if (-not $RelayReady) {
-        throw "Lyrics relay did not respond within the startup timeout."
-    }
-
-    Write-Log "Lyrics relay is responding."
-
+    $env:FILE_BRIDGE_PORT = "$BridgePort"
     $BridgeProcess = Start-Process `
         -FilePath $JsRuntime.Source `
         -ArgumentList @("server/file-bridge.js") `
@@ -485,7 +545,8 @@ VITE_NAVIDROME_PASSWORD=
         if ($null -ne $RelayProcess) {
             $RelayProcess.Refresh()
             if ($RelayProcess.HasExited) {
-                throw "Lyrics relay stopped unexpectedly."
+                Write-Log "Lyrics relay stopped."
+                $RelayProcess = $null
             }
         }
 
