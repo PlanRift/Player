@@ -36,7 +36,7 @@ const MIME_TYPES = {
 const server = http.createServer((req, res) => {
   // CORS support
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, HEAD, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
 
   if (req.method === 'OPTIONS') {
@@ -48,12 +48,14 @@ const server = http.createServer((req, res) => {
   let rawUrl = req.url || '/';
   let pathname = decodeURI(rawUrl.split('?')[0]);
 
-  // Reverse proxy for NAS file bridge (/bridge/* or /api/files/*)
+  // Reverse proxy for NAS file bridge (/bridge/*, /api/files/*, /api/update-cover, /api/metadata/*)
   if (
     pathname === '/bridge' ||
     pathname.startsWith('/bridge/') ||
     pathname === '/api/files' ||
-    pathname.startsWith('/api/files/')
+    pathname.startsWith('/api/files/') ||
+    pathname.startsWith('/api/update-cover') ||
+    pathname.startsWith('/api/metadata')
   ) {
     const bridgePort = Number(process.env.FILE_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001);
     const targetPath = rawUrl.startsWith('/bridge') ? (rawUrl.replace(/^\/bridge/, '') || '/') : rawUrl;

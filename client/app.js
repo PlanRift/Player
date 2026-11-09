@@ -672,6 +672,19 @@
       });
     }
 
+    const editMetaBtn = document.createElement('button');
+    editMetaBtn.type = 'button';
+    editMetaBtn.title = 'Edit cover art & metadata';
+    editMetaBtn.setAttribute('aria-label', 'Edit cover art and metadata');
+    editMetaBtn.className =
+      'p-1.5 text-zinc-400 hover:text-emerald-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity';
+    editMetaBtn.innerHTML = '<i data-lucide="image-plus" class="w-3.5 h-3.5"></i>';
+    editMetaBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMetadataEditorForSong(song, 'single');
+    });
+    right.appendChild(editMetaBtn);
+
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
     menuBtn.title = 'Track options';
@@ -863,6 +876,21 @@
       cover.appendChild(hint);
     }
 
+    if (typeof opts.onEditCover === 'function') {
+      const editCoverBtn = document.createElement('button');
+      editCoverBtn.type = 'button';
+      editCoverBtn.setAttribute('aria-label', `Edit cover & tags for ${opts.title || ''}`);
+      editCoverBtn.title = 'Change cover art / edit tags';
+      editCoverBtn.className =
+        'absolute top-1.5 right-1.5 z-10 h-6 w-6 flex items-center justify-center bg-zinc-950/85 border border-zinc-700 hover:border-emerald-400 text-zinc-300 hover:text-emerald-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-200 cursor-pointer';
+      editCoverBtn.innerHTML = '<i data-lucide="image-plus" class="w-3.5 h-3.5"></i>';
+      editCoverBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        opts.onEditCover();
+      });
+      cover.appendChild(editCoverBtn);
+    }
+
     if (typeof opts.progressPercent === 'number') {
       const bar = document.createElement('div');
       bar.className = 'absolute left-0 right-0 bottom-0 h-1 bg-zinc-700';
@@ -903,6 +931,7 @@
       subtitle: album.artist || 'Unknown Artist',
       meta: `${album.year ? album.year + ' · ' : ''}${album.songCount ? album.songCount + ' trk' : 'Album'}`,
       onClick: () => openAlbumDetail(album, backRoute),
+      onEditCover: () => openMetadataEditorForAlbum(album),
       onPlay: withPlay
         ? async () => {
             try {
@@ -927,6 +956,7 @@
       progressPercent: extra.progressPercent,
       onClick: () => extra.onClick ? extra.onClick() : playOrToggle(song, queueContext),
       onPlay: () => (extra.onClick ? extra.onClick() : playOrToggle(song, queueContext)),
+      onEditCover: () => openMetadataEditorForSong(song, 'single'),
     });
   }
 
@@ -2402,6 +2432,12 @@
     return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg', 'bmp', 'ico', 'avif'].includes(ext);
   }
 
+  function isAudioFile(name) {
+    if (!name || typeof name !== 'string') return false;
+    const ext = name.split('.').pop().toLowerCase();
+    return ['mp3', 'flac', 'm4a', 'mp4', 'wav', 'ogg', 'aac', 'opus', 'aiff'].includes(ext);
+  }
+
   function getFileIcon(name, isDir) {
     if (isDir) return 'folder';
     if (isImageFile(name)) return 'image';
@@ -2676,6 +2712,7 @@
       const iconName = getFileIcon(item.name, item.isDirectory);
       const iconColor = item.isDirectory ? 'text-emerald-400' : 'text-zinc-400';
       const isImg = !item.isDirectory && isImageFile(item.name);
+      const isAudio = !item.isDirectory && isAudioFile(item.name);
 
       tr.innerHTML = `
         <td class="py-2.5 px-4 text-center font-mono text-[11px] text-zinc-500">${idx + 1}</td>
@@ -2685,7 +2722,7 @@
             <button
               type="button"
               class="file-item-btn text-left truncate font-sans text-xs ${
-                item.isDirectory || isImg
+                item.isDirectory || isImg || isAudio
                   ? 'font-medium text-zinc-100 hover:text-emerald-400 hover:underline cursor-pointer'
                   : 'text-zinc-200 select-text cursor-default'
               }"
@@ -2699,6 +2736,15 @@
         <td class="py-2.5 px-4 text-right font-mono text-[11px] text-zinc-400 whitespace-nowrap">${formatFileDate(item.mtime)}</td>
         <td class="py-2.5 px-4 text-center">
           <div class="inline-flex items-center justify-center gap-1">
+            ${item.isDirectory || isAudio ? `
+              <button
+                type="button"
+                title="${item.isDirectory ? 'Edit album folder metadata & cover art' : 'Edit track metadata & cover art'}"
+                class="file-meta-btn w-7 h-7 inline-flex items-center justify-center text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition-colors"
+              >
+                <i data-lucide="tags" class="w-3.5 h-3.5"></i>
+              </button>
+            ` : ''}
             ${isImg ? `
               <button
                 type="button"
@@ -2736,6 +2782,18 @@
       } else if (isImg) {
         tr.querySelector('.file-item-btn').onclick = () => {
           openImageViewer(item);
+        };
+      } else if (isAudio) {
+        tr.querySelector('.file-item-btn').onclick = () => {
+          openMetadataEditor(item, 'single');
+        };
+      }
+
+      const metaBtn = tr.querySelector('.file-meta-btn');
+      if (metaBtn) {
+        metaBtn.onclick = (e) => {
+          e.stopPropagation();
+          openMetadataEditor(item, item.isDirectory ? 'album' : 'single');
         };
       }
 
@@ -3394,6 +3452,942 @@
     });
   }
 
+  // ============================================================================
+  // Full Metadata & Embedded Cover Art Editor (Local + Online JP Auto-Tagging)
+  // ============================================================================
+  const metaEditorState = {
+    active: false,
+    scope: 'single', // 'single' | 'album'
+    filePath: '',
+    folderPath: '',
+    filePaths: [],
+    hints: { title: '', artist: '', album: '', year: '', coverUrl: '' },
+    selectedCoverFile: null,
+    selectedCoverUrl: '',
+    previewObjectUrl: null,
+    onlineResults: [],
+    sourceFilter: 'all',
+    selectedResultId: null,
+    busy: false,
+    initialized: false,
+  };
+
+  function normalizeSubsonicPath(rawPath) {
+    return String(rawPath || '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .trim();
+  }
+
+  function setMetaEditorStatus(text, isError = false) {
+    const el = $('meta-editor-status');
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('text-[#f0605a]', Boolean(isError));
+    el.classList.toggle('text-zinc-400', !isError);
+  }
+
+  function setMetaCoverPreview(srcUrl, badgeLabel = 'NO CHANGE') {
+    const img = $('meta-cover-preview-img');
+    const fallback = $('meta-cover-preview-fallback');
+    const badge = $('meta-cover-source-badge');
+
+    if (badge) {
+      badge.textContent = badgeLabel;
+    }
+
+    if (img && fallback) {
+      if (srcUrl) {
+        img.src = srcUrl;
+        img.classList.remove('hidden');
+        fallback.classList.add('hidden');
+      } else {
+        img.src = '';
+        img.classList.add('hidden');
+        fallback.classList.remove('hidden');
+      }
+    }
+  }
+
+  function updateMetaScopeUI() {
+    const isAlbum = metaEditorState.scope === 'album';
+    const singleBtn = $('meta-scope-single-btn');
+    const albumBtn = $('meta-scope-album-btn');
+    const targetLabel = $('meta-editor-target-label');
+    const scopeHint = $('meta-scope-hint');
+    const saveLabel = $('meta-save-all-label');
+    const overrideWrap = $('meta-override-album-titles-wrap');
+    const titleInput = $('meta-input-title');
+
+    if (singleBtn) {
+      singleBtn.disabled = !metaEditorState.filePath && !metaEditorState.hints?.title;
+      singleBtn.className = `px-2.5 py-1 transition-colors ${
+        !isAlbum
+          ? 'bg-emerald-400 text-zinc-950 font-semibold'
+          : 'text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed'
+      }`;
+    }
+    if (albumBtn) {
+      albumBtn.className = `px-2.5 py-1 transition-colors ${
+        isAlbum ? 'bg-emerald-400 text-zinc-950 font-semibold' : 'text-zinc-400 hover:text-zinc-100'
+      }`;
+    }
+
+    if (targetLabel) {
+      const displayTarget = isAlbum
+        ? metaEditorState.folderPath || metaEditorState.hints?.album || '(album folder)'
+        : metaEditorState.filePath || metaEditorState.hints?.title || '-';
+      targetLabel.textContent = `${isAlbum ? 'Album Folder' : 'Single Track'}: ${
+        displayTarget.startsWith('(') ? displayTarget : `/${displayTarget}`
+      }`;
+    }
+
+    if (scopeHint) {
+      const trackCount = metaEditorState.filePaths?.length || 0;
+      scopeHint.textContent = isAlbum
+        ? trackCount > 0
+          ? `Batch-updating all ${trackCount} track(s) in album`
+          : 'Batch-updating all audio tracks in folder'
+        : 'Editing single audio file';
+    }
+
+    if (saveLabel) {
+      saveLabel.textContent = isAlbum ? 'SAVE TO ALBUM FOLDER' : 'SAVE TO TRACK';
+    }
+
+    if (overrideWrap) {
+      overrideWrap.classList.toggle('hidden', !isAlbum);
+      overrideWrap.classList.toggle('inline-flex', isAlbum);
+    }
+
+    if (titleInput) {
+      const overrideChecked = Boolean($('meta-override-album-titles')?.checked);
+      titleInput.disabled = isAlbum && !overrideChecked;
+      titleInput.classList.toggle('opacity-50', isAlbum && !overrideChecked);
+    }
+  }
+
+  function setMetaEditorScope(newScope) {
+    if (newScope === 'single' && !metaEditorState.filePath && !metaEditorState.hints?.title) {
+      showToast('Select a specific audio track to edit in Single Track mode', 'error');
+      return;
+    }
+    metaEditorState.scope = newScope === 'album' ? 'album' : 'single';
+    updateMetaScopeUI();
+  }
+
+  async function openMetadataEditor(item, initialScope = null) {
+    // Ensure modal listeners are always bound even if opened before visiting Files tab
+    initMetadataEditorEvents();
+
+    const relPath = normalizeSubsonicPath(
+      item?.relPath ?? (filesState.currentPath ? `${filesState.currentPath}/${item?.name || ''}` : item?.name || '')
+    );
+    const isDir = Boolean(item?.isDirectory);
+    const hints = item?.hints || {};
+
+    metaEditorState.hints = {
+      title: String(hints.title || '').trim(),
+      artist: String(hints.artist || '').trim(),
+      album: String(hints.album || '').trim(),
+      year: String(hints.year || '').trim(),
+      coverUrl: String(hints.coverUrl || '').trim(),
+    };
+    metaEditorState.filePaths = Array.isArray(item?.filePaths)
+      ? item.filePaths.map(normalizeSubsonicPath).filter(Boolean)
+      : [];
+
+    if (isDir) {
+      metaEditorState.filePath = normalizeSubsonicPath(item?.firstFilePath || metaEditorState.filePaths[0] || '');
+      metaEditorState.folderPath = relPath;
+      metaEditorState.scope = 'album';
+    } else {
+      metaEditorState.filePath = relPath;
+      const parts = relPath.split('/').filter(Boolean);
+      parts.pop();
+      metaEditorState.folderPath = normalizeSubsonicPath(item?.folderPath ?? parts.join('/'));
+      metaEditorState.scope = initialScope === 'album' ? 'album' : 'single';
+    }
+
+    if (metaEditorState.previewObjectUrl) {
+      URL.revokeObjectURL(metaEditorState.previewObjectUrl);
+      metaEditorState.previewObjectUrl = null;
+    }
+    metaEditorState.selectedCoverFile = null;
+    metaEditorState.selectedCoverUrl = '';
+    metaEditorState.onlineResults = [];
+    metaEditorState.selectedResultId = null;
+    metaEditorState.sourceFilter = 'all';
+    metaEditorState.active = true;
+
+    const fileInput = $('meta-cover-file-input');
+    if (fileInput) fileInput.value = '';
+    if ($('meta-override-album-titles')) $('meta-override-album-titles').checked = false;
+
+    const cleanGuess = String(item?.name || '')
+      .replace(/\.[^.]+$/, '')
+      .replace(/^\d+[\s._-]+/, '')
+      .trim();
+
+    const initialTitle = metaEditorState.hints.title || (isDir ? '' : cleanGuess);
+    const initialArtist = metaEditorState.hints.artist || '';
+    const initialAlbum = metaEditorState.hints.album || (isDir ? item?.name || '' : '');
+    const initialYear = metaEditorState.hints.year || '';
+
+    if ($('meta-input-title')) $('meta-input-title').value = initialTitle;
+    if ($('meta-input-artist')) $('meta-input-artist').value = initialArtist;
+    if ($('meta-input-album')) $('meta-input-album').value = initialAlbum;
+    if ($('meta-input-year')) $('meta-input-year').value = initialYear;
+
+    const initialSearchParts = [
+      initialArtist,
+      metaEditorState.scope === 'album' ? initialAlbum : initialTitle || initialAlbum || cleanGuess,
+    ]
+      .map((s) => String(s || '').trim())
+      .filter(Boolean);
+    if ($('meta-online-search-input')) {
+      $('meta-online-search-input').value = initialSearchParts.join(' ') || cleanGuess;
+    }
+    if ($('meta-search-summary')) $('meta-search-summary').textContent = '';
+
+    if (metaEditorState.hints.coverUrl) {
+      setMetaCoverPreview(metaEditorState.hints.coverUrl, 'CURRENT LIBRARY COVER');
+    } else {
+      setMetaCoverPreview('', 'LOADING...');
+    }
+    updateMetaScopeUI();
+    renderOnlineMetadataResults();
+
+    const modal = $('files-metadata-modal');
+    if (modal) modal.classList.remove('hidden');
+    refreshIcons();
+
+    // Read current embedded tags & cover art from backend bridge
+    const base = getFileBridgeBase();
+    const targetToRead =
+      metaEditorState.scope === 'album'
+        ? metaEditorState.folderPath || metaEditorState.filePath
+        : metaEditorState.filePath || metaEditorState.folderPath;
+
+    const queryParams = new URLSearchParams({
+      path: targetToRead || '',
+      scope: metaEditorState.scope,
+      title: initialTitle,
+      artist: initialArtist,
+      album: initialAlbum,
+    });
+
+    setMetaEditorStatus('Reading current embedded tags from file bridge...');
+    try {
+      const res = await fetch(`${base}/api/metadata/read?${queryParams.toString()}`, {
+        headers: getFileBridgeHeaders(),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const meta = data.metadata || {};
+
+      if (data.path) {
+        if (metaEditorState.scope === 'album' && !metaEditorState.folderPath) {
+          metaEditorState.folderPath = data.path;
+        } else if (metaEditorState.scope === 'single' && !metaEditorState.filePath) {
+          metaEditorState.filePath = data.path;
+        }
+        updateMetaScopeUI();
+      }
+
+      if ($('meta-input-title') && meta.title) $('meta-input-title').value = meta.title;
+      if ($('meta-input-artist') && meta.artist) $('meta-input-artist').value = meta.artist;
+      if ($('meta-input-album') && meta.album) $('meta-input-album').value = meta.album;
+      if ($('meta-input-year') && meta.year) $('meta-input-year').value = meta.year;
+
+      const smartQueryParts = [
+        meta.artist || initialArtist,
+        metaEditorState.scope === 'album'
+          ? meta.album || initialAlbum
+          : meta.title || initialTitle || meta.album || initialAlbum,
+      ]
+        .map((s) => String(s || '').trim())
+        .filter(Boolean);
+      if (smartQueryParts.length > 0 && $('meta-online-search-input')) {
+        $('meta-online-search-input').value = smartQueryParts.join(' ');
+      }
+
+      if (meta.coverDataUrl) {
+        setMetaCoverPreview(meta.coverDataUrl, 'CURRENT EMBEDDED');
+      } else if (metaEditorState.hints.coverUrl) {
+        setMetaCoverPreview(metaEditorState.hints.coverUrl, 'CURRENT LIBRARY COVER');
+      } else {
+        setMetaCoverPreview('', 'NO EMBEDDED COVER');
+      }
+
+      const trackCountNote =
+        typeof data.audioTrackCount === 'number' ? ` (${data.audioTrackCount} audio tracks in folder)` : '';
+      setMetaEditorStatus(`Loaded current metadata${trackCountNote}.`);
+    } catch (err) {
+      if (!metaEditorState.hints.coverUrl) {
+        setMetaCoverPreview('', 'NO COVER');
+      }
+      setMetaEditorStatus(`Ready (${err.message})`);
+    }
+  }
+
+  /**
+   * Open the Metadata & Cover Art Editor directly for any Subsonic song object
+   * in the Music UI (Track Row, Album Detail tracklist, Songs view, Now Playing, etc.).
+   */
+  async function openMetadataEditorForSong(song, initialScope = 'single') {
+    if (!song) {
+      showToast('No track selected', 'error');
+      return;
+    }
+    const songPath = normalizeSubsonicPath(song.path || '');
+    const folderPath = songPath.includes('/') ? songPath.split('/').slice(0, -1).join('/') : '';
+    const coverId = song.coverArt || song.albumId || song.id;
+    const coverUrl = coverId ? client.getCoverArtUrl(coverId, 500) : '';
+
+    await openMetadataEditor(
+      {
+        name: song.title || songPath.split('/').pop() || 'Track',
+        isDirectory: initialScope === 'album' && !songPath,
+        relPath: songPath,
+        folderPath,
+        filePaths: songPath ? [songPath] : [],
+        hints: {
+          title: song.title || '',
+          artist: song.artist || '',
+          album: song.album || '',
+          year: song.year ? String(song.year) : '',
+          coverUrl,
+        },
+      },
+      initialScope
+    );
+  }
+
+  /**
+   * Open the Metadata & Cover Art Editor directly for any Subsonic album object
+   * in the Album Detail UI or Albums grid.
+   */
+  async function openMetadataEditorForAlbum(album) {
+    if (!album) {
+      showToast('No album loaded', 'error');
+      return;
+    }
+    let detail = album;
+    if (!Array.isArray(detail.song) || detail.song.length === 0) {
+      try {
+        detail = await client.resolveAlbumSongs(album);
+      } catch (_) {
+        detail = album;
+      }
+    }
+    const songs = Array.isArray(detail?.song) ? detail.song : [];
+    const filePaths = songs.map((s) => normalizeSubsonicPath(s?.path || '')).filter(Boolean);
+    const firstFilePath = filePaths[0] || '';
+    const folderPath = firstFilePath.includes('/')
+      ? firstFilePath.split('/').slice(0, -1).join('/')
+      : '';
+    const virtual = isVirtualAlbum(detail);
+    const coverId = detail.coverArt || (!virtual ? detail.id : null) || songs[0]?.id;
+    const coverUrl = coverId ? client.getCoverArtUrl(coverId, 500) : '';
+
+    await openMetadataEditor(
+      {
+        name: detail.name || album.name || 'Album',
+        isDirectory: true,
+        relPath: folderPath,
+        firstFilePath,
+        filePaths,
+        hints: {
+          title: songs[0]?.title || '',
+          artist: detail.artist || album.artist || songs[0]?.artist || '',
+          album: detail.name || album.name || '',
+          year: detail.year || album.year ? String(detail.year || album.year) : '',
+          coverUrl,
+        },
+      },
+      'album'
+    );
+  }
+
+  function closeMetadataEditor() {
+    metaEditorState.active = false;
+    if (metaEditorState.previewObjectUrl) {
+      URL.revokeObjectURL(metaEditorState.previewObjectUrl);
+      metaEditorState.previewObjectUrl = null;
+    }
+    const modal = $('files-metadata-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  function getSpotifyHeaders() {
+    const id = localStorage.getItem('century.spotify_client_id') || '';
+    const secret = localStorage.getItem('century.spotify_client_secret') || '';
+    const extra = {};
+    if (id) extra['x-spotify-client-id'] = id;
+    if (secret) extra['x-spotify-client-secret'] = secret;
+    return extra;
+  }
+
+  /**
+   * Direct browser-side fallback search (iTunes JP + MusicBrainz) used when the remote
+   * File Bridge has not yet been updated/restarted with `/api/metadata/search` (HTTP 404).
+   */
+  async function searchOnlineMetadataBrowserFallback(query) {
+    const itunesTask = (async () => {
+      try {
+        const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&country=jp&media=music&entity=song&limit=12`;
+        const res = await fetch(url);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.results || []).map((item) => {
+          const thumb = item.artworkUrl100 || item.artworkUrl60 || '';
+          const highRes = thumb ? thumb.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/1000x1000bb.$1') : '';
+          return {
+            source: 'iTunes JP',
+            sourceId: `itunes-${item.trackId || item.collectionId || Math.random()}`,
+            title: item.trackName || item.collectionName || '',
+            artist: item.artistName || '',
+            album: item.collectionName || '',
+            year: item.releaseDate ? String(item.releaseDate).slice(0, 4) : '',
+            coverUrl: highRes || thumb,
+            thumbnailUrl: thumb,
+            resolution: highRes ? '1000x1000' : '100x100',
+          };
+        });
+      } catch (_) {
+        return [];
+      }
+    })();
+
+    const mbTask = (async () => {
+      try {
+        const url = `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(query)}&fmt=json&limit=8`;
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.recordings || []).map((rec) => {
+          const artistCredit = Array.isArray(rec['artist-credit'])
+            ? rec['artist-credit'].map((c) => c.name || c.artist?.name || '').join('')
+            : '';
+          const firstRelease = Array.isArray(rec.releases) && rec.releases.length > 0 ? rec.releases[0] : null;
+          const releaseId = firstRelease?.id || '';
+          const dateStr = firstRelease?.date || rec['first-release-date'] || '';
+          return {
+            source: 'MusicBrainz',
+            sourceId: `mb-${rec.id}`,
+            title: rec.title || '',
+            artist: artistCredit,
+            album: firstRelease?.title || '',
+            year: dateStr ? String(dateStr).slice(0, 4) : '',
+            coverUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-1200` : '',
+            thumbnailUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-250` : '',
+            resolution: releaseId ? '1200x1200' : '',
+          };
+        });
+      } catch (_) {
+        return [];
+      }
+    })();
+
+    const [itunes, mb] = await Promise.all([itunesTask, mbTask]);
+    return [...itunes, ...mb];
+  }
+
+  async function runOnlineMetadataSearch() {
+    const query = $('meta-online-search-input')?.value?.trim() || '';
+    if (!query) {
+      showToast('Enter a song, artist, or album to search', 'error');
+      return;
+    }
+
+    const base = getFileBridgeBase();
+    const listEl = $('meta-online-results-list');
+    const summaryEl = $('meta-search-summary');
+    const searchBtn = $('meta-online-search-btn');
+
+    if (searchBtn) searchBtn.disabled = true;
+    setMetaEditorStatus(`Searching iTunes JP, Spotify JP, MusicBrainz, and Deezer for "${query}"...`);
+    if (listEl) {
+      listEl.innerHTML = `
+        <div class="p-8 flex flex-col items-center justify-center gap-2 text-xs font-mono text-zinc-400">
+          <i data-lucide="loader-2" class="w-5 h-5 text-emerald-400 animate-spin"></i>
+          <span>Querying iTunes JP (&amp;country=jp), Spotify JP (&amp;market=JP), MusicBrainz &amp; Deezer...</span>
+        </div>
+      `;
+      refreshIcons();
+    }
+
+    try {
+      const res = await fetch(`${base}/api/metadata/search?q=${encodeURIComponent(query)}`, {
+        headers: getFileBridgeHeaders(getSpotifyHeaders()),
+      });
+      if (res.status === 404) {
+        // Remote File Bridge is still running older code — fall back to direct browser search
+        const fallbackResults = await searchOnlineMetadataBrowserFallback(query);
+        metaEditorState.onlineResults = fallbackResults;
+        if (summaryEl) {
+          summaryEl.textContent = `${fallbackResults.length} results (Direct Browser Fallback)`;
+        }
+        setMetaEditorStatus(
+          `Found ${fallbackResults.length} matches via browser fallback (update & restart file-bridge.js on your server PC to enable full backend search & saving).`
+        );
+        renderOnlineMetadataResults();
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      metaEditorState.onlineResults = Array.isArray(data.results) ? data.results : [];
+
+      const s = data.sources || {};
+      const spotifyNote = s.spotifyJP?.configured === false ? ' · Spotify JP (set key to enable)' : '';
+      if (summaryEl) {
+        summaryEl.textContent = `${metaEditorState.onlineResults.length} results${spotifyNote}`;
+      }
+
+      setMetaEditorStatus(
+        `Found ${metaEditorState.onlineResults.length} matches across JP & global music databases. Click any result to auto-fill.`
+      );
+      renderOnlineMetadataResults();
+    } catch (err) {
+      // Also attempt browser fallback on network error
+      const fallbackResults = await searchOnlineMetadataBrowserFallback(query);
+      if (fallbackResults.length > 0) {
+        metaEditorState.onlineResults = fallbackResults;
+        if (summaryEl) {
+          summaryEl.textContent = `${fallbackResults.length} results (Direct Browser Fallback)`;
+        }
+        setMetaEditorStatus(`Found ${fallbackResults.length} matches via direct browser search.`);
+        renderOnlineMetadataResults();
+        return;
+      }
+      setMetaEditorStatus(`Online search failed: ${err.message}`, true);
+      if (listEl) {
+        listEl.innerHTML = `<div class="p-6 text-center text-xs font-mono text-[#f0605a]">Search failed: ${escapeHtml(err.message)}</div>`;
+      }
+    } finally {
+      if (searchBtn) searchBtn.disabled = false;
+    }
+  }
+
+  function getSourceBadgeClass(source) {
+    if (source === 'iTunes JP') return 'border-pink-500/40 bg-pink-950/30 text-pink-300';
+    if (source === 'Spotify JP') return 'border-emerald-500/40 bg-emerald-950/30 text-emerald-300';
+    if (source === 'MusicBrainz') return 'border-amber-500/40 bg-amber-950/30 text-amber-300';
+    if (source === 'Deezer') return 'border-sky-500/40 bg-sky-950/30 text-sky-300';
+    return 'border-zinc-700 bg-zinc-900 text-zinc-300';
+  }
+
+  function renderOnlineMetadataResults() {
+    const listEl = $('meta-online-results-list');
+    if (!listEl) return;
+
+    const filter = metaEditorState.sourceFilter || 'all';
+    const filtered = metaEditorState.onlineResults.filter(
+      (r) => filter === 'all' || r.source === filter
+    );
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = `
+        <div class="p-8 text-center text-xs font-mono text-zinc-500">
+          ${
+            metaEditorState.onlineResults.length === 0
+              ? 'Click "AUTO-TAG / SEARCH ONLINE" to pull Kanji/Romaji tags and high-res covers from iTunes JP, Spotify JP, MusicBrainz, and Deezer.'
+              : `No results from source "${escapeHtml(filter)}".`
+          }
+        </div>
+      `;
+      return;
+    }
+
+    listEl.innerHTML = '';
+    filtered.forEach((item) => {
+      const isSelected = metaEditorState.selectedResultId === item.sourceId;
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `w-full p-2.5 text-left flex items-center gap-3 transition-colors ${
+        isSelected ? 'bg-emerald-950/30 border-l-2 border-l-emerald-400' : 'hover:bg-zinc-900/80'
+      }`;
+
+      const thumbUrl = item.thumbnailUrl || item.coverUrl || '';
+      row.innerHTML = `
+        <div class="relative w-12 h-12 bg-zinc-900 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center">
+          ${
+            thumbUrl
+              ? `<img src="${escapeHtml(thumbUrl)}" alt="" class="w-full h-full object-cover" loading="lazy" onerror="this.style.display='none'" />`
+              : `<i data-lucide="disc" class="w-4 h-4 text-zinc-500"></i>`
+          }
+        </div>
+        <div class="min-w-0 flex-1 space-y-0.5">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="px-1.5 py-0.2 text-[9.5px] font-mono border ${getSourceBadgeClass(item.source)}">
+              ${escapeHtml(item.source)}
+            </span>
+            ${
+              item.resolution
+                ? `<span class="px-1.5 py-0.2 text-[9.5px] font-mono border border-zinc-800 bg-zinc-900 text-zinc-400">${escapeHtml(item.resolution)}</span>`
+                : ''
+            }
+            ${
+              item.year
+                ? `<span class="text-[10px] font-mono text-zinc-400">${escapeHtml(String(item.year))}</span>`
+                : ''
+            }
+          </div>
+          <p class="text-xs font-medium text-zinc-100 truncate">${escapeHtml(item.title || 'Untitled')}</p>
+          <p class="text-[11px] text-zinc-400 truncate">
+            ${escapeHtml(item.artist || 'Unknown Artist')}${item.album ? ` · ${escapeHtml(item.album)}` : ''}
+          </p>
+        </div>
+        <div class="shrink-0 text-[10px] font-mono text-emerald-400 px-2">
+          ${isSelected ? 'SELECTED' : 'USE'}
+        </div>
+      `;
+
+      row.onclick = () => {
+        metaEditorState.selectedResultId = item.sourceId;
+        // Auto-fill manual override inputs
+        if ($('meta-input-title') && item.title) $('meta-input-title').value = item.title;
+        if ($('meta-input-artist') && item.artist) $('meta-input-artist').value = item.artist;
+        if ($('meta-input-album') && item.album) $('meta-input-album').value = item.album;
+        if ($('meta-input-year') && item.year) $('meta-input-year').value = String(item.year);
+
+        // Load high-res cover art preview
+        if (item.coverUrl) {
+          metaEditorState.selectedCoverFile = null;
+          metaEditorState.selectedCoverUrl = item.coverUrl;
+          const fileInput = $('meta-cover-file-input');
+          if (fileInput) fileInput.value = '';
+          setMetaCoverPreview(item.coverUrl, `${item.source} (${item.resolution || 'HIGH-RES'})`);
+        }
+
+        setMetaEditorStatus(`Auto-filled tags & cover from ${item.source}: "${item.title}" — ${item.artist}`);
+        renderOnlineMetadataResults();
+      };
+
+      listEl.appendChild(row);
+    });
+
+    refreshIcons();
+  }
+
+  function refreshMusicUIAfterMetadataUpdate(instantCoverUrl = '') {
+    // Bust Subsonic cover art cache so newly embedded covers reload immediately
+    if (typeof client.bustCoverCache === 'function') {
+      client.bustCoverCache();
+    }
+
+    // Immediately show the newly selected cover in Album Detail if currently viewing an album
+    if (instantCoverUrl && state.route === 'album-detail') {
+      const albumImg = $('album-detail-cover');
+      const albumFb = $('album-detail-cover-fallback');
+      if (albumImg) {
+        albumImg.src = instantCoverUrl;
+        albumImg.classList.remove('hidden');
+      }
+      if (albumFb) {
+        albumFb.classList.add('hidden');
+      }
+    }
+
+    // Ping Navidrome API to force a scan & refresh UI caches
+    client.request('startScan').catch(() => {});
+    state.artists = null;
+    state.songs = null;
+    state.songsPromise = null;
+    state.albumsByType = {};
+
+    if (state.route === 'files') {
+      loadFilesView();
+    }
+
+    // Re-fetch and re-render current route after Navidrome finishes indexing the updated file(s)
+    setTimeout(async () => {
+      if (typeof client.bustCoverCache === 'function') {
+        client.bustCoverCache();
+      }
+      if (state.route === 'album-detail' && state.currentAlbum?.id) {
+        try {
+          const updated = await client.resolveAlbumSongs(state.currentAlbum);
+          state.currentAlbum = updated;
+          renderAlbumDetailView();
+        } catch (_) {
+          renderAlbumDetailView();
+        }
+      } else {
+        rerenderCurrentRoute();
+      }
+    }, 1400);
+  }
+
+  /**
+   * 1. Dedicated Cover-Only Update Flow -> POST /api/update-cover
+   * Packages the image file (or selected online coverUrl), target scope ('single' | 'album'),
+   * and target identifiers (filePath, folderPath, filePaths, hints) into a FormData payload.
+   */
+  async function submitUpdateCoverOnly() {
+    if (metaEditorState.busy) return;
+    if (!metaEditorState.selectedCoverFile && !metaEditorState.selectedCoverUrl) {
+      showToast('Choose a local .jpg/.png image or select an online result with cover art first', 'error');
+      return;
+    }
+
+    const base = getFileBridgeBase();
+    const formData = new FormData();
+    formData.append('scope', metaEditorState.scope);
+    formData.append('filePath', metaEditorState.filePath || '');
+    formData.append('folderPath', metaEditorState.folderPath || '');
+    if (Array.isArray(metaEditorState.filePaths) && metaEditorState.filePaths.length > 0) {
+      formData.append('filePaths', JSON.stringify(metaEditorState.filePaths));
+    }
+    formData.append('hintTitle', $('meta-input-title')?.value?.trim() || metaEditorState.hints?.title || '');
+    formData.append('hintArtist', $('meta-input-artist')?.value?.trim() || metaEditorState.hints?.artist || '');
+    formData.append('hintAlbum', $('meta-input-album')?.value?.trim() || metaEditorState.hints?.album || '');
+
+    const instantCoverPreview = metaEditorState.previewObjectUrl || metaEditorState.selectedCoverUrl || '';
+    if (metaEditorState.selectedCoverFile) {
+      formData.append('image', metaEditorState.selectedCoverFile);
+    } else if (metaEditorState.selectedCoverUrl) {
+      formData.append('coverUrl', metaEditorState.selectedCoverUrl);
+    }
+
+    metaEditorState.busy = true;
+    setMetaEditorStatus(
+      metaEditorState.scope === 'album'
+        ? 'Embedding cover art into all audio tracks in album...'
+        : 'Embedding cover art into audio track...'
+    );
+
+    try {
+      const res = await fetch(`${base}/api/update-cover`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders(),
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error(
+            'HTTP 404 — Your home server is still running the old file-bridge.js. Pull the latest repo on your main server PC and restart run-windows.ps1.'
+          );
+        }
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      const targetDesc =
+        metaEditorState.filePath.split('/').pop() ||
+        metaEditorState.hints?.title ||
+        'track';
+      const msg =
+        metaEditorState.scope === 'album'
+          ? `Embedded cover art into ${data.updatedCount || 0} track(s) in album`
+          : `Updated embedded cover art for "${targetDesc}"`;
+      showToast(msg);
+      setMetaEditorStatus(`${msg}. Triggered Navidrome library rescan.`);
+
+      refreshMusicUIAfterMetadataUpdate(instantCoverPreview);
+    } catch (err) {
+      setMetaEditorStatus(`Cover update failed: ${err.message}`, true);
+      showToast(`Cover update failed: ${err.message}`, 'error');
+    } finally {
+      metaEditorState.busy = false;
+    }
+  }
+
+  /**
+   * 2. Full Metadata & Cover Writer Flow -> POST /api/metadata/apply
+   * Sends finalized metadata object (Title, Artist, Album, Year) + Cover Art (file or URL)
+   * to be injected into the physical audio file(s).
+   */
+  async function submitApplyFullMetadata() {
+    if (metaEditorState.busy) return;
+
+    const base = getFileBridgeBase();
+    const formData = new FormData();
+    formData.append('scope', metaEditorState.scope);
+    formData.append('filePath', metaEditorState.filePath || '');
+    formData.append('folderPath', metaEditorState.folderPath || '');
+    if (Array.isArray(metaEditorState.filePaths) && metaEditorState.filePaths.length > 0) {
+      formData.append('filePaths', JSON.stringify(metaEditorState.filePaths));
+    }
+
+    const titleVal = $('meta-input-title')?.value?.trim() ?? '';
+    const artistVal = $('meta-input-artist')?.value?.trim() ?? '';
+    const albumVal = $('meta-input-album')?.value?.trim() ?? '';
+    const yearVal = $('meta-input-year')?.value?.trim() ?? '';
+    const overrideAlbumTitles = Boolean($('meta-override-album-titles')?.checked);
+
+    formData.append('title', titleVal);
+    formData.append('artist', artistVal);
+    formData.append('album', albumVal);
+    formData.append('year', yearVal);
+    formData.append('overrideAlbumTitles', String(overrideAlbumTitles));
+    formData.append('hintTitle', metaEditorState.hints?.title || titleVal);
+    formData.append('hintArtist', metaEditorState.hints?.artist || artistVal);
+    formData.append('hintAlbum', metaEditorState.hints?.album || albumVal);
+
+    const instantCoverPreview = metaEditorState.previewObjectUrl || metaEditorState.selectedCoverUrl || '';
+    if (metaEditorState.selectedCoverFile) {
+      formData.append('image', metaEditorState.selectedCoverFile);
+    } else if (metaEditorState.selectedCoverUrl) {
+      formData.append('coverUrl', metaEditorState.selectedCoverUrl);
+    }
+
+    metaEditorState.busy = true;
+    const saveBtn = $('meta-save-all-btn');
+    if (saveBtn) saveBtn.disabled = true;
+    setMetaEditorStatus(
+      metaEditorState.scope === 'album'
+        ? 'Writing metadata & cover art to all audio tracks in album...'
+        : 'Writing metadata & cover art to audio file...'
+    );
+
+    try {
+      const res = await fetch(`${base}/api/metadata/apply`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders(),
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error(
+            'HTTP 404 — Your home server is still running the old file-bridge.js. Pull the latest repo on your main server PC and restart run-windows.ps1.'
+          );
+        }
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      const targetDesc =
+        metaEditorState.filePath.split('/').pop() ||
+        titleVal ||
+        metaEditorState.hints?.title ||
+        'track';
+      const msg =
+        metaEditorState.scope === 'album'
+          ? `Saved metadata & cover to ${data.updatedCount || 0} audio file(s) in album`
+          : `Saved metadata & cover to "${targetDesc}"`;
+      showToast(msg);
+      setMetaEditorStatus(msg);
+
+      refreshMusicUIAfterMetadataUpdate(instantCoverPreview);
+      closeMetadataEditor();
+    } catch (err) {
+      setMetaEditorStatus(`Save failed: ${err.message}`, true);
+      showToast(`Metadata save failed: ${err.message}`, 'error');
+    } finally {
+      metaEditorState.busy = false;
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
+  function initMetadataEditorEvents() {
+    if (metaEditorState.initialized) return;
+    metaEditorState.initialized = true;
+
+    on('files-edit-folder-meta-btn', 'click', () => {
+      const folderName = filesState.currentPath
+        ? filesState.currentPath.split('/').filter(Boolean).pop()
+        : 'Root Music Folder';
+      openMetadataEditor(
+        {
+          name: folderName,
+          isDirectory: true,
+          relPath: filesState.currentPath || '',
+        },
+        'album'
+      );
+    });
+
+    on('meta-editor-close-btn', 'click', closeMetadataEditor);
+    on('meta-editor-cancel-btn', 'click', closeMetadataEditor);
+
+    const modal = $('files-metadata-modal');
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeMetadataEditor();
+      });
+    }
+
+    on('meta-scope-single-btn', 'click', () => setMetaEditorScope('single'));
+    on('meta-scope-album-btn', 'click', () => setMetaEditorScope('album'));
+    on('meta-override-album-titles', 'change', () => updateMetaScopeUI());
+
+    // Local cover art file picker (.jpg, .png, .webp)
+    const coverInput = $('meta-cover-file-input');
+    if (coverInput) {
+      coverInput.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (metaEditorState.previewObjectUrl) {
+          URL.revokeObjectURL(metaEditorState.previewObjectUrl);
+        }
+        metaEditorState.selectedCoverFile = file;
+        metaEditorState.selectedCoverUrl = '';
+        metaEditorState.previewObjectUrl = URL.createObjectURL(file);
+        setMetaCoverPreview(metaEditorState.previewObjectUrl, `LOCAL FILE (${file.name})`);
+        setMetaEditorStatus(`Selected local image "${file.name}" (${formatFileSize(file.size)}).`);
+      });
+    }
+
+    on('meta-apply-cover-only-btn', 'click', submitUpdateCoverOnly);
+    on('meta-save-all-btn', 'click', submitApplyFullMetadata);
+
+    // Online Auto-Tag Search Form
+    on('meta-online-search-form', 'submit', (e) => {
+      e.preventDefault();
+      runOnlineMetadataSearch();
+    });
+
+    // Source Filter Pills
+    const filterGroup = $('meta-source-filters');
+    if (filterGroup) {
+      filterGroup.querySelectorAll('[data-meta-source]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          metaEditorState.sourceFilter = btn.getAttribute('data-meta-source') || 'all';
+          filterGroup.querySelectorAll('[data-meta-source]').forEach((b) => {
+            const active = b.getAttribute('data-meta-source') === metaEditorState.sourceFilter;
+            b.className = active
+              ? 'px-2 py-0.5 border border-emerald-400 bg-emerald-400/15 text-emerald-300'
+              : 'px-2 py-0.5 border border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100';
+          });
+          renderOnlineMetadataResults();
+        });
+      });
+    }
+
+    // Optional Spotify Client Credentials panel
+    const credsPanel = $('meta-spotify-creds-panel');
+    const idInput = $('meta-spotify-client-id');
+    const secretInput = $('meta-spotify-client-secret');
+    if (idInput) idInput.value = localStorage.getItem('century.spotify_client_id') || '';
+    if (secretInput) secretInput.value = localStorage.getItem('century.spotify_client_secret') || '';
+
+    on('meta-spotify-creds-btn', 'click', () => {
+      if (credsPanel) credsPanel.classList.toggle('hidden');
+    });
+    on('meta-spotify-save-btn', 'click', () => {
+      const id = idInput?.value?.trim() || '';
+      const secret = secretInput?.value?.trim() || '';
+      localStorage.setItem('century.spotify_client_id', id);
+      localStorage.setItem('century.spotify_client_secret', secret);
+      if (credsPanel) credsPanel.classList.add('hidden');
+      showToast('Saved Spotify API credentials for &market=JP auto-tagging');
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (metaEditorState.active && e.key === 'Escape') {
+        e.preventDefault();
+        closeMetadataEditor();
+      }
+    });
+  }
+
   function navigateFilesUp() {
     if (!filesState.currentPath) return;
     const parts = filesState.currentPath.split('/').filter(Boolean);
@@ -3544,6 +4538,7 @@
     }
 
     initImageViewerEvents();
+    initMetadataEditorEvents();
   }
 
   // ============================================================================
@@ -4936,6 +5931,12 @@
     on('album-play-btn', 'click', () => playSongs(state.currentAlbum?.song || [], { shuffle: false }));
     on('album-shuffle-btn', 'click', () => playSongs(state.currentAlbum?.song || [], { shuffle: true }));
     on('album-star-btn', 'click', () => toggleStarAlbum(state.currentAlbum));
+    on('album-edit-meta-btn', 'click', () => openMetadataEditorForAlbum(state.currentAlbum));
+    on('album-cover-edit-btn', 'click', (e) => {
+      e.stopPropagation();
+      openMetadataEditorForAlbum(state.currentAlbum);
+    });
+    on('album-detail-cover-wrap', 'click', () => openMetadataEditorForAlbum(state.currentAlbum));
     on('album-more-btn', 'click', (e) => {
       e.stopPropagation();
       $('album-more-menu').classList.toggle('hidden');
@@ -4944,6 +5945,10 @@
     on('album-menu-play-next', 'click', () => enqueueNext(state.currentAlbum?.song || []));
     on('album-menu-add-queue', 'click', () => enqueueEnd(state.currentAlbum?.song || []));
     on('album-menu-add-playlist', 'click', () => openAddToPlaylistModal(state.currentAlbum?.song || []));
+    on('album-menu-edit-meta', 'click', () => {
+      $('album-more-menu')?.classList.add('hidden');
+      openMetadataEditorForAlbum(state.currentAlbum);
+    });
 
     // Songs + favourites
     on('songs-play-all-btn', 'click', async () => {
@@ -5272,6 +6277,14 @@
       closeTrackContextMenu();
       if (s) await toggleStarTrack(s);
     });
+    on('ctx-edit-metadata', 'click', () => {
+      const s = state.ctxSong;
+      closeTrackContextMenu();
+      if (s) openMetadataEditorForSong(s, 'single');
+    });
+
+    // Initialize global Metadata & Cover Art Editor modal events
+    initMetadataEditorEvents();
 
     // Click-away for floating menus
     document.addEventListener('click', (e) => {
@@ -5477,6 +6490,7 @@
 
       if (e.key === 'Escape') {
         if (!$('track-context-menu').classList.contains('hidden')) return closeTrackContextMenu();
+        if (metaEditorState.active || !$('files-metadata-modal')?.classList.contains('hidden')) return closeMetadataEditor();
         for (const id of ['add-to-playlist-modal', 'save-queue-playlist-modal', 'create-playlist-modal']) {
           if (!$(id).classList.contains('hidden')) return closeModal(id);
         }

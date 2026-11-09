@@ -710,6 +710,335 @@
       <i id="ctx-star-icon" data-lucide="star" class="w-3.5 h-3.5 text-zinc-400"></i>
       <span id="ctx-star-label">Star Track</span>
     </button>
+
+    <div class="my-1 border-t border-zinc-800"></div>
+
+    <button id="ctx-edit-metadata" type="button" role="menuitem"
+      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-emerald-400">
+      <i data-lucide="tags" class="w-3.5 h-3.5 text-emerald-400"></i>
+      <span>Edit Cover &amp; Metadata...</span>
+    </button>
+  </div>
+
+  <!-- Global Full Metadata & Embedded Cover Art Editor Modal (Accessible from Album UI, Songs UI, Track Menu & Files Tab) -->
+  <div
+    id="files-metadata-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Metadata and Cover Art Editor"
+    class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 select-none"
+  >
+    <div class="w-full max-w-5xl max-h-[92vh] bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col overflow-hidden">
+      <!-- Modal Header + Scope Selector -->
+      <div class="px-5 py-3.5 border-b border-zinc-700 bg-zinc-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <i data-lucide="tags" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+            <h2 class="font-display text-lg text-zinc-100 truncate">Metadata &amp; Cover Art Editor</h2>
+          </div>
+          <p id="meta-editor-target-label" class="text-[11px] font-mono text-zinc-400 truncate mt-0.5">
+            Target: -
+          </p>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          <!-- Scope Toggle: Single Track vs Entire Album Folder -->
+          <div class="inline-flex items-center bg-zinc-950 border border-zinc-700 p-0.5 text-[11px] font-mono">
+            <button
+              id="meta-scope-single-btn"
+              type="button"
+              class="px-2.5 py-1 transition-colors bg-emerald-400 text-zinc-950 font-semibold"
+            >
+              SINGLE TRACK
+            </button>
+            <button
+              id="meta-scope-album-btn"
+              type="button"
+              class="px-2.5 py-1 transition-colors text-zinc-400 hover:text-zinc-100"
+            >
+              ALBUM FOLDER
+            </button>
+          </div>
+
+          <button
+            id="meta-editor-close-btn"
+            type="button"
+            title="Close (Esc)"
+            class="w-8 h-8 inline-flex items-center justify-center bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-100 transition-colors"
+          >
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Modal Body: Two Columns (Left: Cover Art + Manual Fields, Right: Online JP Auto-Tag Search) -->
+      <div class="flex-1 min-h-0 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-zinc-800">
+        <!-- Left Column (5 cols): Cover Art Studio + Manual Tag Inputs -->
+        <div class="lg:col-span-5 p-5 space-y-5 bg-zinc-900/60">
+          <!-- Cover Art Section -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-[10.5px] font-mono uppercase tracking-wider text-emerald-400">
+                Embedded Cover Art / Thumbnail
+              </span>
+              <span
+                id="meta-cover-source-badge"
+                class="px-1.5 py-0.5 text-[10px] font-mono bg-zinc-950 border border-zinc-700 text-zinc-400"
+              >
+                NO CHANGE
+              </span>
+            </div>
+
+            <div class="flex flex-col sm:flex-row lg:flex-col xl:flex-row items-center gap-4">
+              <!-- 1:1 Cover Preview -->
+              <div class="relative w-36 h-36 bg-zinc-950 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center group">
+                <img
+                  id="meta-cover-preview-img"
+                  src=""
+                  alt="Cover Art Preview"
+                  class="hidden w-full h-full object-cover"
+                />
+                <div id="meta-cover-preview-fallback" class="flex flex-col items-center justify-center gap-1.5 text-zinc-500">
+                  <i data-lucide="disc-3" class="w-8 h-8 text-zinc-600"></i>
+                  <span class="text-[10px] font-mono">No Cover</span>
+                </div>
+              </div>
+
+              <!-- File Picker + Quick Cover Update Actions -->
+              <div class="flex-1 w-full space-y-2">
+                <label
+                  class="w-full h-9 px-3 bg-zinc-950 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-100 inline-flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                >
+                  <i data-lucide="image-plus" class="w-3.5 h-3.5 text-emerald-400"></i>
+                  <span>CHOOSE IMAGE (.JPG, .PNG)</span>
+                  <input
+                    id="meta-cover-file-input"
+                    type="file"
+                    accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                    class="hidden"
+                  />
+                </label>
+
+                <button
+                  id="meta-apply-cover-only-btn"
+                  type="button"
+                  title="Send image directly to /api/update-cover for the active scope"
+                  class="w-full h-8 px-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-[11px] font-mono text-emerald-400 inline-flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                  <span>UPDATE COVER ONLY (/api/update-cover)</span>
+                </button>
+
+                <p class="text-[10.5px] font-mono text-zinc-400 leading-relaxed">
+                  Pick a local <code class="text-zinc-300">.jpg</code>/<code class="text-zinc-300">.png</code> or click any online search result on the right to preview &amp; embed.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Manual Tag Override Fields -->
+          <div class="pt-4 border-t border-zinc-800 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-[10.5px] font-mono uppercase tracking-wider text-emerald-400">
+                Manual Tag Overrides
+              </span>
+              <span id="meta-scope-hint" class="text-[10px] font-mono text-zinc-400">
+                Editing single track
+              </span>
+            </div>
+
+            <div id="meta-title-field-wrap" class="space-y-1">
+              <div class="flex items-center justify-between">
+                <label for="meta-input-title" class="block text-[11px] font-mono text-zinc-400">
+                  TITLE (KANJI / ROMAJI)
+                </label>
+                <label id="meta-override-album-titles-wrap" class="hidden items-center gap-1.5 text-[10px] font-mono text-zinc-400 cursor-pointer">
+                  <input id="meta-override-album-titles" type="checkbox" class="accent-emerald-400" />
+                  <span>Apply title to all tracks</span>
+                </label>
+              </div>
+              <input
+                id="meta-input-title"
+                type="text"
+                placeholder="Track title (e.g. 空白の居場所)..."
+                class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-sans select-text"
+              />
+            </div>
+
+            <div class="space-y-1">
+              <label for="meta-input-artist" class="block text-[11px] font-mono text-zinc-400">
+                ARTIST
+              </label>
+              <input
+                id="meta-input-artist"
+                type="text"
+                placeholder="Artist name (e.g. ダズビー / DAZBEE)..."
+                class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-sans select-text"
+              />
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="sm:col-span-2 space-y-1">
+                <label for="meta-input-album" class="block text-[11px] font-mono text-zinc-400">
+                  ALBUM
+                </label>
+                <input
+                  id="meta-input-album"
+                  type="text"
+                  placeholder="Album name..."
+                  class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-sans select-text"
+                />
+              </div>
+
+              <div class="space-y-1">
+                <label for="meta-input-year" class="block text-[11px] font-mono text-zinc-400">
+                  RELEASE YEAR
+                </label>
+                <input
+                  id="meta-input-year"
+                  type="text"
+                  maxlength="10"
+                  placeholder="2024"
+                  class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono select-text"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column (7 cols): Online Auto-Tagging (iTunes JP, Spotify JP, MusicBrainz, Deezer) -->
+        <div class="lg:col-span-7 p-5 flex flex-col min-h-[380px] space-y-3.5 bg-zinc-950/30">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <span class="text-[10.5px] font-mono uppercase tracking-wider text-emerald-400">
+                Online Auto-Tagging (JP Databases + Global)
+              </span>
+              <p class="text-[11px] font-mono text-zinc-400">
+                Queries iTunes JP (&amp;country=jp), Spotify JP (&amp;market=JP), MusicBrainz &amp; Deezer concurrently
+              </p>
+            </div>
+            <button
+              id="meta-spotify-creds-btn"
+              type="button"
+              title="Configure optional Spotify API Client ID &amp; Secret"
+              class="h-7 px-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-zinc-300 inline-flex items-center gap-1 shrink-0"
+            >
+              <i data-lucide="key" class="w-3 h-3 text-emerald-400"></i>
+              <span>SPOTIFY API KEY</span>
+            </button>
+          </div>
+
+          <!-- Optional Collapsible Spotify Client Credentials Box -->
+          <div id="meta-spotify-creds-panel" class="hidden p-3 bg-zinc-950 border border-zinc-800 space-y-2">
+            <div class="flex items-center justify-between text-[10.5px] font-mono text-zinc-400">
+              <span>SPOTIFY CLIENT CREDENTIALS (FOR &amp;market=JP)</span>
+              <span class="text-zinc-500">Or set SPOTIFY_CLIENT_ID in .env</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                id="meta-spotify-client-id"
+                type="text"
+                placeholder="SPOTIFY_CLIENT_ID"
+                class="h-8 px-2.5 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100 select-text"
+              />
+              <input
+                id="meta-spotify-client-secret"
+                type="password"
+                placeholder="SPOTIFY_CLIENT_SECRET"
+                class="h-8 px-2.5 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100 select-text"
+              />
+            </div>
+            <div class="flex justify-end">
+              <button
+                id="meta-spotify-save-btn"
+                type="button"
+                class="h-7 px-3 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-[11px] font-mono font-semibold"
+              >
+                SAVE SPOTIFY KEYS
+              </button>
+            </div>
+          </div>
+
+          <!-- Search Input Bar -->
+          <form id="meta-online-search-form" class="flex gap-2">
+            <div class="relative flex-1">
+              <i data-lucide="search" class="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+              <input
+                id="meta-online-search-input"
+                type="text"
+                placeholder="Search Japanese or romaji artist / track / album (e.g. 和ぬか 審美眼)..."
+                class="w-full h-9 pl-8 pr-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-sans select-text"
+              />
+            </div>
+            <button
+              id="meta-online-search-btn"
+              type="submit"
+              class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center gap-1.5 shrink-0 transition-colors"
+            >
+              <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+              <span>AUTO-TAG / SEARCH ONLINE</span>
+            </button>
+          </form>
+
+          <!-- Source Filter Pills -->
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div id="meta-source-filters" class="flex items-center gap-1 flex-wrap text-[10.5px] font-mono">
+              <button type="button" data-meta-source="all" class="px-2 py-0.5 border border-emerald-400 bg-emerald-400/15 text-emerald-300">
+                ALL
+              </button>
+              <button type="button" data-meta-source="iTunes JP" class="px-2 py-0.5 border border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100">
+                iTunes JP
+              </button>
+              <button type="button" data-meta-source="Spotify JP" class="px-2 py-0.5 border border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100">
+                Spotify JP
+              </button>
+              <button type="button" data-meta-source="MusicBrainz" class="px-2 py-0.5 border border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100">
+                MusicBrainz
+              </button>
+              <button type="button" data-meta-source="Deezer" class="px-2 py-0.5 border border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-100">
+                Deezer
+              </button>
+            </div>
+            <span id="meta-search-summary" class="text-[10.5px] font-mono text-zinc-400"></span>
+          </div>
+
+          <!-- Aggregated Results List -->
+          <div
+            id="meta-online-results-list"
+            class="flex-1 min-h-[240px] max-h-[340px] overflow-y-auto border border-zinc-800 bg-zinc-950 divide-y divide-zinc-800/70"
+          >
+            <div class="p-8 text-center text-xs font-mono text-zinc-500">
+              Click "AUTO-TAG / SEARCH ONLINE" to pull Kanji/Romaji tags and high-res covers from iTunes JP, Spotify JP, MusicBrainz, and Deezer.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-5 py-3 border-t border-zinc-700 bg-zinc-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+        <p id="meta-editor-status" class="text-xs font-mono text-zinc-400 truncate">
+          Ready to edit metadata.
+        </p>
+
+        <div class="flex items-center justify-end gap-2 shrink-0">
+          <button
+            id="meta-editor-cancel-btn"
+            type="button"
+            class="h-9 px-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-xs font-mono text-zinc-200 transition-colors"
+          >
+            CANCEL
+          </button>
+          <button
+            id="meta-save-all-btn"
+            type="button"
+            class="h-9 px-5 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors"
+          >
+            <i data-lucide="check" class="w-4 h-4"></i>
+            <span id="meta-save-all-label">SAVE TO FILE</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Keyboard Shortcuts Cheat Sheet Modal (?) -->

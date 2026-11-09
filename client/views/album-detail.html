@@ -13,12 +13,26 @@
 
   <!-- Album Header Studio Panel -->
   <div class="studio-panel p-5 sm:p-6 bg-zinc-900/60 flex flex-col md:flex-row gap-6 items-start md:items-end">
-    <div class="w-44 h-44 sm:w-48 sm:h-48 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center relative">
+    <div
+      id="album-detail-cover-wrap"
+      class="group w-44 h-44 sm:w-48 sm:h-48 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center relative cursor-pointer"
+      title="Click to change album cover art &amp; metadata"
+    >
       <img id="album-detail-cover" src="" alt="" class="hidden w-full h-full object-cover" />
       <div id="album-detail-cover-fallback" class="flex flex-col items-center justify-center text-zinc-400">
         <i data-lucide="disc" class="w-10 h-10 mb-1"></i>
         <span class="text-[10px] font-mono">NO COVER</span>
       </div>
+      <!-- Hover Overlay to Edit Cover / Metadata directly from the Album Cover -->
+      <button
+        id="album-cover-edit-btn"
+        type="button"
+        class="opacity-0 group-hover:opacity-100 transition-opacity absolute inset-0 bg-black/75 backdrop-blur-[2px] flex flex-col items-center justify-center gap-1.5 text-emerald-400 font-mono text-[11px]"
+      >
+        <i data-lucide="image-plus" class="w-6 h-6"></i>
+        <span class="font-semibold tracking-wider">CHANGE COVER</span>
+        <span class="text-[9.5px] text-zinc-300">OR AUTO-TAG ALBUM</span>
+      </button>
     </div>
 
     <div class="flex-1 min-w-0 space-y-2">
@@ -31,7 +45,7 @@
         <span id="album-detail-meta"></span>
       </div>
 
-      <!-- Actions: Play, Shuffle, Star, and Overflow [...] Menu -->
+      <!-- Actions: Play, Shuffle, Star, Edit Cover/Tags, and Overflow [...] Menu -->
       <div class="pt-3 flex flex-wrap items-center gap-2">
         <button
           id="album-play-btn"
@@ -61,6 +75,16 @@
           <span id="album-star-label">STAR</span>
         </button>
 
+        <button
+          id="album-edit-meta-btn"
+          type="button"
+          title="Change album thumbnail / cover art or auto-tag metadata"
+          class="h-9 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-emerald-400 text-xs font-mono text-zinc-200 hover:text-emerald-400 inline-flex items-center gap-1.5 transition-colors"
+        >
+          <i data-lucide="tags" class="w-3.5 h-3.5 text-emerald-400"></i>
+          <span>EDIT COVER / TAGS</span>
+        </button>
+
         <!-- Album Overflow Menu [...] -->
         <div class="relative">
           <button
@@ -75,7 +99,7 @@
 
           <div
             id="album-more-menu"
-            class="hidden absolute left-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono"
+            class="hidden absolute left-0 mt-1 w-52 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono"
           >
             <button id="album-menu-shuffle" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-zinc-200">
               <i data-lucide="shuffle" class="w-3.5 h-3.5 text-zinc-400"></i>
@@ -92,6 +116,11 @@
             <button id="album-menu-add-playlist" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-zinc-200">
               <i data-lucide="list-music" class="w-3.5 h-3.5 text-zinc-400"></i>
               <span>Add to playlist</span>
+            </button>
+            <div class="my-1 border-t border-zinc-800"></div>
+            <button id="album-menu-edit-meta" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-emerald-400">
+              <i data-lucide="tags" class="w-3.5 h-3.5 text-emerald-400"></i>
+              <span>Edit cover &amp; tags...</span>
             </button>
           </div>
         </div>

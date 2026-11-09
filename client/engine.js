@@ -212,6 +212,12 @@ class SubsonicClient {
   constructor() {
     this.loadConfig();
     this.streamCoverCache = new Map();
+    this.coverCacheBust = 0;
+  }
+
+  bustCoverCache() {
+    this.coverCacheBust = Date.now();
+    this.streamCoverCache.clear();
   }
 
   loadConfig() {
@@ -418,7 +424,9 @@ class SubsonicClient {
 
   getCoverArtUrl(id, size = 300) {
     if (!id) return '';
-    return this.buildUrl('getCoverArt', { id, size });
+    const params = { id, size };
+    if (this.coverCacheBust) params._cb = this.coverCacheBust;
+    return this.buildUrl('getCoverArt', params);
   }
 
   getStreamUrl(id, streamQuality) {

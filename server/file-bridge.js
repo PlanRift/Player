@@ -7,6 +7,14 @@ import fsSync from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import {
+  isAudioFileName,
+  detectImageInfo,
+  readAudioMetadata,
+  writeAudioMetadata,
+  searchMetadataOnline,
+  fetchRemoteCoverBuffer,
+} from './audio-tagger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = path.resolve(__dirname, '..');
@@ -368,7 +376,13 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'x-api-key', 'X-API-Key'],
+  allowedHeaders: [
+    'Content-Type',
+    'x-api-key',
+    'X-API-Key',
+    'x-spotify-client-id',
+    'x-spotify-client-secret',
+  ],
 }));
 
 app.use(express.json({ limit: '100mb' }));
@@ -766,6 +780,490 @@ app.get('/api/files/download', async (req, res) => {
       return res.status(404).json({ error: 'File not found' });
     }
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// 6. EMBEDDED COVER ART & FULL METADATA EDITOR ENDPOINTS
+// ============================================================================
+
+/**
+ * Helper to resolve a cover image Buffer from an uploaded file, remote URL, or base64 Data URL.
+ */
+async function resolveCoverImageBuffer(req) {
+  const uploadedFile = Array.isArray(req.files) && req.files.length > 0 ? req.files[0] : req.file;
+  if (uploadedFile && uploadedFile.path) {
+    const buf = await fs.readFile(uploadedFile.path);
+    detectImageInfo(buf);
+    return buf;
+  }
+
+  const coverUrl = String(req.body?.coverUrl || '').trim();
+  if (coverUrl) {
+    if (coverUrl.startsWith('data:image/')) {
+      const commaIdx = coverUrl.indexOf(',');
+      if (commaIdx === -1) throw new Error('Invalid base64 image data URL');
+      const buf = Buffer.from(coverUrl.slice(commaIdx + 1), 'base64');
+      detectImageInfo(buf);
+      return buf;
+    }
+    return await fetchRemoteCoverBuffer(coverUrl);
+  }
+
+  return null;
+}
+
+/**
+ * Resolve a relative path that may originate either from the Files tab (relative to STORAGE_DIR)
+ * or from Navidrome's Subsonic API `song.path` (relative to MUSIC_DIR), with an optional
+ * fallback search by artist/album/title hints.
+ */
+async function resolveExistingLibraryTarget(rawRelPath, { expectDir = false, hints = {} } = {}) {
+  const candidates = [];
+  const cleanRel = String(rawRelPath || '').normalize('NFC').trim();
+
+  if (cleanRel) {
+    // 1. Direct relative to STORAGE_DIR (e.g. "Music/Artist/Album/Track.mp3")
+    try {
+      const c1 = resolveSafePath(cleanRel, { forbidRoot: true });
+      candidates.push(c1);
+    } catch (_) {}
+
+    // 2. Relative to MUSIC_DIR (e.g. Subsonic song.path "Artist/Album/Track.mp3" when STORAGE_DIR is G:\Server and MUSIC_DIR is G:\Server\Music)
+    const relMusicFromStorage = path.relative(STORAGE_DIR, MUSIC_DIR);
+    if (relMusicFromStorage && !relMusicFromStorage.startsWith('..')) {
+      try {
+        const c2 = resolveSafePath(path.join(relMusicFromStorage, cleanRel), { forbidRoot: true });
+        candidates.push(c2);
+      } catch (_) {}
+    }
+
+    // 3. Also check common "Music" or "music" subfolder inside STORAGE_DIR
+    for (const subName of ['Music', 'music']) {
+      try {
+        const c3 = resolveSafePath(path.join(subName, cleanRel), { forbidRoot: true });
+        candidates.push(c3);
+      } catch (_) {}
+    }
+  }
+
+  for (const cand of candidates) {
+    if (fsSync.existsSync(cand)) {
+      const st = fsSync.lstatSync(cand);
+      if (expectDir && st.isFile()) {
+        return path.dirname(cand);
+      }
+      return cand;
+    }
+  }
+
+  // Fallback search inside MUSIC_DIR / STORAGE_DIR by album/artist/title hints if path wasn't found directly
+  const norm = (s) => String(s || '').normalize('NFC').toLowerCase().trim();
+  const wantTitle = norm(hints.title);
+  const wantAlbum = norm(hints.album);
+  const wantArtist = norm(hints.artist);
+
+  if (wantTitle || wantAlbum || cleanRel) {
+    const baseNameHint = cleanRel ? norm(path.basename(cleanRel.replace(/\\/g, '/'))) : '';
+    const searchRoots = [];
+    if (fsSync.existsSync(MUSIC_DIR) && canonicalizePath(MUSIC_DIR).startsWith(CANONICAL_STORAGE_ROOT)) {
+      searchRoots.push(MUSIC_DIR);
+    }
+    if (!searchRoots.includes(STORAGE_DIR)) {
+      searchRoots.push(STORAGE_DIR);
+    }
+
+    const queue = [...searchRoots];
+    const visited = new Set(queue.map((d) => canonicalizePath(d)));
+    let bestDirMatch = null;
+    let bestFileMatch = null;
+
+    while (queue.length > 0 && visited.size < 400) {
+      const currentDir = queue.shift();
+      let entries;
+      try {
+        entries = await fs.readdir(currentDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (entry.name === '.tmp_chunks' || entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+        const fullPath = path.join(currentDir, entry.name);
+        const canon = canonicalizePath(fullPath);
+        if (
+          canon === CANONICAL_PROJECT_ROOT ||
+          canon.startsWith(CANONICAL_PROJECT_ROOT + path.sep) ||
+          canon === CANONICAL_TMP_ROOT
+        ) {
+          continue;
+        }
+
+        const entryLower = norm(entry.name);
+        if (entry.isDirectory()) {
+          if (!visited.has(canon)) {
+            visited.add(canon);
+            queue.push(fullPath);
+          }
+          if (expectDir) {
+            if (baseNameHint && entryLower === baseNameHint) {
+              return fullPath;
+            }
+            if (wantAlbum && (entryLower === wantAlbum || entryLower.includes(wantAlbum))) {
+              bestDirMatch = fullPath;
+            } else if (!bestDirMatch && wantArtist && entryLower === wantArtist) {
+              bestDirMatch = fullPath;
+            }
+          }
+        } else if (entry.isFile() && isAudioFileName(entry.name)) {
+          const stemLower = norm(path.basename(entry.name, path.extname(entry.name))).replace(/^\d+[\s._-]+/, '');
+          if (baseNameHint && entryLower === baseNameHint) {
+            return expectDir ? path.dirname(fullPath) : fullPath;
+          }
+          if (wantTitle && (stemLower === wantTitle || stemLower.includes(wantTitle))) {
+            bestFileMatch = fullPath;
+          }
+        }
+      }
+    }
+
+    if (expectDir && bestDirMatch) return bestDirMatch;
+    if (expectDir && bestFileMatch) return path.dirname(bestFileMatch);
+    if (!expectDir && bestFileMatch) return bestFileMatch;
+  }
+
+  throw new Error(`Could not locate target audio file or folder on server: "${cleanRel || wantAlbum || wantTitle}"`);
+}
+
+/**
+ * Helper to apply metadata/cover updates to either a single audio file or every audio file in an album folder.
+ */
+async function applyMetadataByScope({
+  scope,
+  targetRelPath,
+  filePaths = [],
+  hints = {},
+  updates,
+  overrideAlbumTitles = false,
+}) {
+  const normalizedScope = String(scope || 'single').toLowerCase() === 'album' ? 'album' : 'single';
+
+  if (normalizedScope === 'single') {
+    const targetFile = await resolveExistingLibraryTarget(targetRelPath, {
+      expectDir: false,
+      hints,
+    });
+    const relFromRoot = path.relative(STORAGE_DIR, targetFile);
+    const verifiedFile = resolveSafePath(relFromRoot, {
+      forbidRoot: true,
+      forbidProtected: true,
+    });
+    assertSafeFileWriteTarget(verifiedFile, STORAGE_DIR);
+
+    if (!isAudioFileName(verifiedFile)) {
+      throw new Error(`Unsupported audio file extension: ${path.extname(verifiedFile)}`);
+    }
+
+    await writeAudioMetadata(verifiedFile, updates, TMP_CHUNKS_DIR);
+    return {
+      scope: 'single',
+      updatedCount: 1,
+      updatedFiles: [path.basename(verifiedFile)],
+      errors: [],
+    };
+  }
+
+  // Album Mode:
+  // In album mode, preserve each track's individual song title unless overrideAlbumTitles is true
+  const albumUpdates = { ...updates };
+  if (!overrideAlbumTitles) {
+    delete albumUpdates.title;
+  }
+
+  // If explicit track filePaths were supplied (e.g. from Album Detail UI where album.song provides each track's path),
+  // resolve all of them and also include all audio files inside their parent album folder.
+  const targetTrackFiles = new Set();
+  if (Array.isArray(filePaths) && filePaths.length > 0) {
+    for (const fp of filePaths) {
+      try {
+        const resolvedTrack = await resolveExistingLibraryTarget(fp, { expectDir: false, hints });
+        if (isAudioFileName(resolvedTrack)) {
+          targetTrackFiles.add(resolvedTrack);
+        }
+      } catch (_) {}
+    }
+  }
+
+  // Also resolve the album folder itself and include all audio files inside it
+  let targetFolder = null;
+  try {
+    targetFolder = await resolveExistingLibraryTarget(targetRelPath, {
+      expectDir: true,
+      hints,
+    });
+  } catch (folderErr) {
+    if (targetTrackFiles.size > 0) {
+      targetFolder = path.dirname([...targetTrackFiles][0]);
+    } else {
+      throw folderErr;
+    }
+  }
+
+  if (targetFolder && fsSync.existsSync(targetFolder) && fsSync.lstatSync(targetFolder).isDirectory()) {
+    const entries = await fs.readdir(targetFolder, { withFileTypes: true });
+    for (const e of entries) {
+      if (
+        e.isFile() &&
+        !e.name.startsWith('._') &&
+        !IGNORED_SYSTEM_NAMES.has(e.name.toLowerCase()) &&
+        isAudioFileName(e.name)
+      ) {
+        targetTrackFiles.add(path.join(targetFolder, e.name));
+      }
+    }
+  }
+
+  if (targetTrackFiles.size === 0) {
+    throw new Error('No supported audio files found for the selected album');
+  }
+
+  const updatedFiles = [];
+  const errors = [];
+
+  for (const fullTrackPath of targetTrackFiles) {
+    const relTrack = path.relative(STORAGE_DIR, fullTrackPath);
+    const safeTrackPath = resolveSafePath(relTrack, {
+      forbidRoot: true,
+      forbidProtected: true,
+    });
+    assertSafeFileWriteTarget(safeTrackPath, STORAGE_DIR);
+
+    try {
+      await writeAudioMetadata(safeTrackPath, albumUpdates, TMP_CHUNKS_DIR);
+      updatedFiles.push(path.basename(safeTrackPath));
+    } catch (trackErr) {
+      errors.push({ file: path.basename(safeTrackPath), error: trackErr.message });
+    }
+  }
+
+  return {
+    scope: 'album',
+    updatedCount: updatedFiles.length,
+    totalAudioFiles: targetTrackFiles.size,
+    updatedFiles,
+    errors,
+  };
+}
+
+// 6a. POST /api/update-cover - Update embedded cover art for a single track or entire album folder
+app.post(['/api/update-cover', '/api/files/update-cover'], stagingUpload.any(), async (req, res) => {
+  const stagedFiles = Array.isArray(req.files) ? req.files : [];
+  try {
+    const scope = String(req.body?.scope || 'single').toLowerCase();
+    const targetRelPath =
+      scope === 'album'
+        ? req.body?.folderPath || req.body?.filePath || req.body?.path || ''
+        : req.body?.filePath || req.body?.folderPath || req.body?.path || '';
+
+    let filePaths = [];
+    if (req.body?.filePaths) {
+      try {
+        filePaths = typeof req.body.filePaths === 'string' ? JSON.parse(req.body.filePaths) : req.body.filePaths;
+      } catch {
+        filePaths = Array.isArray(req.body.filePaths) ? req.body.filePaths : [req.body.filePaths];
+      }
+    }
+
+    const hints = {
+      title: req.body?.hintTitle || req.body?.title || '',
+      artist: req.body?.hintArtist || req.body?.artist || '',
+      album: req.body?.hintAlbum || req.body?.album || '',
+    };
+
+    const coverBuffer = await resolveCoverImageBuffer(req);
+    if (!coverBuffer) {
+      return res.status(400).json({ error: 'No cover image file (.jpg, .png) or coverUrl provided' });
+    }
+
+    const result = await applyMetadataByScope({
+      scope,
+      targetRelPath,
+      filePaths,
+      hints,
+      updates: { coverBuffer },
+      overrideAlbumTitles: false,
+    });
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (err) {
+    console.error(`[UpdateCover Error] ${err.message}`);
+    res.status(400).json({ error: err.message });
+  } finally {
+    for (const f of stagedFiles) {
+      await safeRemoveStagingFile(f?.path);
+    }
+  }
+});
+
+// 6b. GET /api/metadata/read - Read current embedded metadata & cover art from a track or album folder
+app.get(['/api/metadata/read', '/api/files/metadata/read'], async (req, res) => {
+  try {
+    const rawPath = String(req.query.path || '').trim();
+    const requestedScope = String(req.query.scope || '').toLowerCase();
+    const hints = {
+      title: req.query.title || '',
+      artist: req.query.artist || '',
+      album: req.query.album || '',
+    };
+
+    const target = await resolveExistingLibraryTarget(rawPath, {
+      expectDir: requestedScope === 'album',
+      hints,
+    });
+
+    const stat = await fs.lstat(target);
+    if (stat.isDirectory()) {
+      const entries = await fs.readdir(target, { withFileTypes: true });
+      const audioFiles = entries
+        .filter((e) => e.isFile() && !e.name.startsWith('._') && isAudioFileName(e.name))
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b));
+
+      let sampleMeta = {
+        title: '',
+        artist: '',
+        album: path.basename(target),
+        year: '',
+        hasCover: false,
+        coverDataUrl: null,
+      };
+
+      if (audioFiles.length > 0) {
+        const firstAudio = path.join(target, audioFiles[0]);
+        sampleMeta = await readAudioMetadata(firstAudio);
+      }
+
+      const relFolder = path.relative(STORAGE_DIR, target).replace(/\\/g, '/');
+      return res.json({
+        scope: 'album',
+        path: relFolder,
+        folderPath: relFolder,
+        audioTrackCount: audioFiles.length,
+        audioFiles,
+        metadata: {
+          title: '',
+          artist: sampleMeta.artist || '',
+          album: sampleMeta.album || path.basename(target),
+          year: sampleMeta.year || '',
+          hasCover: sampleMeta.hasCover,
+          coverDataUrl: sampleMeta.coverDataUrl,
+        },
+      });
+    }
+
+    const meta = await readAudioMetadata(target);
+    const relFile = path.relative(STORAGE_DIR, target).replace(/\\/g, '/');
+    const relFolder = path.relative(STORAGE_DIR, path.dirname(target)).replace(/\\/g, '/');
+
+    return res.json({
+      scope: requestedScope === 'album' ? 'album' : 'single',
+      path: relFile,
+      filePath: relFile,
+      folderPath: relFolder,
+      metadata: meta,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 6c. GET /api/metadata/search - Search online metadata concurrently (iTunes JP, Spotify JP, MusicBrainz, Deezer)
+app.get(['/api/metadata/search', '/api/files/metadata/search'], async (req, res) => {
+  try {
+    const q = String(req.query.q || req.query.query || '').trim();
+    if (!q) {
+      return res.status(400).json({ error: 'Missing search query parameter (?q=...)' });
+    }
+
+    const spotifyClientId =
+      req.headers['x-spotify-client-id'] || req.query.spotifyClientId || process.env.SPOTIFY_CLIENT_ID || '';
+    const spotifyClientSecret =
+      req.headers['x-spotify-client-secret'] || req.query.spotifyClientSecret || process.env.SPOTIFY_CLIENT_SECRET || '';
+
+    const data = await searchMetadataOnline(q, {
+      spotifyClientId,
+      spotifyClientSecret,
+    });
+
+    res.json(data);
+  } catch (err) {
+    console.error(`[MetadataSearch Error] ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6d. POST /api/metadata/apply - Apply finalized metadata & cover art to single track or album folder
+app.post(['/api/metadata/apply', '/api/files/metadata/apply'], stagingUpload.any(), async (req, res) => {
+  const stagedFiles = Array.isArray(req.files) ? req.files : [];
+  try {
+    const scope = String(req.body?.scope || 'single').toLowerCase() === 'album' ? 'album' : 'single';
+    const targetRelPath =
+      scope === 'album'
+        ? req.body?.folderPath || req.body?.filePath || req.body?.path || ''
+        : req.body?.filePath || req.body?.folderPath || req.body?.path || '';
+
+    let filePaths = [];
+    if (req.body?.filePaths) {
+      try {
+        filePaths = typeof req.body.filePaths === 'string' ? JSON.parse(req.body.filePaths) : req.body.filePaths;
+      } catch {
+        filePaths = Array.isArray(req.body.filePaths) ? req.body.filePaths : [req.body.filePaths];
+      }
+    }
+
+    const hints = {
+      title: req.body?.hintTitle || req.body?.title || '',
+      artist: req.body?.hintArtist || req.body?.artist || '',
+      album: req.body?.hintAlbum || req.body?.album || '',
+    };
+
+    const updates = {};
+    if (req.body?.title !== undefined) updates.title = String(req.body.title).normalize('NFC').trim();
+    if (req.body?.artist !== undefined) updates.artist = String(req.body.artist).normalize('NFC').trim();
+    if (req.body?.album !== undefined) updates.album = String(req.body.album).normalize('NFC').trim();
+    if (req.body?.year !== undefined) updates.year = String(req.body.year).normalize('NFC').trim();
+
+    const coverBuffer = await resolveCoverImageBuffer(req);
+    if (coverBuffer) {
+      updates.coverBuffer = coverBuffer;
+    }
+
+    const overrideAlbumTitles =
+      req.body?.overrideAlbumTitles === true || req.body?.overrideAlbumTitles === 'true';
+
+    const result = await applyMetadataByScope({
+      scope,
+      targetRelPath,
+      filePaths,
+      hints,
+      updates,
+      overrideAlbumTitles,
+    });
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  } catch (err) {
+    console.error(`[MetadataApply Error] ${err.message}`);
+    res.status(400).json({ error: err.message });
+  } finally {
+    for (const f of stagedFiles) {
+      await safeRemoveStagingFile(f?.path);
+    }
   }
 });
 
