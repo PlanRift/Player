@@ -28,10 +28,11 @@
     <div class="flex items-center gap-2">
       <!-- Japanese Language Mode Toggle (原文 / Romaji / EN) -->
       <div id="sig-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-900">
-        <button type="button" data-lyrics-mode="original" class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono bg-emerald-400 text-zinc-950 font-semibold">原文</button>
-        <button type="button" data-lyrics-mode="romaji" class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
-        <button type="button" data-lyrics-mode="en" class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">EN</button>
-      </div>
+          <button type="button" data-lyrics-toggle="romaji"
+            class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
+          <button type="button" data-lyrics-toggle="translated"
+            class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
+        </div>
       <span id="sig-lyrics-preparing" class="hidden text-[10px] font-mono text-emerald-400 animate-pulse">preparing readings...</span>
 
       <!-- Timing Offset Nudge Controls -->
@@ -85,9 +86,9 @@
   <div class="relative z-10 flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-8 px-6 md:px-10 py-6 max-w-[1800px] w-full mx-auto overflow-hidden">
     <!-- Left Column (5 cols) -->
     <div class="lg:col-span-5 flex flex-col justify-center items-center lg:items-start space-y-5">
-      <div class="w-full max-w-[min(460px,44dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
-        <img id="sig-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
-        <i id="sig-cover-fallback" data-lucide="disc" class="w-16 h-16 text-zinc-400"></i>
+      <div class="relative w-full max-w-[min(460px,44dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
+        <img id="sig-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
+        <i id="sig-cover-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-16 h-16 text-zinc-400 pointer-events-none"></i>
       </div>
 
       <div class="w-full max-w-md space-y-1 text-center lg:text-left">

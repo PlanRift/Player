@@ -235,6 +235,25 @@
       <!-- Floating Bottom Player Bar (Inside Main Content Area) -->
       <footer id="bottom-player-bar" aria-label="Audio Player Controls"
         class="absolute bottom-0 left-0 right-0 p-2 sm:p-3.5 pointer-events-none z-30">
+        <!-- Multi-select action bar (V-15, Century M7): sits above the
+             player bar when one or more tracks are selected in Songs /
+             Album Detail / Playlist Detail. -->
+        <div id="multi-select-bar" class="hidden max-w-[1920px] mx-auto mb-2 pointer-events-auto">
+          <div class="flex items-center gap-2 px-3 py-2 bg-zinc-900 border border-zinc-700 shadow-2xl">
+            <span id="multi-select-count" class="text-xs font-mono text-zinc-100 whitespace-nowrap">0 selected</span>
+            <div class="flex-1"></div>
+            <button id="multi-select-play-btn" type="button"
+              class="px-2.5 py-1 text-[11px] font-mono bg-emerald-400 text-zinc-950 font-semibold hover:bg-emerald-300">Play</button>
+            <button id="multi-select-queue-btn" type="button"
+              class="px-2.5 py-1 text-[11px] font-mono bg-zinc-800 border border-zinc-600 text-zinc-100 hover:border-emerald-400">Add to Queue</button>
+            <button id="multi-select-playlist-btn" type="button"
+              class="px-2.5 py-1 text-[11px] font-mono bg-zinc-800 border border-zinc-600 text-zinc-100 hover:border-emerald-400">Add to Playlist</button>
+            <button id="multi-select-star-btn" type="button"
+              class="px-2.5 py-1 text-[11px] font-mono bg-zinc-800 border border-zinc-600 text-zinc-100 hover:border-emerald-400">Star</button>
+            <button id="multi-select-clear-btn" type="button" aria-label="Clear selection"
+              class="px-2 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Clear</button>
+          </div>
+        </div>
         <div
           class="studio-panel max-w-[1920px] mx-auto pointer-events-auto shadow-2xl bg-zinc-900/95 backdrop-blur-md border border-zinc-700">
           <!-- Mobile Mini-Player (< md) -->
@@ -243,9 +262,9 @@
               <button id="mobile-mini-track-btn" type="button"
                 class="flex items-center gap-2.5 min-w-0 flex-1 text-left">
                 <div
-                  class="w-10 h-10 bg-zinc-950 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center">
-                  <img id="mobile-mini-cover" src="" alt="" class="hidden w-full h-full object-cover" />
-                  <i id="mobile-mini-fallback" data-lucide="disc" class="w-4 h-4 text-zinc-400"></i>
+                  class="relative w-10 h-10 bg-zinc-950 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center">
+                  <img id="mobile-mini-cover" src="" alt="" class="hidden relative w-full h-full object-cover" />
+                  <i id="mobile-mini-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-4 h-4 text-zinc-400 pointer-events-none"></i>
                 </div>
                 <div class="min-w-0 flex-1">
                   <p id="mobile-mini-title" class="text-xs font-medium text-zinc-100 truncate">No track selected</p>
@@ -314,9 +333,9 @@
               <div id="player-center-track-wrap"
                 class="flex items-center gap-2.5 min-w-0 max-w-md shrink grow-0 justify-center transition-opacity duration-150">
                 <button id="player-cover-btn" type="button" title="Open Now Playing View"
-                  class="w-10 h-10 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center">
-                  <img id="player-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
-                  <i id="player-cover-fallback" data-lucide="disc" class="w-4 h-4 text-zinc-400"></i>
+                  class="relative w-10 h-10 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center">
+                  <img id="player-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
+                  <i id="player-cover-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-4 h-4 text-zinc-400 pointer-events-none"></i>
                 </button>
 
                 <div class="min-w-0 flex-1 text-left">
@@ -498,9 +517,9 @@
       <!-- Track Strip -->
       <div class="px-4 py-2.5 border-b border-zinc-800 bg-zinc-900/40 flex items-center gap-3 shrink-0">
         <div
-          class="w-10 h-10 bg-zinc-950 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center">
-          <img id="ld-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
-          <i id="ld-cover-fallback" data-lucide="disc" class="w-4 h-4 text-zinc-400"></i>
+          class="relative w-10 h-10 bg-zinc-950 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center">
+          <img id="ld-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
+          <i id="ld-cover-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-4 h-4 text-zinc-400 pointer-events-none"></i>
         </div>
         <div class="min-w-0 flex-1">
           <p id="ld-title" class="text-xs font-medium text-zinc-100 truncate">No track selected</p>
@@ -511,12 +530,10 @@
       <!-- Toolbar: 原文 / Romaji / EN + Lyric Search -->
       <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between gap-2 shrink-0">
         <div id="ld-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-900">
-          <button type="button" data-lyrics-mode="original"
-            class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono bg-emerald-400 text-zinc-950 font-semibold">原文</button>
-          <button type="button" data-lyrics-mode="romaji"
+          <button type="button" data-lyrics-toggle="romaji"
             class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
-          <button type="button" data-lyrics-mode="en"
-            class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">EN</button>
+          <button type="button" data-lyrics-toggle="translated"
+            class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
         </div>
         <span id="ld-lyrics-preparing" class="hidden text-[10px] font-mono text-emerald-400 animate-pulse">preparing
           readings...</span>

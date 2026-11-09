@@ -214,10 +214,12 @@ export function timingAgreement(hit: UnifiedLyrics, others: UnifiedLyrics[]): nu
 /**
  * Auto-mode winner selection (extracted from the relay race so it is
  * unit-testable). Gate-passing hits rank first, then sync rank (word above
- * line above plain), then metadata score. When rank and score tie, the
- * timing-agreement tie-breaker picks the hit whose line timings agree most
- * with the other candidates; remaining ties keep provider order (stable
- * sort). Returns null when no hit is eligible.
+ * line above plain), then metadata score. When rank and score tie, a hit
+ * carrying romaji / translation sidecars wins over one without them (the
+ * sidecars power the Romaji / Translated sub-lines). The timing-agreement
+ * tie-breaker picks the hit whose line timings agree most with the other
+ * candidates; remaining ties keep provider order (stable sort). Returns
+ * null when no hit is eligible.
  */
 export function selectAutoWinner(hits: UnifiedLyrics[], query: LyricsQuery): UnifiedLyrics | null {
   const scored = hits.map((hit) => ({
@@ -239,6 +241,19 @@ export function selectAutoWinner(hits: UnifiedLyrics[], query: LyricsQuery): Uni
     if (rankB !== rankA) return rankB - rankA;
     const scoreDiff = (b.score ?? 0) - (a.score ?? 0);
     if (scoreDiff !== 0) return scoreDiff;
+    // Sidecar tie-breaker: a word-synced hit that also carries romaji /
+    // translation sidecars wins over one that does not. This keeps AUTO
+    // from picking a bare word-sync hit (e.g. lrcred) over QQ when both
+    // tie on match score — the sidecars are what power the Romaji /
+    // Translated sub-lines, so losing them to a tie-break means the
+    // client must derive readings separately (and shows nothing until it
+    // does). Sidecars never outrank match score, only break ties.
+    const romajiA = Array.isArray(a.hit.romajiLines) && a.hit.romajiLines.length > 0 ? 1 : 0;
+    const romajiB = Array.isArray(b.hit.romajiLines) && b.hit.romajiLines.length > 0 ? 1 : 0;
+    if (romajiB !== romajiA) return romajiB - romajiA;
+    const transA = Array.isArray(a.hit.translationLines) && a.hit.translationLines.length > 0 ? 1 : 0;
+    const transB = Array.isArray(b.hit.translationLines) && b.hit.translationLines.length > 0 ? 1 : 0;
+    if (transB !== transA) return transB - transA;
     if (a.agreement !== b.agreement) return a.agreement - b.agreement;
     return 0;
   });

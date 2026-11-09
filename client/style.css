@@ -175,6 +175,24 @@ input:disabled {
   border-color: var(--primary);
 }
 
+/* Multi-select (V-15, Century M7): a selected row gets the sage left
+ * border + a subtle sage wash, matching the active-row treatment. */
+.song-row-selected {
+  background-color: rgba(138, 184, 160, 0.08);
+  border-left: 2px solid var(--primary);
+}
+
+/* Cover fallback: hide whenever the sibling cover image is visible.
+ * This is a CSS rule (not a class toggle) because Lucide's createIcons()
+ * replaces the fallback <i> with a fresh <svg> on every refreshIcons()
+ * run, dropping the `hidden` class that attachCoverImage set — so the
+ * disc icon stayed visible on top of the loaded cover. The :has()
+ * selector re-hides it declaratively, no matter how often Lucide
+ * re-renders the icon. */
+:has(> img:not(.hidden)) > [id$="-fallback"] {
+  display: none !important;
+}
+
 .toggle-btn[aria-pressed="true"] {
   background-color: var(--primary);
   color: var(--primary-foreground);
@@ -364,27 +382,50 @@ input[type="range"].studio-range-thin::-moz-range-thumb {
   border-left: 2px solid var(--primary);
 }
 
-.lyric-word {
-  display: inline;
-  transition: color 80ms linear;
+/* Word sweep (Century ActiveLineWordFill): each word is a two-layer span.
+ * The base layer is dim; the fill layer is sage and sits exactly on top,
+ * revealed left-to-right by clip-path only. There is NO background-clip:
+ * text gradient and NO colour transition on the words — the old gradient
+ * repainted every animation frame and flashed white <-> sage (the flicker
+ * users saw on the active line). Clip-path is the only thing that moves.
+ * The fill starts fully clipped (inset 0 100% 0 0) and syncLyrics sets it
+ * per frame. */
+.lyric-word-wrap {
+  position: relative;
+  display: inline-block;
+  white-space: pre;
 }
 
-.lyric-word-sung {
-  color: var(--foreground);
+.lyric-word-base {
+  color: rgba(235, 235, 235, 0.45);
 }
 
-.lyric-word-active {
-  background-image: linear-gradient(
-    90deg,
-    var(--primary) var(--word-fill, 100%),
-    rgba(235, 235, 235, 0.45) var(--word-fill, 100%)
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.lyric-word-fill {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--primary);
+  pointer-events: none;
+  user-select: none;
+  clip-path: inset(0 100% 0 0);
 }
 
-.lyric-word-unsung {
+/* Romaji / Translated sub-lines (Century): stacked under the original,
+ * smaller and dimmer. Romaji is a step brighter than Translated. */
+.lyric-subline {
+  display: block;
+  font-size: 0.72em;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.lyric-subline-romaji {
+  margin-top: 0.25rem;
+  color: rgba(235, 235, 235, 0.55);
+}
+
+.lyric-subline-translated {
+  margin-top: 0.125rem;
   color: rgba(235, 235, 235, 0.45);
 }
 
@@ -414,20 +455,24 @@ input[type="range"].studio-range-thin::-moz-range-thumb {
 }
 
 /* Word spans inside a BG line use sage tones, not the lead line's
- * near-white. Without these rules the .lyric-word-unsung colour
+ * near-white. Without these rules the base colour
  * (rgba(235,235,235,0.45)) wins over the BG div's sage, so a BG line's
  * glyphs look identical to an unsung lead line. */
-.lyric-line-bg .lyric-word-unsung,
-.lyric-line-bg .lyric-word-sung {
+.lyric-line-bg .lyric-word-base {
   color: rgba(138, 184, 160, 0.7);
 }
 
-.lyric-line-bg .lyric-word-active {
-  background-image: linear-gradient(
-    90deg,
-    rgba(138, 184, 160, 0.95) var(--word-fill, 100%),
-    rgba(138, 184, 160, 0.35) var(--word-fill, 100%)
-  );
+.lyric-line-bg .lyric-word-fill {
+  color: rgba(138, 184, 160, 0.95);
+}
+
+/* BG sub-lines are sage-dim too. */
+.lyric-line-bg .lyric-subline-romaji {
+  color: rgba(138, 184, 160, 0.55);
+}
+
+.lyric-line-bg .lyric-subline-translated {
+  color: rgba(138, 184, 160, 0.45);
 }
 
 /* Instrumental break dots: three dots that fill as the gap progresses.

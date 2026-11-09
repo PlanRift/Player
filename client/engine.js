@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   SHOW_TRANSLATED_TITLES: 'century.settings.showTranslatedTitles',
   SPLIT_ALBUMS_SINGLES: 'century.settings.splitAlbumsSingles',
   AUTOPLAY: 'century.settings.autoplay',
+  BALANCED_SHUFFLE: 'century.settings.balancedShuffle',
   VOLUME: 'century.settings.volume',
   HISTORY: 'century.history.v1',
   PLAYBACK_POSITIONS: 'century.playback_positions.v1',
@@ -24,6 +25,8 @@ const STORAGE_KEYS = {
   LYRICS_PRIORITY: 'century.lyrics.priorityOrder',
   LYRICS_PROVIDER_PREFIX: 'century.lyrics.provider.',
   LYRICS_MODE_PREFIX: 'century.lyrics.mode.',
+  LYRICS_PREF_ROMAJI: 'century.lyrics.pref.romaji',
+  LYRICS_PREF_TRANSLATED: 'century.lyrics.pref.translated',
   LYRICS_OFFSET_PREFIX: 'century.lyrics.offset.',
   LYRICS_EN_PREFIX: 'century.lyrics.en.',
   LYRICS_ROMAJI_PREFIX: 'century.lyrics.romaji.',
@@ -434,6 +437,10 @@ class SubsonicClient {
     if (quality === 'opus-96') {
       return this.buildUrl('stream', { id, format: 'opus', maxBitRate: 96 });
     }
+    if (quality === 'auto') {
+      return this.buildUrl('stream', { id, format: 'opus', maxBitRate: 192 });
+    }
+    // 'original' (and anything unknown): the raw file, no transcode params.
     return this.buildUrl('stream', { id });
   }
 
@@ -1127,6 +1134,7 @@ const LYRICS_PROVIDERS_META = [
   { id: 'unison', name: 'Unison', bestKind: 'word-synced' },
   { id: 'lrcred', name: 'lrc.red', bestKind: 'word-synced' },
   { id: 'lyricsplus', name: 'LyricsPlus', bestKind: 'word-synced' },
+  { id: 'amll', name: 'AMLL', bestKind: 'synced' },
 ];
 
 const DEFAULT_LYRICS_PRIORITY = LYRICS_PROVIDERS_META.map((p) => p.id);
@@ -1472,6 +1480,67 @@ class LyricsManager {
     else localStorage.setItem(key, mode);
   }
 
+  // --- Global lyrics display toggles (Century model, L-1) ---
+  // The original line is ALWAYS shown. Romaji and Translated render as
+  // sub-lines under it, controlled by these two global prefs (not a
+  // per-track exclusive mode). Romaji defaults ON, Translated OFF.
+  getShowRomaji() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.LYRICS_PREF_ROMAJI);
+      return raw === null ? true : raw === '1' || raw === 'true';
+    } catch {
+      return true;
+    }
+  }
+
+  setShowRomaji(value) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.LYRICS_PREF_ROMAJI, value ? '1' : '0');
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  getShowTranslated() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.LYRICS_PREF_TRANSLATED);
+      return raw === null ? false : raw === '1' || raw === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  setShowTranslated(value) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.LYRICS_PREF_TRANSLATED, value ? '1' : '0');
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  // One-time migration from the old per-track exclusive mode
+  // (century.lyrics.mode.<trackId> = 'romaji' | 'en'). A legacy 'romaji'
+  // mode turns the global Romaji pref on; 'en' turns Translated on.
+  // The per-track key is deleted after migration.
+  migrateLegacyTrackMode(trackId) {
+    if (!trackId) return;
+    const key = `${STORAGE_KEYS.LYRICS_MODE_PREFIX}${trackId}`;
+    let legacy = null;
+    try {
+      legacy = localStorage.getItem(key);
+    } catch {
+      return;
+    }
+    if (legacy === 'romaji') this.setShowRomaji(true);
+    else if (legacy === 'en') this.setShowTranslated(true);
+    else return;
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
   getTrackOffset(trackId) {
     if (!trackId) return 0;
     const num = parseFloat(localStorage.getItem(`${STORAGE_KEYS.LYRICS_OFFSET_PREFIX}${trackId}`) || '0');
@@ -1537,6 +1606,46 @@ class LyricsManager {
 
   setSplitBackground(value) {
     this.setLyricsDisplay('splitBackground', value);
+  }
+
+  // Focus-mode display settings (Century lyricsStore defaults).
+  getManualScrollPause() {
+    return this.getLyricsDisplay('manualScrollPause', true);
+  }
+
+  setManualScrollPause(value) {
+    this.setLyricsDisplay('manualScrollPause', value);
+  }
+
+  getHidePlayed() {
+    return this.getLyricsDisplay('hidePlayed', false);
+  }
+
+  setHidePlayed(value) {
+    this.setLyricsDisplay('hidePlayed', value);
+  }
+
+  getHideUpcoming() {
+    return this.getLyricsDisplay('hideUpcoming', false);
+  }
+
+  setHideUpcoming(value) {
+    this.setLyricsDisplay('hideUpcoming', value);
+  }
+
+  // Clear the lyrics cache + all derived romaji/EN readings (Settings).
+  clearLyricsCache() {
+    this.cache.clear();
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('century.lyrics.en.') || k.startsWith('century.lyrics.romaji.'))) keys.push(k);
+      }
+      keys.forEach((k) => localStorage.removeItem(k));
+    } catch {
+      // Ignore storage errors
+    }
   }
 
   // Lyrics relay base URL (plenrip-relay, default http://localhost:3005).
@@ -1829,19 +1938,19 @@ class HistoryStore {
       if (e.playedAt > prev) lastPlayedMap.set(e.songId, e.playedAt);
     }
 
-    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
     const now = Date.now();
     const candidates = [];
 
     for (const song of starredSongs) {
       if (!song || !song.id) continue;
       const lastPlayed = lastPlayedMap.get(song.id) || 0;
-      if (lastPlayed === 0 || now - lastPlayed >= fourteenDaysMs) {
+      if (lastPlayed === 0 || now - lastPlayed >= thirtyDaysMs) {
         const daysAgo = lastPlayed === 0 ? null : Math.floor((now - lastPlayed) / (24 * 60 * 60 * 1000));
         candidates.push({
           song,
           lastPlayed,
-          badge: daysAgo ? `${daysAgo}d ago` : 'Unplayed',
+          badge: daysAgo ? `last played ${daysAgo} days ago` : 'never played',
         });
       }
     }
@@ -1850,7 +1959,7 @@ class HistoryStore {
     return candidates.slice(0, limit);
   }
 
-  // Section 3: Listen Again (tracks with >= 2 recorded plays where most recent play was > 2 hours ago)
+  // Section 3: Listen Again (tracks with >= 2 recorded plays where most recent play was > 7 days ago)
   getListenAgain(songMap = new Map(), limit = 6) {
     const stats = new Map();
     for (const e of this.entries) {
@@ -1861,12 +1970,12 @@ class HistoryStore {
       stats.set(e.songId, cur);
     }
 
-    const twoHoursMs = 2 * 60 * 60 * 1000;
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     const now = Date.now();
     const results = [];
 
     for (const [songId, info] of stats.entries()) {
-      if (info.count >= 2 && now - info.lastPlayed > twoHoursMs) {
+      if (info.count >= 2 && now - info.lastPlayed > sevenDaysMs) {
         const song = songMap.get(songId);
         if (song) {
           results.push({
@@ -1953,6 +2062,23 @@ function seededShuffle(items, seedStr) {
 }
 
 // Balanced shuffle avoiding consecutive songs by the same artist
+// Shuffle helper: balanced (spread same-artist tracks apart) only when
+// the setting is on (Century default OFF); otherwise plain Fisher-Yates.
+function getBalancedShuffle() {
+  return localStorage.getItem(STORAGE_KEYS.BALANCED_SHUFFLE) === 'true';
+}
+
+function shuffleSongs(songs) {
+  if (!Array.isArray(songs) || songs.length <= 2) return [...(songs || [])];
+  if (getBalancedShuffle()) return balancedShuffle(songs);
+  const copy = [...songs];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 function balancedShuffle(songs) {
   if (!Array.isArray(songs) || songs.length <= 2) return [...(songs || [])];
   const copy = [...songs];
@@ -2584,12 +2710,12 @@ class GaplessAudioEngine {
 
     if (this.shuffle && targetQueue.length > 1) {
       if (options.shuffle && startIndex === 0 && !options.keepFirstTrack) {
-        targetQueue = balancedShuffle(targetQueue);
+        targetQueue = shuffleSongs(targetQueue);
         targetSong = targetQueue[0];
         resolvedIdx = 0;
       } else {
         const rest = targetQueue.filter((s) => s.id !== targetSong.id);
-        targetQueue = [targetSong, ...balancedShuffle(rest)];
+        targetQueue = [targetSong, ...shuffleSongs(rest)];
         resolvedIdx = 0;
       }
     }
@@ -2607,7 +2733,7 @@ class GaplessAudioEngine {
 
     if (this.shuffle && newQueue && newQueue.length > 1) {
       const rest = targetQueue.filter((s) => s.id !== song.id);
-      targetQueue = [song, ...balancedShuffle(rest)];
+      targetQueue = [song, ...shuffleSongs(rest)];
     }
 
     const idx = targetQueue.findIndex((s) => s.id === song.id);
@@ -2641,6 +2767,12 @@ class GaplessAudioEngine {
 
   next() {
     if (this.queue.length === 0) return;
+    // Repeat-one: the Next button restarts the current track (Century).
+    if (this.repeatMode === 'one') {
+      this.seek(0);
+      if (!this.isPlaying) this.togglePlayPause();
+      return;
+    }
     const nextIdx = this.getNextQueueIndex();
     if (nextIdx !== -1) {
       this.transitionToNextTrack(nextIdx);
@@ -2804,7 +2936,7 @@ class GaplessAudioEngine {
     if (!this.shuffle) {
       const current = this.currentSong;
       const remaining = this.queue.filter((_, idx) => idx !== this.currentIndex);
-      const shuffledRemaining = balancedShuffle(remaining);
+      const shuffledRemaining = shuffleSongs(remaining);
       const newQueue = current ? [current, ...shuffledRemaining] : shuffledRemaining;
       this.shuffle = true;
       this.queue = newQueue;

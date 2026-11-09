@@ -568,6 +568,35 @@ describe('Lyrics timing fix: credit stripping + agreement tie-breaker', () => {
     expect(winner!.lines[0]).toEqual(expect.objectContaining({ t: 0.779, text: '何が僕にできるか' }));
     expect(winner!.lines.length).toBe(44);
   });
+
+  it('auto winner: a word-synced hit with a romaji sidecar beats a tied one without it', () => {
+    const base: UnifiedLyrics = {
+      lines: [{ t: 0, text: '壱雫空' }, { t: 5, text: 'テスト' }],
+      synced: true,
+      source: 'lrcred',
+      provider: 'lrc.red',
+      hasWordSync: true,
+      match: { title: '壱雫空', artist: 'MyGO!!!!!', duration: 189 },
+    };
+    const withRomaji: UnifiedLyrics = {
+      ...base,
+      source: 'qq',
+      provider: 'QQ Music',
+      romajiLines: [{ t: 0, text: 'ichi shizuku sora' }, { t: 5, text: 'tesuto' }],
+    };
+    // Same rank (word) + same score: the romaji sidecar breaks the tie.
+    const winner = selectAutoWinner([base, withRomaji], { title: '壱雫空', artist: 'MyGO!!!!!', duration: 189 });
+    expect(winner).not.toBeNull();
+    expect(winner!.source).toBe('qq');
+    // A higher match score still outranks the sidecar (sidecars only break ties).
+    const lowScoreRomaji: UnifiedLyrics = {
+      ...withRomaji,
+      match: { title: 'other', artist: 'Someone', duration: 300 },
+    };
+    const winner2 = selectAutoWinner([base, lowScoreRomaji], { title: '壱雫空', artist: 'MyGO!!!!!', duration: 189 });
+    expect(winner2).not.toBeNull();
+    expect(winner2!.source).toBe('lrcred');
+  });
 });
 
 describe('QQ QRC decrypt + parse (real 壱雫空 fixtures)', () => {

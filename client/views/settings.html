@@ -113,6 +113,17 @@
             <input id="settings-autoplay-toggle" type="checkbox" checked class="w-4 h-4 accent-[#8ab8a0]" />
           </label>
         </div>
+
+        <!-- Balanced Shuffle (Century M5, default OFF) -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Balanced Shuffle</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">Spread tracks by the same artist apart when shuffling. Off = plain random shuffle.</p>
+          </div>
+          <label class="inline-flex items-center cursor-pointer shrink-0">
+            <input id="settings-balanced-shuffle-toggle" type="checkbox" class="w-4 h-4 accent-[#8ab8a0]" />
+          </label>
+        </div>
       </div>
 
       <!-- TAB: AUDIO -->
@@ -364,6 +375,27 @@
             </span>
             <input id="settings-split-bg-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
           </label>
+          <label class="flex items-start justify-between gap-4 cursor-pointer">
+            <span>
+              <span class="block text-xs font-mono text-zinc-100">Pause auto-scroll while reading</span>
+              <span class="block text-[11px] text-zinc-400 mt-0.5">Scrolling the lyrics by hand pauses auto-centering for 5 seconds so you can read ahead without being yanked back.</span>
+            </span>
+            <input id="settings-manual-scroll-pause-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
+          </label>
+          <label class="flex items-start justify-between gap-4 cursor-pointer">
+            <span>
+              <span class="block text-xs font-mono text-zinc-100">Hide played lines</span>
+              <span class="block text-[11px] text-zinc-400 mt-0.5">Fade out lines that have already played, keeping only the current line and what comes next.</span>
+            </span>
+            <input id="settings-hide-played-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
+          </label>
+          <label class="flex items-start justify-between gap-4 cursor-pointer">
+            <span>
+              <span class="block text-xs font-mono text-zinc-100">Hide upcoming lines</span>
+              <span class="block text-[11px] text-zinc-400 mt-0.5">Hide lines that have not played yet, showing only the current line and what already played.</span>
+            </span>
+            <input id="settings-hide-upcoming-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
+          </label>
         </div>
         <p class="text-[11px] text-zinc-500">Lyrics come from the plenrip-relay (port 3005). Romaji and English readings are derived server-side (kuroshiro / Gemini / Google) when you switch modes.</p>
       </div>
@@ -407,6 +439,20 @@
             class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
           >
             CLEAR HISTORY
+          </button>
+        </div>
+        <!-- Cached Lyrics -->
+        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
+          <div>
+            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Cached Lyrics</h3>
+            <p class="text-[11px] text-zinc-400 mt-0.5">Clear the cached lyrics and derived romaji / English readings. Lyrics are re-fetched from the relay next time.</p>
+          </div>
+          <button
+            id="settings-clear-lyrics-cache-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
+          >
+            CLEAR LYRICS CACHE
           </button>
         </div>
       </div>

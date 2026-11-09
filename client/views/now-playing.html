@@ -33,9 +33,9 @@
       <div class="flex-1 flex flex-col items-center justify-center p-6 xl:p-10 relative overflow-hidden">
 
         <div class="relative z-10 w-full max-w-[min(520px,calc(100dvh-310px))] flex flex-col">
-          <div class="w-full aspect-square bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden flex items-center justify-center">
-            <img id="np-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
-            <div id="np-cover-fallback" class="flex flex-col items-center justify-center text-zinc-400">
+          <div class="relative w-full aspect-square bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden flex items-center justify-center">
+            <img id="np-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
+            <div id="np-cover-fallback" class="absolute inset-0 flex flex-col items-center justify-center text-zinc-400 pointer-events-none">
               <i data-lucide="disc" class="w-16 h-16"></i>
             </div>
           </div>
@@ -123,10 +123,11 @@
           <!-- Lyrics Toolbar (Mode Toggle + Lyric Search) -->
           <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between gap-2 shrink-0">
             <div id="np-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-950">
-              <button type="button" data-lyrics-mode="original" class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono bg-emerald-400 text-zinc-950 font-semibold">原文</button>
-              <button type="button" data-lyrics-mode="romaji" class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
-              <button type="button" data-lyrics-mode="en" class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">EN</button>
-            </div>
+          <button type="button" data-lyrics-toggle="romaji"
+            class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
+          <button type="button" data-lyrics-toggle="translated"
+            class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
+        </div>
             <span id="np-lyrics-preparing" class="hidden text-[10px] font-mono text-emerald-400 animate-pulse">preparing readings...</span>
             <div id="np-offset-controls" class="hidden items-center gap-1 border border-zinc-700 bg-zinc-950 px-1.5 py-0.5">
               <button id="np-offset-minus" type="button" aria-label="Lyrics earlier" class="w-5 h-5 flex items-center justify-center text-zinc-400 hover:text-zinc-100 text-xs font-mono">−</button>
@@ -172,9 +173,9 @@
 
       <!-- Center: Cover or Overlay (Queue / Lyrics) -->
       <div id="np-mobile-art-panel" class="flex-1 min-h-0 flex flex-col items-center justify-center py-4">
-        <div class="w-full max-w-[min(300px,38dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl">
-          <img id="np-mobile-cover-img" src="" alt="" class="hidden w-full h-full object-cover" />
-          <i id="np-mobile-cover-fallback" data-lucide="disc" class="w-12 h-12 text-zinc-400"></i>
+        <div class="relative w-full max-w-[min(300px,38dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl">
+          <img id="np-mobile-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
+          <i id="np-mobile-cover-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-12 h-12 text-zinc-400 pointer-events-none"></i>
         </div>
         <div class="w-full max-w-sm mt-4 flex items-center justify-between gap-3">
           <div class="min-w-0 flex-1">
@@ -197,10 +198,11 @@
           <span id="np-mobile-overlay-title" class="text-xs font-mono uppercase tracking-wider text-zinc-200">Synced Lyrics</span>
           <div class="flex items-center gap-1.5">
             <div id="np-mobile-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-950">
-              <button type="button" data-lyrics-mode="original" class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono bg-emerald-400 text-zinc-950 font-semibold">原文</button>
-              <button type="button" data-lyrics-mode="romaji" class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono text-zinc-400">Romaji</button>
-              <button type="button" data-lyrics-mode="en" class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono text-zinc-400">EN</button>
-            </div>
+          <button type="button" data-lyrics-toggle="romaji"
+            class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
+          <button type="button" data-lyrics-toggle="translated"
+            class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
+        </div>
             <button id="np-mobile-overlay-close" type="button" class="p-1 text-zinc-400 hover:text-zinc-100">
               <i data-lucide="x" class="w-4 h-4"></i>
             </button>

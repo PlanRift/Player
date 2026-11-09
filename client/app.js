@@ -68,6 +68,14 @@
     starredSongIds: new Set(),
     starredAlbumIds: new Set(),
     starredArtistIds: new Set(),
+
+    // Multi-select (V-15, Century M7): selected song ids + the song
+    // objects, for the action bar in Songs / Album Detail / Playlist
+    // Detail. `scope` records which view owns the selection; navigating
+    // away clears it.
+    multiSelect: new Set(),
+    multiSelectSongs: new Map(),
+    multiSelectScope: null,
     favouriteSongs: [],
     starredArtists: [],
     starredAlbums: [],
@@ -213,6 +221,14 @@
         }
       };
       imgEl.src = url;
+      // Cached image: the load event may already have fired (or never
+      // fire again for the same URL), leaving the fallback disc visible
+      // BESIDE the loaded cover in the flex container. Hide it at once
+      // when the image is already complete.
+      if (imgEl.complete && imgEl.naturalWidth > 0) {
+        imgEl.classList.remove('hidden');
+        if (fallbackEl) fallbackEl.classList.add('hidden');
+      }
     };
 
     if (coverId) {
@@ -349,6 +365,9 @@
     if (state.route !== route) state.previousRoute = state.route;
     state.route = route;
     setMobileSidebar(false);
+    // Multi-select is scoped to one view; leaving it clears the selection
+    // so the action bar never acts on songs from a view the user left.
+    clearMultiSelect();
 
     for (const v of MAIN_VIEWS) {
       show($(`view-${v}`), v === route);
@@ -467,9 +486,36 @@
     row.__song = song;
     row.className =
       'song-row group flex items-center justify-between gap-3 px-3 py-2 border-b border-zinc-700 hover:bg-zinc-800/70 transition-colors';
+    if (options.selectable && state.multiSelect.has(song.id)) {
+      row.classList.add('song-row-selected');
+    }
 
     const left = document.createElement('div');
     left.className = 'flex items-center gap-3 min-w-0 flex-1';
+
+    // Multi-select checkbox (V-15, Century M7). Only in the selectable
+    // views (Songs / Album Detail / Playlist Detail). Ctrl/Cmd+click on
+    // the row toggles selection too, without playing the track.
+    if (options.selectable) {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'multi-select-checkbox shrink-0 w-4 h-4 accent-emerald-400 cursor-pointer';
+      cb.setAttribute('data-multi-select-checkbox', 'true');
+      cb.setAttribute('data-song-id', song.id);
+      cb.setAttribute('aria-label', `Select ${song.title || 'track'}`);
+      cb.checked = state.multiSelect.has(song.id);
+      cb.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleMultiSelect(song, options.selectScope || state.route);
+      });
+      left.appendChild(cb);
+      row.addEventListener('click', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          toggleMultiSelect(song, options.selectScope || state.route);
+        }
+      });
+    }
 
     const idxBtn = document.createElement('button');
     idxBtn.type = 'button';
@@ -775,9 +821,7 @@
       'group studio-panel hover:border-zinc-500 p-3 flex flex-col cursor-pointer transition-colors min-w-0';
 
     const cover = document.createElement('div');
-    cover.className = `w-full aspect-square bg-zinc-950 border border-zinc-700 overflow-hidden relative flex items-center justify-center mb-2.5 ${
-      opts.round ? '!rounded-full' : ''
-    }`;
+    cover.className = 'w-full aspect-square bg-zinc-950 border border-zinc-700 overflow-hidden relative flex items-center justify-center mb-2.5';
     const img = document.createElement('img');
     img.alt = '';
     img.className = 'hidden w-full h-full object-cover';
@@ -827,7 +871,7 @@
     }
 
     const title = document.createElement('div');
-    title.className = `text-sm font-medium text-zinc-100 group-hover:text-emerald-400 truncate ${opts.round ? 'text-center' : ''}`;
+    title.className = 'text-sm font-medium text-zinc-100 group-hover:text-emerald-400 truncate';
     title.innerHTML = opts.titleHtml || escapeHtml(opts.title || '');
 
     card.appendChild(cover);
@@ -835,13 +879,13 @@
 
     if (opts.subtitle) {
       const sub = document.createElement('div');
-      sub.className = `text-xs text-zinc-400 truncate mt-0.5 ${opts.round ? 'text-center' : ''}`;
+      sub.className = 'text-xs text-zinc-400 truncate mt-0.5';
       sub.textContent = opts.subtitle;
       card.appendChild(sub);
     }
     if (opts.meta) {
       const meta = document.createElement('div');
-      meta.className = `mt-1.5 text-[11px] font-mono text-zinc-400 ${opts.round ? 'text-center' : ''}`;
+      meta.className = 'mt-1.5 text-[11px] font-mono text-zinc-400';
       meta.textContent = opts.meta;
       card.appendChild(meta);
     }
@@ -889,7 +933,6 @@
   function createArtistCard(artist) {
     return createMediaCard({
       artist,
-      round: true,
       titleHtml: titleHtml(artist.name || 'Unknown Artist', ''),
       meta: `${artist.albumCount ?? 0} ${artist.albumCount === 1 ? 'album' : 'albums'}`,
       onClick: () => openArtistDetail(artist.id),
@@ -911,6 +954,99 @@
     } catch {
       // Ignore if offline
     }
+  }
+
+  // ---- Multi-select (V-15, Century M7) ----
+  // Selection lives in state.multiSelect (ids) + state.multiSelectSongs
+  // (id -> song, insertion order). `scope` is the view that owns the
+  // selection ('songs' | 'album' | 'playlist'); selecting in a different
+  // view clears the old selection first, so the action bar never acts on
+  // songs from a view the user has left.
+  function getMultiSelectSongs() {
+    return [...state.multiSelectSongs.values()].filter(Boolean);
+  }
+
+  function updateMultiSelectBar() {
+    const bar = $('multi-select-bar');
+    if (!bar) return;
+    const n = state.multiSelect.size;
+    show(bar, n > 0);
+    const count = $('multi-select-count');
+    if (count) count.textContent = `${n} selected`;
+    // Sync every visible row checkbox + row highlight with the set.
+    document.querySelectorAll('[data-multi-select-checkbox]').forEach((cb) => {
+      const id = cb.getAttribute('data-song-id');
+      const checked = state.multiSelect.has(id);
+      cb.checked = checked;
+      cb.closest('.song-row')?.classList.toggle('song-row-selected', checked);
+    });
+  }
+
+  function toggleMultiSelect(song, scope) {
+    if (!song?.id) return;
+    if (state.multiSelectScope !== null && state.multiSelectScope !== scope) {
+      clearMultiSelect();
+    }
+    state.multiSelectScope = scope;
+    if (state.multiSelect.has(song.id)) {
+      state.multiSelect.delete(song.id);
+      state.multiSelectSongs.delete(song.id);
+    } else {
+      state.multiSelect.add(song.id);
+      state.multiSelectSongs.set(song.id, song);
+    }
+    if (state.multiSelect.size === 0) state.multiSelectScope = null;
+    updateMultiSelectBar();
+  }
+
+  function clearMultiSelect() {
+    state.multiSelect.clear();
+    state.multiSelectSongs.clear();
+    state.multiSelectScope = null;
+    updateMultiSelectBar();
+  }
+
+  function multiSelectPlay() {
+    const songs = getMultiSelectSongs();
+    if (songs.length === 0) return;
+    audioEngine.playQueue(songs, 0);
+    clearMultiSelect();
+  }
+
+  function multiSelectAddToQueue() {
+    const songs = getMultiSelectSongs();
+    if (songs.length === 0) return;
+    songs.forEach((s) => audioEngine.addToQueue(s));
+    showToast(`Added ${songs.length} track${songs.length === 1 ? '' : 's'} to queue`);
+    clearMultiSelect();
+  }
+
+  async function multiSelectStar() {
+    const songs = getMultiSelectSongs().filter((s) => !state.starredSongIds.has(s.id));
+    if (songs.length === 0) {
+      clearMultiSelect();
+      return;
+    }
+    for (const s of songs) {
+      try {
+        await client.star({ id: s.id });
+        state.starredSongIds.add(s.id);
+        state.favouriteSongs = [s, ...state.favouriteSongs];
+        s.starred = new Date().toISOString();
+      } catch {
+        // Ignore per-song failures; the rest still star.
+      }
+    }
+    showToast(`Starred ${songs.length} track${songs.length === 1 ? '' : 's'}`);
+    refreshRowHighlights();
+    clearMultiSelect();
+  }
+
+  function multiSelectAddToPlaylist() {
+    const songs = getMultiSelectSongs();
+    if (songs.length === 0) return;
+    openAddToPlaylistModal(songs);
+    clearMultiSelect();
   }
 
   async function toggleStarTrack(song) {
@@ -1093,9 +1229,16 @@
       if (!ui.container) return;
       if (!view.items) return;
       const filtered = getFiltered();
-      const pages = Math.max(1, Math.ceil(filtered.length / cfg.pageSize));
+      // Century renders the full list in browse mode and paginates only
+      // while filtering/searching. When cfg.fullListInBrowse is set and
+      // nothing is filtering, the page size is the whole list.
+      const isFiltering = Boolean(view.query.trim() || view.starredOnly);
+      const pageSize = !isFiltering && cfg.fullListInBrowse
+        ? Math.max(1, filtered.length)
+        : (isFiltering && cfg.searchPageSize ? cfg.searchPageSize : cfg.pageSize);
+      const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
       if (view.page >= pages) view.page = pages - 1;
-      const slice = filtered.slice(view.page * cfg.pageSize, (view.page + 1) * cfg.pageSize);
+      const slice = filtered.slice(view.page * pageSize, (view.page + 1) * pageSize);
 
       updateControls(filtered.length);
       if (ui.countLabel) ui.countLabel.textContent = `${(view.items || []).length} ${cfg.nounPlural} in library`;
@@ -1265,6 +1408,10 @@
       nounPlural: 'albums',
       defaultSort: 'newest',
       pageSize: 48,
+      // Century: browse shows the full list (split into Albums / Singles
+      // & EPs); pagination only while searching (36/page).
+      fullListInBrowse: true,
+      searchPageSize: 36,
       fetchItems: (view) => loadAllAlbums(view.sort),
       isStarred: (a) => state.starredAlbumIds.has(a.id),
       matches: (a, q) =>
@@ -1345,7 +1492,7 @@
       renderPage: (container, items, view, all) => {
         // Queue context is the full filtered + sorted list so playback continues past the page
         items.forEach((song, idx) => {
-          container.appendChild(createTrackRowElement(song, view.page * 100 + idx, all));
+          container.appendChild(createTrackRowElement(song, view.page * 100 + idx, all, { selectable: true, selectScope: 'songs' }));
         });
       },
     });
@@ -1362,13 +1509,13 @@
     }
 
     try {
-      const recent = await client.getAlbumList2({ type: 'newest', size: 12, offset: 0 });
+      const recent = await client.getAlbumList2({ type: 'newest', size: 18, offset: 0 });
       setConnectionError(null);
       recentGrid.innerHTML = '';
       if (recent.length === 0) {
         recentGrid.innerHTML = '<div class="col-span-full py-6 text-xs font-mono text-zinc-400">No albums found on server.</div>';
       } else {
-        recent.forEach((alb) => recentGrid.appendChild(createAlbumCard(alb, 'home', false)));
+        recent.forEach((alb) => recentGrid.appendChild(createAlbumCard(alb, 'home', true)));
         queueTranslations(recent.map((a) => ({ title: a.name, artist: a.artist })));
       }
       refreshIcons();
@@ -1507,7 +1654,10 @@
           e.stopPropagation();
           clearSearchState(true);
         } else {
+          // Empty search input: Esc goes back (Century).
+          e.preventDefault();
           input.blur();
+          goBack();
         }
         return;
       }
@@ -1603,7 +1753,7 @@
     }
 
     if (song.length > 0) {
-      const sec = section('Songs', song.length);
+      const sec = section('Tracks', song.length);
       const list = document.createElement('div');
       list.className = 'studio-panel overflow-hidden';
       song.forEach((s, idx) => {
@@ -1633,6 +1783,27 @@
     btn.classList.toggle('text-emerald-400', starred);
     btn.classList.toggle('border-emerald-400', starred);
     btn.querySelector('svg, i')?.classList.toggle('fill-current', starred);
+  }
+
+  // Wikipedia biography fallback (bio-only): REST summary, EN -> JA.
+  // Returns { text, lang } or null. Never throws.
+  async function fetchWikipediaBio(name) {
+    if (!name) return null;
+    for (const lang of ['en', 'ja']) {
+      try {
+        const res = await fetchWithTimeout(
+          `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`,
+          { timeout: 5000 }
+        );
+        if (!res.ok) continue;
+        const data = await res.json();
+        const text = String(data?.extract || '').trim();
+        if (text) return { text, lang };
+      } catch (_) {
+        // Try the next language, then give up silently.
+      }
+    }
+    return null;
   }
 
   async function openArtistDetail(artistId) {
@@ -1687,14 +1858,26 @@
       refreshIcons();
 
       // Biography + similar artists (best-effort)
-      client.getArtistInfo2(artistId).then((info) => {
+      client.getArtistInfo2(artistId).then(async (info) => {
         if (state.currentArtist?.id !== artistId) return;
-        const bio = String(info.biography || '').replace(/<a [^>]*>.*?<\/a>/gi, '').replace(/<[^>]+>/g, '').trim();
+        let bio = String(info.biography || '').replace(/<a [^>]*>.*?<\/a>/gi, '').replace(/<[^>]+>/g, '').trim();
+        let bioSource = bio ? 'Server' : '';
+        // Locked decision: Wikipedia is the bio-only fallback when the
+        // server has no biography (EN -> JA -> hide).
+        if (!bio) {
+          const wiki = await fetchWikipediaBio(artist.name);
+          if (wiki) {
+            bio = wiki.text;
+            bioSource = `Wikipedia (${wiki.lang.toUpperCase()})`;
+          }
+        }
         if (bio) {
           $('artist-bio-text').textContent = bio.length > 600 ? `${bio.slice(0, 600)}...` : bio;
+          const src = $('artist-bio-source');
+          if (src) src.textContent = `Biography · ${bioSource}`;
           show($('artist-bio-wrap'), true);
         }
-        const similar = (info.similarArtist || []).filter((a) => a.id).slice(0, 8);
+        const similar = (info.similarArtist || []).filter((a) => a.id).slice(0, 12);
         if (similar.length > 0) {
           const list = $('artist-similar-list');
           list.innerHTML = '';
@@ -1810,7 +1993,7 @@
     }
     songs.forEach((song, idx) => {
       list.appendChild(
-        createTrackRowElement(song, idx, songs, { showCover: virtual, showAlbum: virtual, showTrackNumber: !virtual })
+        createTrackRowElement(song, idx, songs, { showCover: virtual, showAlbum: virtual, showTrackNumber: !virtual, selectable: true, selectScope: 'album' })
       );
     });
     queueTranslations(songs.map((s) => ({ title: s.title, artist: s.artist })));
@@ -2002,6 +2185,8 @@
     entries.forEach((song, idx) => {
       list.appendChild(
         createTrackRowElement(song, idx, entries, {
+          selectable: true,
+          selectScope: 'playlist',
           onRemoveFromPlaylist: async (removeIdx) => {
             try {
               await client.updatePlaylist({ playlistId: pl.id, songIndexToRemove: removeIdx });
@@ -2098,6 +2283,9 @@
   // ============================================================================
   // Favourites
   // ============================================================================
+  const FAVOURITES_PAGE_SIZE = 50;
+  let favouritesPage = 0;
+
   async function loadFavouritesView() {
     const list = $('favourites-list');
     if (!list) return;
@@ -2105,15 +2293,24 @@
     try {
       await syncStarredFromServer();
       const songs = state.favouriteSongs;
-      $('favourites-count-label').textContent = `${songs.length} starred tracks`;
+      const total = songs.reduce((acc, s) => acc + (s.duration || 0), 0);
+      $('favourites-count-label').textContent = `${songs.length} starred tracks · ${formatDuration(total)} total`;
+      const pages = Math.max(1, Math.ceil(songs.length / FAVOURITES_PAGE_SIZE));
+      if (favouritesPage >= pages) favouritesPage = pages - 1;
+      const pageSongs = songs.slice(favouritesPage * FAVOURITES_PAGE_SIZE, (favouritesPage + 1) * FAVOURITES_PAGE_SIZE);
       list.innerHTML = '';
       if (songs.length === 0) {
         list.innerHTML = '<div class="p-8 text-center text-xs font-mono text-zinc-400">No favourite songs yet. Click the star on any track to add it.</div>';
+        show($('favourites-pagination'), false);
         return;
       }
-      songs.forEach((song, idx) => list.appendChild(createTrackRowElement(song, idx, songs)));
-      queueTranslations(songs.map((s) => ({ title: s.title, artist: s.artist })));
+      pageSongs.forEach((song, idx) => list.appendChild(createTrackRowElement(song, favouritesPage * FAVOURITES_PAGE_SIZE + idx, songs)));
+      queueTranslations(pageSongs.map((s) => ({ title: s.title, artist: s.artist })));
       refreshIcons();
+      show($('favourites-pagination'), pages > 1);
+      if ($('favourites-prev-page')) $('favourites-prev-page').disabled = favouritesPage <= 0;
+      if ($('favourites-next-page')) $('favourites-next-page').disabled = favouritesPage >= pages - 1;
+      if ($('favourites-page-indicator')) $('favourites-page-indicator').textContent = `PAGE ${favouritesPage + 1} OF ${pages}`;
     } catch (err) {
       setConnectionError(err.message);
     }
@@ -2839,7 +3036,7 @@
           metaEl.textContent = `Failed to load preview · ${formatFileSize(item.size)}`;
         }
       };
-      fetch(`${base}/api/files/raw?path=${encodeURIComponent(relativePath)}`, {
+      fetch(`${base}/api/files/download?path=${encodeURIComponent(relativePath)}`, {
         headers: getFileBridgeHeaders(),
       })
         .then((res) => {
@@ -3282,37 +3479,133 @@
     {
       key: 'drawer', container: 'ld-lyrics-scroll', modeGroup: 'ld-lyrics-mode-group',
       preparing: 'ld-lyrics-preparing', searchBtn: 'ld-lyrics-search-btn', size: 'text-sm',
-      visible: () => state.lyricsDrawerOpen, lastIdx: -2,
+      visible: () => state.lyricsDrawerOpen, lastIdx: -2, manualScrollUntil: 0,
     },
     {
       key: 'np', container: 'np-lyrics-scroll', modeGroup: 'np-lyrics-mode-group',
       preparing: 'np-lyrics-preparing', searchBtn: 'np-lyrics-search-btn', size: 'text-lg',
-      visible: () => state.route === 'now-playing' && state.npTab === 'lyrics' && window.innerWidth >= 1024, lastIdx: -2,
+      visible: () => state.route === 'now-playing' && state.npTab === 'lyrics' && window.innerWidth >= 1024, lastIdx: -2, manualScrollUntil: 0,
     },
     {
       key: 'npm', container: 'np-mobile-overlay-body', modeGroup: 'np-mobile-lyrics-mode-group',
       size: 'text-lg',
-      visible: () => state.route === 'now-playing' && state.npMobileOverlay === 'lyrics' && window.innerWidth < 1024, lastIdx: -2,
+      visible: () => state.route === 'now-playing' && state.npMobileOverlay === 'lyrics' && window.innerWidth < 1024, lastIdx: -2, manualScrollUntil: 0,
     },
     {
       key: 'sig', container: 'signature-lyrics-container', modeGroup: 'sig-lyrics-mode-group',
       preparing: 'sig-lyrics-preparing', size: 'text-2xl md:text-3xl',
-      visible: () => state.signatureOpen, lastIdx: -2,
+      visible: () => state.signatureOpen, lastIdx: -2, manualScrollUntil: 0,
     },
   ];
+
+  // Manual scroll pauses auto-centering for 5s (Century manualScrollPause).
+  // Delegated on document so it works for views loaded later via templates.
+  document.addEventListener('wheel', (e) => {
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    if (!target) return;
+    const view = lyricViews.find((v) => target.closest(`#${v.container}`));
+    if (view && lyricsManager.getManualScrollPause()) view.manualScrollUntil = Date.now() + 5000;
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    if (!target) return;
+    const view = lyricViews.find((v) => target.closest(`#${v.container}`));
+    if (view && lyricsManager.getManualScrollPause()) view.manualScrollUntil = Date.now() + 5000;
+  }, { passive: true });
 
   function anyLyricsVisible() {
     return lyricViews.some((v) => v.visible());
   }
 
+  // Century model (L-1): the original lines are ALWAYS the displayed
+  // lines. Romaji / Translated render as sub-lines under them (see
+  // getRomajiSubline / getTranslatedSubline), not as an exclusive mode.
   function getDisplayLines() {
     const L = state.lyrics;
     const res = L.result;
     if (!res || !Array.isArray(res.lines)) return [];
-    const mode = lyricsManager.getTrackMode(L.trackId);
-    if (mode === 'romaji' && L.romaji) return L.romaji;
-    if (mode === 'en' && L.en) return L.en;
     return res.lines;
+  }
+
+  // Build the per-segment sweep list for one lyric line (Century
+  // buildSweepSegments, simplified). Each segment carries its text, start
+  // and end times. A single long word is split into per-character
+  // segments (even time slices) so the sweep moves across the line
+  // instead of filling the whole word at once. JP words get no trailing
+  // space; other words get one. `nextLineStart` bounds the last word.
+  function buildWordSegments(line, nextLineStart) {
+    const words = Array.isArray(line.words) ? line.words : [];
+    const segments = [];
+    if (words.length === 0) return segments;
+    if (words.length === 1 && words[0].text && [...words[0].text].length > 1) {
+      const chars = [...words[0].text];
+      const w = words[0];
+      const start = w.t;
+      const end = w.end ?? nextLineStart ?? w.t + 2;
+      const dur = Math.max(0.08, end - start);
+      chars.forEach((ch, i) => {
+        const segStart = start + (dur * i) / chars.length;
+        const segEnd = start + (dur * (i + 1)) / chars.length;
+        segments.push({ text: ch, t: segStart, end: segEnd, trailingSpace: '' });
+      });
+      return segments;
+    }
+    words.forEach((w, i) => {
+      const next = words[i + 1];
+      const end = w.end ?? (next ? next.t : nextLineStart) ?? w.t + 0.2;
+      segments.push({
+        text: w.text,
+        t: w.t,
+        end: Math.max(w.t + 0.08, end),
+        trailingSpace: JP_REGEX.test(w.text) ? '' : ' ',
+      });
+    });
+    return segments;
+  }
+
+  // Normalize a lyric line for identity comparison (Century
+  // normalizeLyricsText): lowercase, strip punctuation + spaces.
+  function normalizeLyricsText(text) {
+    return String(text || '')
+      .toLowerCase()
+      .replace(/[\s\p{P}]/gu, '');
+  }
+
+  // A line can show a romaji sub-line only when it has Japanese script.
+  function canRomanizeLine(text) {
+    return JP_REGEX.test(String(text || ''));
+  }
+
+  // A line can show a translated sub-line only when it is not already
+  // English (i.e. it contains non-Latin script).
+  const NON_LATIN_REGEX = /[\u3040-\u30ff\u4e00-\u9fff\u3400-\u4dbf\uac00-\ud7af\u0400-\u04ff\u0600-\u06ff\u0900-\u097f]/;
+  function canTranslateLine(text) {
+    return NON_LATIN_REGEX.test(String(text || ''));
+  }
+
+  // Romaji sub-line for line index i, or null when suppressed (toggle off,
+  // no romaji data, line has no JP script, or romaji equals the original).
+  function getRomajiSubline(lineIdx) {
+    const L = state.lyrics;
+    if (!lyricsManager.getShowRomaji()) return null;
+    if (!L.romaji || L.romaji.length !== L.result?.lines?.length) return null;
+    const line = L.result.lines[lineIdx];
+    const romaji = L.romaji[lineIdx]?.text ?? '';
+    if (!romaji || !canRomanizeLine(line?.text || '')) return null;
+    if (normalizeLyricsText(romaji) === normalizeLyricsText(line.text)) return null;
+    return romaji;
+  }
+
+  // Translated sub-line for line index i, or null when suppressed.
+  function getTranslatedSubline(lineIdx) {
+    const L = state.lyrics;
+    if (!lyricsManager.getShowTranslated()) return null;
+    if (!L.en || L.en.length !== L.result?.lines?.length) return null;
+    const line = L.result.lines[lineIdx];
+    const en = L.en[lineIdx]?.text ?? '';
+    if (!en || !canTranslateLine(line?.text || '')) return null;
+    if (normalizeLyricsText(en) === normalizeLyricsText(line.text)) return null;
+    return en;
   }
 
   async function ensureLyrics(force = false) {
@@ -3349,33 +3642,39 @@
     L.loading = false;
     L.result = res;
     renderAllLyrics();
-    if (res.status === 'ok' && res.lines && hasJapaneseScript(res.lines) && lyricsManager.getTrackMode(song.id) !== 'original') {
-      prepareReadings();
+    // Prepare romaji / EN readings when the track has Japanese script and
+    // at least one sub-line toggle is on (Century: readings are derived
+    // for the sub-lines, not for an exclusive mode).
+    if (res.status === 'ok' && res.lines && hasJapaneseScript(res.lines)) {
+      lyricsManager.migrateLegacyTrackMode(song.id);
+      if (lyricsManager.getShowRomaji() || lyricsManager.getShowTranslated()) {
+        prepareReadings();
+      }
     }
   }
 
   async function prepareReadings() {
     const L = state.lyrics;
     const song = audioEngine?.currentSong;
-    if (!song || !L.result?.lines || L.romaji || L.preparing) return;
+    if (!song || !L.result?.lines || L.preparing) return;
+    if (L.romaji && L.en) return;
     // Prefer the relay's sidecars (kuroshiro / Gemini / Google, server-side) — instant, no extra network.
     const res = L.result;
-    if (Array.isArray(res.romajiLines) && res.romajiLines.length === res.lines.length) {
+    if (!L.romaji && Array.isArray(res.romajiLines) && res.romajiLines.length === res.lines.length) {
       L.romaji = res.lines.map((l, i) => ({ t: l.t, timeSeconds: l.timeSeconds ?? l.t, text: res.romajiLines[i] ?? '' }));
     }
-    if (Array.isArray(res.translationLines) && res.translationLines.length === res.lines.length) {
+    if (!L.en && Array.isArray(res.translationLines) && res.translationLines.length === res.lines.length) {
       L.en = res.lines.map((l, i) => ({ t: l.t, timeSeconds: l.timeSeconds ?? l.t, text: res.translationLines[i] ?? '' }));
     }
-    if (L.romaji || L.en) {
-      // Fill whichever side is missing from the other (romaji-only or EN-only result).
-      if (!L.romaji) L.romaji = res.lines.map((l) => ({ t: l.t, timeSeconds: l.timeSeconds ?? l.t, text: l.text }));
-      if (!L.en) L.en = res.lines.map((l) => ({ t: l.t, timeSeconds: l.timeSeconds ?? l.t, text: l.text }));
+    if (L.romaji && L.en) {
       renderAllLyrics();
       return;
     }
-    // Fallback (manual LRCLIB candidate, or a relay result without sidecars):
-    // derive via the relay (kuroshiro / Gemini / Google, server-side), then
-    // client-side Google Translate + offline Hepburn if the relay is down.
+    // Derive the missing side(s) via the relay (kuroshiro / Gemini /
+    // Google, server-side), then client-side Google Translate + offline
+    // Hepburn if the relay is down. A missing side is NOT back-filled
+    // with the original text (L-2): it stays missing and its sub-line
+    // simply does not render.
     L.preparing = true;
     renderAllLyrics();
     let { romaji, en } = await lyricsManager.deriveReadings(L.result.lines, song.id);
@@ -3385,17 +3684,26 @@
       en = en || fallback.en;
     }
     if (audioEngine?.currentSong?.id !== song.id) return;
-    L.romaji = romaji;
-    L.en = en;
+    L.romaji = romaji || L.romaji;
+    L.en = en || L.en;
     L.preparing = false;
     renderAllLyrics();
   }
 
-  function setLyricsMode(mode) {
+  // Toggle a global lyrics sub-line pref (Century toolbar: Romaji |
+  // Translated). Turning a toggle on derives the readings if needed.
+  function toggleLyricsPref(kind) {
     const song = audioEngine?.currentSong;
     if (!song) return;
-    lyricsManager.setTrackMode(song.id, mode);
-    if (mode !== 'original' && !state.lyrics.romaji) prepareReadings();
+    if (kind === 'romaji') {
+      const next = !lyricsManager.getShowRomaji();
+      lyricsManager.setShowRomaji(next);
+      if (next) prepareReadings();
+    } else if (kind === 'translated') {
+      const next = !lyricsManager.getShowTranslated();
+      lyricsManager.setShowTranslated(next);
+      if (next) prepareReadings();
+    }
     renderAllLyrics();
   }
 
@@ -3421,14 +3729,18 @@
     const res = L.result;
     const synced = res?.status === 'ok' && res.kind === 'synced' && Array.isArray(res.lines) && res.lines.length > 0;
 
-    // Mode group (only for Japanese lyrics with synced lines)
+    // Toggle group (only for Japanese lyrics with synced lines):
+    // Romaji | Translated — global prefs, not a per-track mode.
     const group = $(view.modeGroup);
     if (group) {
-      const showModes = synced && hasJapaneseScript(res.lines);
-      group.classList.toggle('hidden', !showModes);
-      if (showModes) group.classList.add('flex');
-      const mode = lyricsManager.getTrackMode(L.trackId);
-      group.querySelectorAll('[data-lyrics-mode]').forEach((b) => setModeButton(b, b.getAttribute('data-lyrics-mode') === mode));
+      const showToggles = synced && hasJapaneseScript(res.lines);
+      group.classList.toggle('hidden', !showToggles);
+      if (showToggles) group.classList.add('flex');
+      group.querySelectorAll('[data-lyrics-toggle]').forEach((b) => {
+        const kind = b.getAttribute('data-lyrics-toggle');
+        const on = kind === 'romaji' ? lyricsManager.getShowRomaji() : lyricsManager.getShowTranslated();
+        setModeButton(b, on);
+      });
     }
     if (view.preparing) show($(view.preparing), L.preparing);
 
@@ -3456,7 +3768,6 @@
     }
 
     const lines = getDisplayLines();
-    const mode = lyricsManager.getTrackMode(L.trackId);
     const wordSweep = lyricsManager.getWordSweep();
     const splitBg = lyricsManager.getSplitBackground();
     container.innerHTML = '<div class="py-[30%]"></div>';
@@ -3481,17 +3792,59 @@
       } else {
         el.className = `lyric-line cursor-pointer px-4 py-2 leading-snug text-zinc-400 hover:text-zinc-100 ${view.size}`;
       }
-      if (mode === 'original' && wordSweep && line.words && line.words.length > 0) {
-        line.words.forEach((w) => {
-          const span = document.createElement('span');
-          span.className = 'lyric-word lyric-word-unsung';
-          span.setAttribute('data-t', String(w.t));
-          span.setAttribute('data-end', String(w.end));
-          span.textContent = JP_REGEX.test(w.text) ? w.text : `${w.text} `;
-          el.appendChild(span);
+      // Primary line: the original text, always shown. Word-synced lines
+      // get the Century clip-path two-layer sweep (base + fill layer),
+      // which never flickers (no background-clip:text, no color
+      // transition — the fill is revealed by clip-path only).
+      if (wordSweep && line.words && line.words.length > 0) {
+        const primary = document.createElement('span');
+        primary.className = 'block';
+        primary.setAttribute('data-lyrics-primary', 'original');
+        buildWordSegments(line, lines[idx + 1]?.t).forEach((seg) => {
+          const wrapEl = document.createElement('span');
+          wrapEl.className = 'lyric-word-wrap';
+          wrapEl.setAttribute('data-word-span', 'true');
+          wrapEl.setAttribute('data-t', String(seg.t));
+          wrapEl.setAttribute('data-end', String(seg.end));
+          const base = document.createElement('span');
+          base.className = 'lyric-word-base';
+          base.textContent = seg.text;
+          const fill = document.createElement('span');
+          fill.className = 'lyric-word-fill';
+          fill.setAttribute('data-word-fill', 'true');
+          fill.setAttribute('aria-hidden', 'true');
+          fill.textContent = seg.text;
+          wrapEl.appendChild(base);
+          wrapEl.appendChild(fill);
+          primary.appendChild(wrapEl);
+          if (seg.trailingSpace) primary.appendChild(document.createTextNode(seg.trailingSpace));
         });
+        el.appendChild(primary);
       } else {
-        el.textContent = line.text || '♪';
+        const primary = document.createElement('span');
+        primary.className = 'block';
+        primary.setAttribute('data-lyrics-primary', 'original');
+        primary.textContent = line.text || '♪';
+        el.appendChild(primary);
+      }
+      // Sub-lines (Century): Romaji + Translated under the original,
+      // each governed by its own global toggle and suppressed when it
+      // would duplicate the original or the line cannot carry it.
+      const romajiText = getRomajiSubline(idx);
+      if (romajiText !== null) {
+        const sub = document.createElement('span');
+        sub.className = 'lyric-subline lyric-subline-romaji';
+        sub.setAttribute('data-lyrics-subline', 'romaji');
+        sub.textContent = romajiText;
+        el.appendChild(sub);
+      }
+      const enText = getTranslatedSubline(idx);
+      if (enText !== null) {
+        const sub = document.createElement('span');
+        sub.className = 'lyric-subline lyric-subline-translated';
+        sub.setAttribute('data-lyrics-subline', 'translated');
+        sub.textContent = enText;
+        el.appendChild(sub);
       }
       el.addEventListener('click', () => {
         const offset = lyricsManager.getTrackOffset(L.trackId);
@@ -3540,36 +3893,50 @@
       if (els.length === 0) continue;
 
       if (view.lastIdx !== idx || force) {
+        const hidePlayed = lyricsManager.getHidePlayed();
+        const hideUpcoming = lyricsManager.getHideUpcoming();
         els.forEach((el, i) => {
           const active = i === idx;
           el.classList.toggle('lyric-line-active', active);
+          // Focus mode: hide played lines and/or upcoming lines.
+          el.classList.toggle('hidden', (hidePlayed && i < idx) || (hideUpcoming && i > idx));
           // Never put text-zinc-400 on a BG line: its sage-dim colour comes
           // from .lyric-line-bg, and the zinc utility would override it.
           const isBgLine = el.classList.contains('lyric-line-bg');
-          el.classList.toggle('text-zinc-400', !active && !isBgLine && !el.querySelector('.lyric-word'));
+          el.classList.toggle('text-zinc-400', !active && !isBgLine && !el.querySelector('[data-word-span]'));
           // BG line: open (expand + fade in) only while its parent lead is active.
           if (el.classList.contains('lyric-line-bg')) {
             const parent = parseInt(el.getAttribute('data-parent') || '-1', 10);
             el.classList.toggle('lyric-line-bg-open', parent === idx);
           }
-          // Reset word state for non-active lines
+          // Reset word state for non-active lines: the fill layer is
+          // either fully revealed (played lines) or fully hidden
+          // (upcoming lines). Clip-path only — no class juggling, no
+          // colour transition, so nothing flickers.
           if (!active) {
-            el.querySelectorAll('.lyric-word').forEach((w) => {
-              w.classList.remove('lyric-word-active');
-              w.classList.toggle('lyric-word-sung', i < idx);
-              w.classList.toggle('lyric-word-unsung', i >= idx);
-              w.style.removeProperty('--word-fill');
+            const revealed = i < idx;
+            el.querySelectorAll('[data-word-span]').forEach((wrapEl) => {
+              const fill = wrapEl.querySelector('[data-word-fill]');
+              if (fill) fill.style.clipPath = revealed ? 'inset(0 0% 0 0)' : 'inset(0 100% 0 0)';
             });
           }
         });
-        if (idx >= 0 && els[idx]) scrollLineIntoCenter(container, els[idx]);
+        // Auto-center the active line, unless the user just scrolled by
+        // hand and manual-scroll-pause is on (5s pause, Century).
+        if (idx >= 0 && els[idx]) {
+          const paused = lyricsManager.getManualScrollPause() && Date.now() < view.manualScrollUntil;
+          if (!paused) scrollLineIntoCenter(container, els[idx]);
+        }
         view.lastIdx = idx;
       }
 
       // Instrumental dots: show after the active line while inside a gap.
+      // An intro gap (afterLineIndex === -1) has no active line yet — the
+      // dots render at the top, before the first line (Century).
       const dots = container.querySelector('.lyric-dots');
       if (dots) {
-        if (gap && idx >= 0 && els[idx]) {
+        const isIntroGap = gap && gap.afterLineIndex === -1;
+        if (gap && ((idx >= 0 && els[idx]) || isIntroGap)) {
           const progress = Math.max(0, Math.min(1, (time - gap.start) / Math.max(0.01, gap.end - gap.start)));
           const filled = Math.min(3, Math.round(progress * 3));
           dots.classList.remove('hidden');
@@ -3577,8 +3944,13 @@
           dots.querySelectorAll('.lyric-dot').forEach((d, di) => {
             d.classList.toggle('lyric-dot-filled', di < filled);
           });
-          // Keep the dots directly after the active line.
-          if (els[idx].nextElementSibling !== dots) els[idx].after(dots);
+          // Keep the dots directly after the active line, or at the top
+          // for an intro gap (before the first line).
+          if (isIntroGap) {
+            if (els[0] && els[0].previousElementSibling !== dots) els[0].before(dots);
+          } else if (els[idx].nextElementSibling !== dots) {
+            els[idx].after(dots);
+          }
         } else {
           dots.classList.add('hidden');
           // Reset the label with the fill count so a hidden dots element
@@ -3587,26 +3959,21 @@
         }
       }
 
-      // Word-level karaoke fill on the active line
+      // Word-level karaoke fill on the active line (Century
+      // ActiveLineWordFill): each word's sage fill layer is revealed by
+      // clip-path only — direct style mutation, no class changes, no
+      // background-clip:text gradient, no colour transition. That is the
+      // flicker fix: the old gradient repainted per frame and flashed
+      // white <-> sage.
       const activeEl = idx >= 0 ? els[idx] : null;
       if (activeEl) {
-        activeEl.querySelectorAll('.lyric-word').forEach((w) => {
-          const start = parseFloat(w.getAttribute('data-t'));
-          const end = parseFloat(w.getAttribute('data-end'));
-          if (time >= end) {
-            w.classList.remove('lyric-word-active', 'lyric-word-unsung');
-            w.classList.add('lyric-word-sung');
-            w.style.removeProperty('--word-fill');
-          } else if (time >= start) {
-            const pct = Math.max(0, Math.min(100, ((time - start) / Math.max(0.05, end - start)) * 100));
-            w.classList.remove('lyric-word-unsung', 'lyric-word-sung');
-            w.classList.add('lyric-word-active');
-            w.style.setProperty('--word-fill', `${pct}%`);
-          } else {
-            w.classList.remove('lyric-word-active', 'lyric-word-sung');
-            w.classList.add('lyric-word-unsung');
-            w.style.removeProperty('--word-fill');
-          }
+        activeEl.querySelectorAll('[data-word-span]').forEach((wrapEl) => {
+          const fill = wrapEl.querySelector('[data-word-fill]');
+          if (!fill) return;
+          const start = parseFloat(wrapEl.getAttribute('data-t') || '0');
+          const end = parseFloat(wrapEl.getAttribute('data-end') || '0');
+          const progress = Math.max(0, Math.min(1, (time - start) / Math.max(0.04, end - start)));
+          fill.style.clipPath = `inset(0 ${(1 - progress) * 100}% 0 0)`;
         });
       }
     }
@@ -3859,7 +4226,7 @@
         L.en = null;
         closeLyricsSourceModal();
         renderAllLyrics();
-        if (L.result.lines && hasJapaneseScript(L.result.lines) && lyricsManager.getTrackMode(song.id) !== 'original') prepareReadings();
+        if (L.result.lines && hasJapaneseScript(L.result.lines) && (lyricsManager.getShowRomaji() || lyricsManager.getShowTranslated())) prepareReadings();
       });
       results.appendChild(btn);
     });
@@ -4195,10 +4562,18 @@
     if (wordSweepToggle) wordSweepToggle.checked = lyricsManager.getWordSweep();
     const splitBgToggle = $('settings-split-bg-toggle');
     if (splitBgToggle) splitBgToggle.checked = lyricsManager.getSplitBackground();
+    const manualScrollToggle = $('settings-manual-scroll-pause-toggle');
+    if (manualScrollToggle) manualScrollToggle.checked = lyricsManager.getManualScrollPause();
+    const hidePlayedToggle = $('settings-hide-played-toggle');
+    if (hidePlayedToggle) hidePlayedToggle.checked = lyricsManager.getHidePlayed();
+    const hideUpcomingToggle = $('settings-hide-upcoming-toggle');
+    if (hideUpcomingToggle) hideUpcomingToggle.checked = lyricsManager.getHideUpcoming();
     const splitAlbumsToggle = $('settings-split-albums-toggle');
     if (splitAlbumsToggle) splitAlbumsToggle.checked = getSplitAlbumsSingles();
     const autoplayToggle = $('settings-autoplay-toggle');
     if (autoplayToggle) autoplayToggle.checked = audioEngine.autoplay;
+    const balancedToggle = $('settings-balanced-shuffle-toggle');
+    if (balancedToggle) balancedToggle.checked = localStorage.getItem('century.settings.balancedShuffle') === 'true';
 
     $('settings-server-url').value = client.baseUrl;
     $('settings-server-user').value = client.username;
@@ -4248,6 +4623,20 @@
   }
 
   function bindAllEvents() {
+    // Multi-select action bar (V-15, Century M7)
+    on('multi-select-play-btn', 'click', multiSelectPlay);
+    on('multi-select-queue-btn', 'click', multiSelectAddToQueue);
+    on('multi-select-playlist-btn', 'click', multiSelectAddToPlaylist);
+    on('multi-select-star-btn', 'click', multiSelectStar);
+    on('multi-select-clear-btn', 'click', clearMultiSelect);
+    // Esc clears the selection before it falls through to goBack.
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && state.multiSelect.size > 0) {
+        clearMultiSelect();
+        e.stopPropagation();
+      }
+    }, true);
+
     // Sidebar + mobile chrome
     on('sidebar-toggle-btn', 'click', toggleSidebar);
     on('sidebar-brand-wrap', 'click', () => navigateTo('home'));
@@ -4307,6 +4696,8 @@
     });
     on('favourites-play-btn', 'click', () => playSongs(state.favouriteSongs, { shuffle: false }));
     on('favourites-shuffle-btn', 'click', () => playSongs(state.favouriteSongs, { shuffle: true }));
+    on('favourites-prev-page', 'click', () => { favouritesPage = Math.max(0, favouritesPage - 1); loadFavouritesView(); });
+    on('favourites-next-page', 'click', () => { favouritesPage += 1; loadFavouritesView(); });
 
     // Playlists
     on('playlists-open-create-modal-btn', 'click', () => openModal('create-playlist-modal'));
@@ -4533,9 +4924,9 @@
       if (current) setNpMobileOverlay(current);
     });
 
-    // Lyrics: mode buttons (all groups) + search buttons
-    document.querySelectorAll('[data-lyrics-mode]').forEach((btn) => {
-      btn.addEventListener('click', () => setLyricsMode(btn.getAttribute('data-lyrics-mode')));
+    // Lyrics: Romaji / Translated toggle buttons (all groups) + search buttons
+    document.querySelectorAll('[data-lyrics-toggle]').forEach((btn) => {
+      btn.addEventListener('click', () => toggleLyricsPref(btn.getAttribute('data-lyrics-toggle')));
     });
     ['ld-lyrics-search-btn', 'np-lyrics-search-btn', 'btn-lyrics-source'].forEach((id) => on(id, 'click', openLyricsSourceModal));
     on('lyrics-source-close-btn', 'click', closeLyricsSourceModal);
@@ -4683,6 +5074,25 @@
       lyricsManager.setSplitBackground(e.target.checked);
       renderAllLyrics();
     });
+    on('settings-manual-scroll-pause-toggle', 'change', (e) => {
+      lyricsManager.setManualScrollPause(e.target.checked);
+      renderAllLyrics();
+    });
+    on('settings-hide-played-toggle', 'change', (e) => {
+      lyricsManager.setHidePlayed(e.target.checked);
+      renderAllLyrics();
+    });
+    on('settings-hide-upcoming-toggle', 'change', (e) => {
+      lyricsManager.setHideUpcoming(e.target.checked);
+      renderAllLyrics();
+    });
+    on('settings-clear-lyrics-cache-btn', 'click', () => {
+      lyricsManager.clearLyricsCache();
+      showToast('Cleared cached lyrics');
+      state.lyrics.result = null;
+      state.lyrics.trackId = null;
+      if (audioEngine?.currentSong) ensureLyrics(true);
+    });
     on('settings-output-device', 'change', (e) => audioEngine.setOutputDevice(e.target.value || 'default'));
     on('settings-crossfade-slider', 'input', (e) => {
       const v = parseInt(e.target.value, 10) || 0;
@@ -4690,6 +5100,9 @@
       $('settings-crossfade-label').textContent = v === 0 ? '0s (Gapless cut)' : `${v}s`;
     });
     on('settings-autoplay-toggle', 'change', (e) => audioEngine.setAutoplay(e.target.checked));
+    on('settings-balanced-shuffle-toggle', 'change', (e) => {
+      localStorage.setItem('century.settings.balancedShuffle', e.target.checked ? 'true' : 'false');
+    });
     $('settings-norm-group')?.querySelectorAll('[data-norm]').forEach((btn) => {
       btn.addEventListener('click', () => {
         audioEngine.setNormalization(btn.getAttribute('data-norm'));
@@ -4804,7 +5217,8 @@
         if (state.signatureOpen) return closeSignatureView();
         if (state.queueOpen) return toggleQueueDrawer(false);
         if (state.lyricsDrawerOpen) return toggleLyricsDrawer(false);
-        return;
+        // Nothing open: Esc goes back (Century).
+        return goBack();
       }
       if (typing) return;
       const k = e.key.toLowerCase();
