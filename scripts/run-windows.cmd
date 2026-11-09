@@ -3,11 +3,14 @@ setlocal
 
 cd /d "%~dp0"
 
-if exist "%USERPROFILE%\.bun\bin" (
-    set "PATH=%USERPROFILE%\.bun\bin;%PATH%"
+where pwsh.exe >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    set "PS_CMD=pwsh.exe"
+) else (
+    set "PS_CMD=powershell.exe"
 )
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-windows.ps1"
+"%PS_CMD%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-windows.ps1" %*
 
 set "RUNNER_EXIT=%ERRORLEVEL%"
 
