@@ -254,8 +254,8 @@
               class="px-2 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Clear</button>
           </div>
         </div>
-        <div
-          class="studio-panel max-w-[1920px] mx-auto pointer-events-auto shadow-2xl bg-zinc-900/95 backdrop-blur-md border border-zinc-700">
+        <div id="player-bar-panel"
+          class="studio-panel max-w-[800px] mx-auto pointer-events-auto shadow-2xl bg-zinc-900/95 backdrop-blur-md border border-zinc-700">
           <!-- Mobile Mini-Player (< md) -->
           <div class="md:hidden flex flex-col">
             <div class="p-2 flex items-center justify-between gap-2">
@@ -298,31 +298,31 @@
             <!-- True centering: left and right are equal flex-1 columns, so
                  the center track block sits at the exact middle of the bar
                  (Century has no star here and the title is centered). -->
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-1">
               <!-- Left: Transport Controls -->
-              <div class="flex flex-1 items-center gap-1">
+              <div class="flex flex-1 items-center smallest-padding max-w-max">
                 <button id="btn-shuffle" type="button" aria-label="Toggle shuffle" title="Shuffle (S)"
-                  class="w-9 h-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+                  class="w-7 h-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
                   <i data-lucide="shuffle" class="w-4 h-4"></i>
                 </button>
 
                 <button id="btn-prev" type="button" aria-label="Previous track" title="Previous ([ or P)"
-                  class="w-9 h-9 flex items-center justify-center text-zinc-200 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+                  class="w-7 h-9 flex items-center justify-center text-zinc-200 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
                   <i data-lucide="skip-back" class="w-4 h-4"></i>
                 </button>
 
                 <button id="btn-play" type="button" aria-label="Play or Pause" title="Play / Pause (Space)"
                   class="w-9 h-9 flex items-center justify-center text-zinc-100 hover:text-emerald-400 hover:bg-zinc-800 transition-colors">
-                  <i id="icon-play" data-lucide="play" class="w-4 h-4 fill-current"></i>
+                  <i id="icon-play" data-lucide="play" class="w-7 h-7 fill-current"></i>
                 </button>
 
                 <button id="btn-next" type="button" aria-label="Next track" title="Next (] or N)"
-                  class="w-9 h-9 flex items-center justify-center text-zinc-200 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+                  class="w-7 h-9 flex items-center justify-center text-zinc-200 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
                   <i data-lucide="skip-forward" class="w-4 h-4"></i>
                 </button>
 
                 <button id="btn-repeat" type="button" aria-label="Cycle repeat mode" title="Repeat mode (R)"
-                  class="w-9 h-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 relative transition-colors">
+                  class="w-7 h-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 relative transition-colors">
                   <i id="icon-repeat" data-lucide="repeat" class="w-4 h-4"></i>
                   <span id="repeat-one-badge"
                     class="hidden absolute top-1 right-1 w-3 h-3 bg-emerald-400 text-zinc-950 text-[8px] font-mono font-bold items-center justify-center">1</span>
@@ -330,20 +330,25 @@
               </div>
 
               <!-- Center: Active Track Button (Fades out when scrubbing seek bar; clicks to open /now-playing) -->
+               <div id="player-center-track-wrap-bar"
+               class="rows-4 flex-1 px-4">
               <div id="player-center-track-wrap"
                 class="flex items-center gap-2.5 min-w-0 max-w-md shrink grow-0 justify-center transition-opacity duration-150">
-                <button id="player-cover-btn" type="button" title="Open Now Playing View"
-                  class="relative w-10 h-10 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center">
-                  <img id="player-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
-                  <i id="player-cover-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-4 h-4 text-zinc-400 pointer-events-none"></i>
-                </button>
+                <!-- Column: Cover Art + Bitrate Indicator -->
+                <div id="player-cover-col" class="flex items-center gap-1.5 shrink-0">
+                  <button id="player-cover-btn" type="button" title="Open Now Playing View"
+                    class="relative w-12 h-12 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center">
+                    <img id="player-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
+                    <i id="player-cover-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-4 h-4 text-zinc-400 pointer-events-none"></i>
+                  </button>
+                </div>
 
                 <div class="min-w-0 flex-1 text-left">
                   <button id="player-title-btn" type="button" title="Open Now Playing View"
-                    class="block max-w-full truncate text-xs font-medium text-zinc-100 hover:text-emerald-400 text-left">
+                    class="block max-w-full truncate text-xl font-medium text-zinc-100 hover:text-emerald-400 text-left">
                     No track selected
                   </button>
-                  <div class="flex items-center gap-1 min-w-0 text-[11px] text-zinc-400">
+                  <div class="flex items-center gap-1 min-w-0 text-md text-zinc-400 mt-[-5px]">
                     <button id="player-artist-btn" type="button" title="Open Artist Page"
                       class="truncate hover:text-zinc-200 text-left shrink-0 max-w-[45%]">
                       Select any song or album to begin playback
@@ -354,55 +359,71 @@
                     </button>
                   </div>
                 </div>
-              </div>
-
-              <!-- Right: Queue, Lyrics Drawer, Signature Room, Volume, Context Menu (Century order) -->
-              <div class="flex flex-1 items-center justify-end gap-1">
-                <button id="btn-queue" type="button" aria-label="Toggle playback queue drawer" title="Toggle Queue (Q)"
-                  class="h-8 px-2 flex items-center gap-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
-                  <i data-lucide="list-music" class="w-4 h-4"></i>
-                  <span id="player-queue-count"
-                    class="px-1.5 py-0.5 bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-emerald-400">0</span>
-                </button>
-
-                <button id="btn-lyrics-drawer" type="button" aria-label="Toggle Lyrics Drawer"
-                  title="Toggle Lyrics Drawer"
-                  class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
-                  <i data-lucide="quote" class="w-4 h-4"></i>
-                </button>
-
-                <button id="btn-signature" type="button" aria-label="Open Fullscreen Listening Room"
-                  title="Fullscreen Listening Room (U)"
-                  class="hidden lg:inline-flex w-8 h-8 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
-                  <i data-lucide="maximize-2" class="w-4 h-4"></i>
-                </button>
-
-                <div class="flex items-center gap-1.5 pl-1 border-l border-zinc-800">
-                  <button id="btn-mute" type="button" aria-label="Toggle mute" title="Mute / Unmute"
-                    class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100">
-                    <i id="icon-volume" data-lucide="volume-2" class="w-4 h-4"></i>
-                  </button>
-
-                  <input id="volume-slider" type="range" min="0" max="1" step="0.01" value="0.85"
-                    aria-label="Master volume" class="studio-range-thin w-16 sm:w-20" />
-                </div>
-
+                <span id="player-bitrate-indicator" title="Audio Bitrate"
+                    class="px-1.5 py-0.5 text-[9px] font-mono font-medium border border-zinc-700 bg-zinc-900/90 text-zinc-400 select-none tracking-tight leading-none shrink-0 hover:text-zinc-200 hover:border-zinc-500 transition-colors">
+                    320
+                  </span>
                 <button id="player-more-btn" type="button" aria-label="Current track options" title="Track options"
                   class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
-                  <i data-lucide="more-vertical" class="w-4 h-4"></i>
+                  <i data-lucide="more-horizontal" class="w-4 h-4"></i>
                 </button>
               </div>
-            </div>
-
-            <!-- Row 2: Full-Width Thin Seek Bar with Floating Hover Timestamps -->
-            <div id="player-seek-row" class="group relative w-full flex items-center pt-0.5">
+              <div id="player-seek-row" class="group relative w-full flex items-center mb-[-15px]">
               <span id="time-current"
-                class="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-4 left-0 text-[10px] font-mono text-zinc-300 bg-zinc-950/90 px-1 pointer-events-none">0:00</span>
+                class=" transition-opacity absolute left-0 text-[10px] font-mono text-zinc-300 bg-zinc-950/90 px-1 pointer-events-none">0:00</span>
               <input id="seek-slider" type="range" min="0" max="100" step="0.1" value="0"
                 aria-label="Seek audio position" class="studio-range-thin w-full" />
               <span id="time-total"
-                class="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-4 right-0 text-[10px] font-mono text-zinc-300 bg-zinc-950/90 px-1 pointer-events-none">0:00</span>
+                class="transition-opacity absolute right-0 text-[10px] font-mono text-zinc-300 bg-zinc-950/90 px-1 pointer-events-none">0:00</span>
             </div>
+              </div>
+
+              <!-- Right: Queue, Lyrics Drawer, Signature Room, Volume, Context Menu (Century order) -->
+              <div class="relative flex flex-1 items-center justify-end gap-1 volume-group max-w-max">
+  
+  <!-- Hidden toggle checkbox -->
+  <input type="checkbox" id="volume-toggle" class="peer sr-only" />
+
+  <!-- Left icons: fade out and lose pointer events when #volume-toggle is checked -->
+  <div class="secondary-icons flex items-center gap-1 transition-all duration-200">
+    <button id="btn-queue" type="button" aria-label="Toggle playback queue drawer" title="Toggle Queue (Q)"
+      class="h-8 px-2 flex items-center gap-1.5 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+      <i data-lucide="list-music" class="w-4 h-4"></i>
+    </button>
+
+    <button id="btn-lyrics-drawer" type="button" aria-label="Toggle Lyrics Drawer"
+      title="Toggle Lyrics Drawer"
+      class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+      <i data-lucide="quote" class="w-4 h-4"></i>
+    </button>
+
+    <button id="btn-signature" type="button" aria-label="Open Fullscreen Listening Room"
+      title="Fullscreen Listening Room (U)"
+      class="lg:inline-flex w-8 h-8 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+      <i data-lucide="maximize-2" class="w-4 h-4 mx-auto"></i>
+    </button>
+  </div>
+
+  <!-- Volume section -->
+  <div class="relative flex items-center pl-1 border-zinc-800">
+    <!-- Slider track positioned absolutely so it doesn't take flex space -->
+    <div class="volume-slider-box absolute right-9 top-1/2 -translate-y-1/2 flex items-center opacity-0 pointer-events-none -translate-x-2 transition-all duration-300">
+      <input id="volume-slider" type="range" min="0" max="1" step="0.01" value="0.85"
+        aria-label="Master volume" class="studio-range-thin w-20" />
+    </div>
+
+    <!-- The speaker icon: click to open volume bar; click again while open to mute/unmute -->
+    <button id="btn-volume" type="button" aria-label="Toggle volume slider or mute" title="Volume / Mute"
+      class="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100 cursor-pointer z-10 select-none hover:bg-zinc-800 rounded-sm">
+      <i id="icon-volume" data-lucide="volume-2" class="w-4 h-4"></i>
+    </button>
+  </div>
+
+</div>
+            </div>
+
+            <!-- Row 2: Full-Width Thin Seek Bar with Floating Hover Timestamps -->
+            
           </div>
         </div>
 
@@ -710,17 +731,9 @@
       <i id="ctx-star-icon" data-lucide="star" class="w-3.5 h-3.5 text-zinc-400"></i>
       <span id="ctx-star-label">Star Track</span>
     </button>
-
-    <div class="my-1 border-t border-zinc-800"></div>
-
-    <button id="ctx-edit-metadata" type="button" role="menuitem"
-      class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-emerald-400">
-      <i data-lucide="tags" class="w-3.5 h-3.5 text-emerald-400"></i>
-      <span>Edit Cover &amp; Metadata...</span>
-    </button>
   </div>
 
-  <!-- Global Full Metadata & Embedded Cover Art Editor Modal (Accessible from Album UI, Songs UI, Track Menu & Files Tab) -->
+  <!-- Global Full Metadata & Embedded Cover Art Editor Modal (Exclusively via Files UI) -->
   <div
     id="files-metadata-modal"
     role="dialog"
@@ -729,12 +742,18 @@
     class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 select-none"
   >
     <div class="w-full max-w-5xl max-h-[92vh] bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col overflow-hidden">
-      <!-- Modal Header + Scope Selector -->
+      <!-- Modal Header -->
       <div class="px-5 py-3.5 border-b border-zinc-700 bg-zinc-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
             <i data-lucide="tags" class="w-4 h-4 text-emerald-400 shrink-0"></i>
             <h2 class="font-display text-lg text-zinc-100 truncate">Metadata &amp; Cover Art Editor</h2>
+            <span
+              id="meta-scope-badge"
+              class="px-2 py-0.5 text-[10px] font-mono font-semibold bg-emerald-400/15 border border-emerald-400/40 text-emerald-300 shrink-0"
+            >
+              SINGLE TRACK
+            </span>
           </div>
           <p id="meta-editor-target-label" class="text-[11px] font-mono text-zinc-400 truncate mt-0.5">
             Target: -
@@ -742,24 +761,6 @@
         </div>
 
         <div class="flex items-center gap-2 shrink-0">
-          <!-- Scope Toggle: Single Track vs Entire Album Folder -->
-          <div class="inline-flex items-center bg-zinc-950 border border-zinc-700 p-0.5 text-[11px] font-mono">
-            <button
-              id="meta-scope-single-btn"
-              type="button"
-              class="px-2.5 py-1 transition-colors bg-emerald-400 text-zinc-950 font-semibold"
-            >
-              SINGLE TRACK
-            </button>
-            <button
-              id="meta-scope-album-btn"
-              type="button"
-              class="px-2.5 py-1 transition-colors text-zinc-400 hover:text-zinc-100"
-            >
-              ALBUM FOLDER
-            </button>
-          </div>
-
           <button
             id="meta-editor-close-btn"
             type="button"

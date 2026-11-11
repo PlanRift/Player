@@ -5,8 +5,28 @@ import path from 'path';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import ffmpegStatic from 'ffmpeg-static';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Resolve the path to the ffmpeg executable:
+ * 1. Explicit FFMPEG_PATH environment variable (if provided)
+ * 2. Bundled binary from npm package 'ffmpeg-static'
+ * 3. System 'ffmpeg' binary in PATH as last resort
+ */
+export function getFfmpegBinaryPath() {
+  if (process.env.FFMPEG_PATH) {
+    if (fsSync.existsSync(process.env.FFMPEG_PATH)) {
+      return process.env.FFMPEG_PATH;
+    }
+    return process.env.FFMPEG_PATH;
+  }
+  if (ffmpegStatic && fsSync.existsSync(ffmpegStatic)) {
+    return ffmpegStatic;
+  }
+  return 'ffmpeg';
+}
 
 export const AUDIO_EXTENSIONS = new Set([
   '.mp3',
@@ -417,6 +437,21 @@ function parseVorbisCommentBlock(payload) {
       else if (key === 'ALBUM' && !tags.album) tags.album = val;
       else if ((key === 'DATE' || key === 'YEAR') && !tags.year) tags.year = val.slice(0, 4);
       else if (key === 'TRACKNUMBER' && !tags.trackNumber) tags.trackNumber = val;
+      else if ((key === 'METADATA_BLOCK_PICTURE' || key === 'COVERART') && !tags.coverBuffer) {
+        try {
+          const picBuf = Buffer.from(val, 'base64');
+          if (key === 'METADATA_BLOCK_PICTURE') {
+            const pic = parseFlacPictureBlock(picBuf);
+            if (pic && pic.imageBuffer?.length > 0) {
+              tags.coverBuffer = pic.imageBuffer;
+              tags.coverMime = pic.mime || 'image/jpeg';
+            }
+          } else {
+            tags.coverBuffer = picBuf;
+            tags.coverMime = 'image/jpeg';
+          }
+        } catch (_) {}
+      }
     }
   }
 
@@ -671,8 +706,80 @@ function buildFlacWithUpdatedTags(fileBuf, updates) {
 }
 
 // ============================================================================
-// 3. FFMPEG FALLBACK FOR M4A / OGG / OPUS / WAV & UNIFIED READ/WRITE API
+// 3. OGG / OPUS PACKET PARSER & FFMPEG AUDIO TAG WRITER
 // ============================================================================
+
+/**
+ * Extract logical packets from an Ogg bitstream (used for OpusTags / Vorbis comments).
+ */
+function extractOggPackets(buf, maxPackets = 8) {
+  let offset = 0;
+  const streams = new Map();
+  const finishedPackets = [];
+
+  while (offset + 27 <= buf.length) {
+    if (buf.readUInt32BE(offset) !== 0x4f676753) { // 'OggS'
+      const next = buf.indexOf(Buffer.from('OggS'), offset + 1);
+      if (next === -1) break;
+      offset = next;
+      continue;
+    }
+
+    const serial = buf.readUInt32LE(offset + 14);
+    const segCount = buf[offset + 26];
+    const segTableOffset = offset + 27;
+    if (segTableOffset + segCount > buf.length) break;
+
+    let payloadLen = 0;
+    for (let i = 0; i < segCount; i++) {
+      payloadLen += buf[segTableOffset + i];
+    }
+    const dataOffset = segTableOffset + segCount;
+    if (dataOffset + payloadLen > buf.length) break;
+
+    let pageStream = streams.get(serial);
+    if (!pageStream) {
+      pageStream = { currentPacketChunks: [] };
+      streams.set(serial, pageStream);
+    }
+
+    let segOffset = dataOffset;
+    for (let i = 0; i < segCount; i++) {
+      const segLen = buf[segTableOffset + i];
+      pageStream.currentPacketChunks.push(buf.subarray(segOffset, segOffset + segLen));
+      segOffset += segLen;
+      if (segLen < 255) {
+        // End of logical packet
+        const fullPacket = Buffer.concat(pageStream.currentPacketChunks);
+        pageStream.currentPacketChunks = [];
+        finishedPackets.push(fullPacket);
+        if (finishedPackets.length >= maxPackets) return finishedPackets;
+      }
+    }
+
+    offset = dataOffset + payloadLen;
+  }
+
+  return finishedPackets;
+}
+
+/**
+ * Parse Vorbis comment metadata and cover art from an Ogg Opus (.opus) or Ogg Vorbis (.ogg) file.
+ */
+function parseOpusOrOggFile(buf) {
+  const packets = extractOggPackets(buf, 8);
+  for (const p of packets) {
+    // Opus comment header: "OpusTags" (8 bytes)
+    if (p.length >= 8 && p.subarray(0, 8).toString('ascii') === 'OpusTags') {
+      return parseVorbisCommentBlock(p.subarray(8));
+    }
+    // Vorbis comment header: 0x03 + "vorbis" (7 bytes)
+    if (p.length >= 7 && p[0] === 0x03 && p.subarray(1, 7).toString('ascii') === 'vorbis') {
+      return parseVorbisCommentBlock(p.subarray(7));
+    }
+  }
+  return null;
+}
 
 async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
   const ext = path.extname(filePath).toLowerCase();
@@ -688,27 +795,66 @@ async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
     }
 
     const args = ['-y', '-i', filePath];
-    if (tempCoverPath) {
-      args.push('-i', tempCoverPath, '-map', '0:a', '-map', '1:v', '-c', 'copy', '-disposition:v:0', 'attached_pic');
-    } else {
-      args.push('-map', '0', '-c', 'copy');
-    }
 
-    if (updates.title !== undefined && String(updates.title).trim()) {
-      args.push('-metadata', `title=${String(updates.title).trim()}`);
-    }
-    if (updates.artist !== undefined && String(updates.artist).trim()) {
-      args.push('-metadata', `artist=${String(updates.artist).trim()}`);
-    }
-    if (updates.album !== undefined && String(updates.album).trim()) {
-      args.push('-metadata', `album=${String(updates.album).trim()}`);
-    }
-    if (updates.year !== undefined && String(updates.year).trim()) {
-      args.push('-metadata', `date=${String(updates.year).trim()}`);
+    if (ext === '.opus' || ext === '.ogg') {
+      // In Ogg Opus & Vorbis containers, cover art MUST be embedded via METADATA_BLOCK_PICTURE
+      // (a base64-encoded FLAC picture block). Video stream muxing fails in Opus muxers.
+      // Audio is copied losslessly with -c:a copy.
+      args.push('-map', '0:a:0', '-c:a', 'copy');
+
+      if (updates.coverBuffer) {
+        const picBlock = encodeFlacPictureBlock(
+          updates.coverBuffer,
+          updates.coverMime || 'image/jpeg',
+          updates.coverWidth || 0,
+          updates.coverHeight || 0
+        );
+        const base64Pic = picBlock.toString('base64');
+        args.push('-metadata', `METADATA_BLOCK_PICTURE=${base64Pic}`);
+        args.push('-metadata:s:a:0', `METADATA_BLOCK_PICTURE=${base64Pic}`);
+      }
+
+      if (updates.title !== undefined && String(updates.title).trim()) {
+        const val = String(updates.title).trim();
+        args.push('-metadata', `title=${val}`, '-metadata:s:a:0', `title=${val}`);
+      }
+      if (updates.artist !== undefined && String(updates.artist).trim()) {
+        const val = String(updates.artist).trim();
+        args.push('-metadata', `artist=${val}`, '-metadata:s:a:0', `artist=${val}`);
+      }
+      if (updates.album !== undefined && String(updates.album).trim()) {
+        const val = String(updates.album).trim();
+        args.push('-metadata', `album=${val}`, '-metadata:s:a:0', `album=${val}`);
+      }
+      if (updates.year !== undefined && String(updates.year).trim()) {
+        const val = String(updates.year).trim();
+        args.push('-metadata', `date=${val}`, '-metadata:s:a:0', `date=${val}`);
+      }
+    } else {
+      // Other containers (.m4a, .mp4, .wav, etc.)
+      if (tempCoverPath) {
+        args.push('-i', tempCoverPath, '-map', '0:a', '-map', '1:v', '-c', 'copy', '-disposition:v:0', 'attached_pic');
+      } else {
+        args.push('-map', '0', '-c', 'copy');
+      }
+
+      if (updates.title !== undefined && String(updates.title).trim()) {
+        args.push('-metadata', `title=${String(updates.title).trim()}`);
+      }
+      if (updates.artist !== undefined && String(updates.artist).trim()) {
+        args.push('-metadata', `artist=${String(updates.artist).trim()}`);
+      }
+      if (updates.album !== undefined && String(updates.album).trim()) {
+        args.push('-metadata', `album=${String(updates.album).trim()}`);
+      }
+      if (updates.year !== undefined && String(updates.year).trim()) {
+        args.push('-metadata', `date=${String(updates.year).trim()}`);
+      }
     }
 
     args.push(tempOutPath);
-    await execFileAsync('ffmpeg', args, { timeout: 60000 });
+    const ffmpegBin = getFfmpegBinaryPath();
+    await execFileAsync(ffmpegBin, args, { timeout: 60000 });
     await fs.copyFile(tempOutPath, filePath);
   } finally {
     if (tempCoverPath && fsSync.existsSync(tempCoverPath)) {
@@ -773,6 +919,26 @@ export async function readAudioMetadata(filePath) {
             ? `data:${t.coverMime || 'image/jpeg'};base64,${t.coverBuffer.toString('base64')}`
             : null,
       };
+    }
+
+    if (ext === '.opus' || ext === '.ogg') {
+      const buf = await fs.readFile(filePath);
+      const parsed = parseOpusOrOggFile(buf);
+      if (parsed) {
+        const t = parsed.tags;
+        return {
+          title: t.title || fallback.title,
+          artist: t.artist || fallback.artist,
+          album: t.album || fallback.album,
+          year: t.year || fallback.year,
+          trackNumber: t.trackNumber || '',
+          hasCover: Boolean(t.coverBuffer && t.coverBuffer.length > 0),
+          coverDataUrl:
+            t.coverBuffer && t.coverBuffer.length > 0
+              ? `data:${t.coverMime || 'image/jpeg'};base64,${t.coverBuffer.toString('base64')}`
+              : null,
+        };
+      }
     }
   } catch (err) {
     console.warn(`[AudioTagger] Could not parse native tags for ${path.basename(filePath)}: ${err.message}`);

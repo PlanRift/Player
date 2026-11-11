@@ -822,6 +822,15 @@ async function resolveExistingLibraryTarget(rawRelPath, { expectDir = false, hin
   const candidates = [];
   const cleanRel = String(rawRelPath || '').normalize('NFC').trim();
 
+  if (!cleanRel || cleanRel === '.' || cleanRel === '/') {
+    if (expectDir) {
+      if (fsSync.existsSync(MUSIC_DIR) && canonicalizePath(MUSIC_DIR).startsWith(CANONICAL_STORAGE_ROOT)) {
+        return MUSIC_DIR;
+      }
+      return STORAGE_DIR;
+    }
+  }
+
   if (cleanRel) {
     // 1. Direct relative to STORAGE_DIR (e.g. "Music/Artist/Album/Track.mp3")
     try {
@@ -1059,11 +1068,27 @@ async function applyMetadataByScope({
 app.post(['/api/update-cover', '/api/files/update-cover'], stagingUpload.any(), async (req, res) => {
   const stagedFiles = Array.isArray(req.files) ? req.files : [];
   try {
-    const scope = String(req.body?.scope || 'single').toLowerCase();
+    const rawScope = String(req.body?.scope || req.body?.type || '').toLowerCase();
     const targetRelPath =
-      scope === 'album'
+      req.body?.targetPath ||
+      (rawScope === 'album' || rawScope === 'folder'
         ? req.body?.folderPath || req.body?.filePath || req.body?.path || ''
-        : req.body?.filePath || req.body?.folderPath || req.body?.path || '';
+        : req.body?.filePath || req.body?.folderPath || req.body?.path || '');
+
+    let scope = rawScope === 'album' || rawScope === 'folder' ? 'album' : (rawScope === 'single' || rawScope === 'file' ? 'single' : '');
+    if (!scope && targetRelPath) {
+      try {
+        const candidate = resolveSafePath(targetRelPath);
+        if (fsSync.existsSync(candidate) && fsSync.lstatSync(candidate).isDirectory()) {
+          scope = 'album';
+        } else {
+          scope = 'single';
+        }
+      } catch (_) {
+        scope = 'single';
+      }
+    }
+    if (!scope) scope = 'single';
 
     let filePaths = [];
     if (req.body?.filePaths) {
@@ -1209,11 +1234,27 @@ app.get(['/api/metadata/search', '/api/files/metadata/search'], async (req, res)
 app.post(['/api/metadata/apply', '/api/files/metadata/apply'], stagingUpload.any(), async (req, res) => {
   const stagedFiles = Array.isArray(req.files) ? req.files : [];
   try {
-    const scope = String(req.body?.scope || 'single').toLowerCase() === 'album' ? 'album' : 'single';
+    const rawScope = String(req.body?.scope || req.body?.type || '').toLowerCase();
     const targetRelPath =
-      scope === 'album'
+      req.body?.targetPath ||
+      (rawScope === 'album' || rawScope === 'folder'
         ? req.body?.folderPath || req.body?.filePath || req.body?.path || ''
-        : req.body?.filePath || req.body?.folderPath || req.body?.path || '';
+        : req.body?.filePath || req.body?.folderPath || req.body?.path || '');
+
+    let scope = rawScope === 'album' || rawScope === 'folder' ? 'album' : (rawScope === 'single' || rawScope === 'file' ? 'single' : '');
+    if (!scope && targetRelPath) {
+      try {
+        const candidate = resolveSafePath(targetRelPath);
+        if (fsSync.existsSync(candidate) && fsSync.lstatSync(candidate).isDirectory()) {
+          scope = 'album';
+        } else {
+          scope = 'single';
+        }
+      } catch (_) {
+        scope = 'single';
+      }
+    }
+    if (!scope) scope = 'single';
 
     let filePaths = [];
     if (req.body?.filePaths) {

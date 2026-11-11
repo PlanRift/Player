@@ -672,19 +672,6 @@
       });
     }
 
-    const editMetaBtn = document.createElement('button');
-    editMetaBtn.type = 'button';
-    editMetaBtn.title = 'Edit cover art & metadata';
-    editMetaBtn.setAttribute('aria-label', 'Edit cover art and metadata');
-    editMetaBtn.className =
-      'p-1.5 text-zinc-400 hover:text-emerald-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity';
-    editMetaBtn.innerHTML = '<i data-lucide="image-plus" class="w-3.5 h-3.5"></i>';
-    editMetaBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openMetadataEditorForSong(song, 'single');
-    });
-    right.appendChild(editMetaBtn);
-
     const menuBtn = document.createElement('button');
     menuBtn.type = 'button';
     menuBtn.title = 'Track options';
@@ -876,21 +863,6 @@
       cover.appendChild(hint);
     }
 
-    if (typeof opts.onEditCover === 'function') {
-      const editCoverBtn = document.createElement('button');
-      editCoverBtn.type = 'button';
-      editCoverBtn.setAttribute('aria-label', `Edit cover & tags for ${opts.title || ''}`);
-      editCoverBtn.title = 'Change cover art / edit tags';
-      editCoverBtn.className =
-        'absolute top-1.5 right-1.5 z-10 h-6 w-6 flex items-center justify-center bg-zinc-950/85 border border-zinc-700 hover:border-emerald-400 text-zinc-300 hover:text-emerald-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-200 cursor-pointer';
-      editCoverBtn.innerHTML = '<i data-lucide="image-plus" class="w-3.5 h-3.5"></i>';
-      editCoverBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        opts.onEditCover();
-      });
-      cover.appendChild(editCoverBtn);
-    }
-
     if (typeof opts.progressPercent === 'number') {
       const bar = document.createElement('div');
       bar.className = 'absolute left-0 right-0 bottom-0 h-1 bg-zinc-700';
@@ -931,7 +903,6 @@
       subtitle: album.artist || 'Unknown Artist',
       meta: `${album.year ? album.year + ' · ' : ''}${album.songCount ? album.songCount + ' trk' : 'Album'}`,
       onClick: () => openAlbumDetail(album, backRoute),
-      onEditCover: () => openMetadataEditorForAlbum(album),
       onPlay: withPlay
         ? async () => {
             try {
@@ -956,7 +927,6 @@
       progressPercent: extra.progressPercent,
       onClick: () => extra.onClick ? extra.onClick() : playOrToggle(song, queueContext),
       onPlay: () => (extra.onClick ? extra.onClick() : playOrToggle(song, queueContext)),
-      onEditCover: () => openMetadataEditorForSong(song, 'single'),
     });
   }
 
@@ -2785,7 +2755,13 @@
         };
       } else if (isAudio) {
         tr.querySelector('.file-item-btn').onclick = () => {
-          openMetadataEditor(item, 'single');
+          const targetRel = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
+          openMetadataEditor({
+            ...item,
+            relPath: targetRel,
+            type: 'file',
+            isDirectory: false,
+          }, 'single');
         };
       }
 
@@ -2793,7 +2769,13 @@
       if (metaBtn) {
         metaBtn.onclick = (e) => {
           e.stopPropagation();
-          openMetadataEditor(item, item.isDirectory ? 'album' : 'single');
+          const targetRel = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
+          openMetadataEditor({
+            ...item,
+            relPath: targetRel,
+            type: item.isDirectory ? 'folder' : 'file',
+            isDirectory: Boolean(item.isDirectory),
+          }, item.isDirectory ? 'album' : 'single');
         };
       }
 
@@ -3511,32 +3493,26 @@
 
   function updateMetaScopeUI() {
     const isAlbum = metaEditorState.scope === 'album';
-    const singleBtn = $('meta-scope-single-btn');
-    const albumBtn = $('meta-scope-album-btn');
+    const badge = $('meta-scope-badge');
     const targetLabel = $('meta-editor-target-label');
     const scopeHint = $('meta-scope-hint');
     const saveLabel = $('meta-save-all-label');
     const overrideWrap = $('meta-override-album-titles-wrap');
     const titleInput = $('meta-input-title');
 
-    if (singleBtn) {
-      singleBtn.disabled = !metaEditorState.filePath && !metaEditorState.hints?.title;
-      singleBtn.className = `px-2.5 py-1 transition-colors ${
-        !isAlbum
-          ? 'bg-emerald-400 text-zinc-950 font-semibold'
-          : 'text-zinc-400 hover:text-zinc-100 disabled:opacity-40 disabled:cursor-not-allowed'
-      }`;
-    }
-    if (albumBtn) {
-      albumBtn.className = `px-2.5 py-1 transition-colors ${
-        isAlbum ? 'bg-emerald-400 text-zinc-950 font-semibold' : 'text-zinc-400 hover:text-zinc-100'
+    if (badge) {
+      badge.textContent = isAlbum ? 'ALBUM FOLDER' : 'SINGLE TRACK';
+      badge.className = `px-2 py-0.5 text-[10px] font-mono font-semibold shrink-0 ${
+        isAlbum
+          ? 'bg-amber-400/15 border border-amber-400/40 text-amber-300'
+          : 'bg-emerald-400/15 border border-emerald-400/40 text-emerald-300'
       }`;
     }
 
     if (targetLabel) {
       const displayTarget = isAlbum
-        ? metaEditorState.folderPath || metaEditorState.hints?.album || '(album folder)'
-        : metaEditorState.filePath || metaEditorState.hints?.title || '-';
+        ? metaEditorState.folderPath || metaEditorState.targetPath || metaEditorState.hints?.album || '(album folder)'
+        : metaEditorState.filePath || metaEditorState.targetPath || metaEditorState.hints?.title || '-';
       targetLabel.textContent = `${isAlbum ? 'Album Folder' : 'Single Track'}: ${
         displayTarget.startsWith('(') ? displayTarget : `/${displayTarget}`
       }`;
@@ -3546,7 +3522,7 @@
       const trackCount = metaEditorState.filePaths?.length || 0;
       scopeHint.textContent = isAlbum
         ? trackCount > 0
-          ? `Batch-updating all ${trackCount} track(s) in album`
+          ? `Batch-updating all ${trackCount} track(s) in album folder`
           : 'Batch-updating all audio tracks in folder'
         : 'Editing single audio file';
     }
@@ -3568,10 +3544,6 @@
   }
 
   function setMetaEditorScope(newScope) {
-    if (newScope === 'single' && !metaEditorState.filePath && !metaEditorState.hints?.title) {
-      showToast('Select a specific audio track to edit in Single Track mode', 'error');
-      return;
-    }
     metaEditorState.scope = newScope === 'album' ? 'album' : 'single';
     updateMetaScopeUI();
   }
@@ -3583,7 +3555,11 @@
     const relPath = normalizeSubsonicPath(
       item?.relPath ?? (filesState.currentPath ? `${filesState.currentPath}/${item?.name || ''}` : item?.name || '')
     );
-    const isDir = Boolean(item?.isDirectory);
+    const isDir = Boolean(
+      item?.isDirectory ||
+      item?.type === 'folder' ||
+      initialScope === 'album'
+    );
     const hints = item?.hints || {};
 
     metaEditorState.hints = {
@@ -3597,16 +3573,18 @@
       ? item.filePaths.map(normalizeSubsonicPath).filter(Boolean)
       : [];
 
+    metaEditorState.scope = isDir ? 'album' : 'single';
+    metaEditorState.targetType = isDir ? 'folder' : 'file';
+    metaEditorState.targetPath = relPath;
+
     if (isDir) {
       metaEditorState.filePath = normalizeSubsonicPath(item?.firstFilePath || metaEditorState.filePaths[0] || '');
       metaEditorState.folderPath = relPath;
-      metaEditorState.scope = 'album';
     } else {
       metaEditorState.filePath = relPath;
       const parts = relPath.split('/').filter(Boolean);
       parts.pop();
       metaEditorState.folderPath = normalizeSubsonicPath(item?.folderPath ?? parts.join('/'));
-      metaEditorState.scope = initialScope === 'album' ? 'album' : 'single';
     }
 
     if (metaEditorState.previewObjectUrl) {
@@ -4140,6 +4118,13 @@
     const base = getFileBridgeBase();
     const formData = new FormData();
     formData.append('scope', metaEditorState.scope);
+    formData.append('type', metaEditorState.scope === 'album' ? 'folder' : 'file');
+    formData.append(
+      'targetPath',
+      metaEditorState.scope === 'album'
+        ? (metaEditorState.folderPath || metaEditorState.filePath || '')
+        : (metaEditorState.filePath || metaEditorState.folderPath || '')
+    );
     formData.append('filePath', metaEditorState.filePath || '');
     formData.append('folderPath', metaEditorState.folderPath || '');
     if (Array.isArray(metaEditorState.filePaths) && metaEditorState.filePaths.length > 0) {
@@ -4210,6 +4195,13 @@
     const base = getFileBridgeBase();
     const formData = new FormData();
     formData.append('scope', metaEditorState.scope);
+    formData.append('type', metaEditorState.scope === 'album' ? 'folder' : 'file');
+    formData.append(
+      'targetPath',
+      metaEditorState.scope === 'album'
+        ? (metaEditorState.folderPath || metaEditorState.filePath || '')
+        : (metaEditorState.filePath || metaEditorState.folderPath || '')
+    );
     formData.append('filePath', metaEditorState.filePath || '');
     formData.append('folderPath', metaEditorState.folderPath || '');
     if (Array.isArray(metaEditorState.filePaths) && metaEditorState.filePaths.length > 0) {
@@ -4298,6 +4290,7 @@
         {
           name: folderName,
           isDirectory: true,
+          type: 'folder',
           relPath: filesState.currentPath || '',
         },
         'album'
@@ -4314,8 +4307,6 @@
       });
     }
 
-    on('meta-scope-single-btn', 'click', () => setMetaEditorScope('single'));
-    on('meta-scope-album-btn', 'click', () => setMetaEditorScope('album'));
     on('meta-override-album-titles', 'change', () => updateMetaScopeUI());
 
     // Local cover art file picker (.jpg, .png, .webp)
@@ -5636,6 +5627,12 @@
       $('player-artist-btn').textContent = 'Select any song or album to begin playback';
       $('player-album-btn')?.classList.add('hidden');
       $('player-album-sep')?.classList.add('hidden');
+      const bitrateEl = $('player-bitrate-indicator');
+      if (bitrateEl) {
+        bitrateEl.textContent = '--';
+        bitrateEl.title = 'No track selected';
+        bitrateEl.classList.add('opacity-40');
+      }
       $('mobile-mini-title').textContent = 'No track selected';
       $('mobile-mini-artist').textContent = 'Select a track to play';
       lastPlayerTrackId = null;
@@ -5658,6 +5655,23 @@
         albumBtn.textContent = song.album || '';
         albumBtn.classList.toggle('hidden', !hasAlbum);
         albumSep?.classList.toggle('hidden', !hasAlbum);
+      }
+      const bitrateEl = $('player-bitrate-indicator');
+      if (bitrateEl) {
+        const br = song.bitRate || song.bitrate;
+        if (br) {
+          bitrateEl.textContent = String(br);
+          bitrateEl.title = `Bitrate: ${br} kbps`;
+          bitrateEl.classList.remove('opacity-40');
+        } else if (song.suffix) {
+          bitrateEl.textContent = song.suffix.toUpperCase();
+          bitrateEl.title = `Format: ${song.suffix.toUpperCase()}`;
+          bitrateEl.classList.remove('opacity-40');
+        } else {
+          bitrateEl.textContent = '320';
+          bitrateEl.title = 'Bitrate: 320 kbps';
+          bitrateEl.classList.remove('opacity-40');
+        }
       }
       $('mobile-mini-title').innerHTML = titleHtml(song.title || 'Untitled Track', song.artist);
       $('mobile-mini-artist').textContent = song.artist || 'Unknown Artist';
@@ -5931,12 +5945,6 @@
     on('album-play-btn', 'click', () => playSongs(state.currentAlbum?.song || [], { shuffle: false }));
     on('album-shuffle-btn', 'click', () => playSongs(state.currentAlbum?.song || [], { shuffle: true }));
     on('album-star-btn', 'click', () => toggleStarAlbum(state.currentAlbum));
-    on('album-edit-meta-btn', 'click', () => openMetadataEditorForAlbum(state.currentAlbum));
-    on('album-cover-edit-btn', 'click', (e) => {
-      e.stopPropagation();
-      openMetadataEditorForAlbum(state.currentAlbum);
-    });
-    on('album-detail-cover-wrap', 'click', () => openMetadataEditorForAlbum(state.currentAlbum));
     on('album-more-btn', 'click', (e) => {
       e.stopPropagation();
       $('album-more-menu').classList.toggle('hidden');
@@ -5945,10 +5953,6 @@
     on('album-menu-play-next', 'click', () => enqueueNext(state.currentAlbum?.song || []));
     on('album-menu-add-queue', 'click', () => enqueueEnd(state.currentAlbum?.song || []));
     on('album-menu-add-playlist', 'click', () => openAddToPlaylistModal(state.currentAlbum?.song || []));
-    on('album-menu-edit-meta', 'click', () => {
-      $('album-more-menu')?.classList.add('hidden');
-      openMetadataEditorForAlbum(state.currentAlbum);
-    });
 
     // Songs + favourites
     on('songs-play-all-btn', 'click', async () => {
@@ -6161,12 +6165,72 @@
       if (v > 0) state.lastNonZeroVolume = v;
       audioEngine.setVolume(v);
     });
-    on('btn-mute', 'click', () => {
+
+    const toggleMute = () => {
       if (audioEngine.volume > 0) {
         state.lastNonZeroVolume = audioEngine.volume;
         audioEngine.setVolume(0);
       } else {
         audioEngine.setVolume(state.lastNonZeroVolume || 0.85);
+      }
+    };
+    on('btn-mute', 'click', toggleMute);
+
+    // Speaker icon: click opens sound bar; clicking while open mutes/unmutes
+    on('btn-volume', 'click', (e) => {
+      e.stopPropagation();
+      const toggle = $('volume-toggle');
+      if (!toggle) return;
+      if (!toggle.checked) {
+        toggle.checked = true;
+      } else {
+        toggleMute();
+      }
+    });
+
+    // Auto-hide sound bar when mouse stops hovering the player bar
+    let isVolumeDragging = false;
+    let pendingCloseVolume = false;
+
+    const volumeSlider = $('volume-slider');
+    if (volumeSlider) {
+      volumeSlider.addEventListener('pointerdown', () => {
+        isVolumeDragging = true;
+      });
+    }
+
+    window.addEventListener('pointerup', () => {
+      if (isVolumeDragging) {
+        isVolumeDragging = false;
+        if (pendingCloseVolume) {
+          pendingCloseVolume = false;
+          const toggle = $('volume-toggle');
+          if (toggle) toggle.checked = false;
+        }
+      }
+    });
+
+    const playerBarPanel = $('player-bar-panel');
+    if (playerBarPanel) {
+      playerBarPanel.addEventListener('mouseleave', () => {
+        const toggle = $('volume-toggle');
+        if (!toggle || !toggle.checked) return;
+        if (isVolumeDragging) {
+          pendingCloseVolume = true;
+          return;
+        }
+        toggle.checked = false;
+      });
+      playerBarPanel.addEventListener('mouseenter', () => {
+        pendingCloseVolume = false;
+      });
+    }
+
+    document.addEventListener('pointerdown', (e) => {
+      const panel = $('player-bar-panel');
+      const toggle = $('volume-toggle');
+      if (panel && toggle && toggle.checked && !panel.contains(e.target)) {
+        toggle.checked = false;
       }
     });
 
@@ -6276,11 +6340,6 @@
       const s = state.ctxSong;
       closeTrackContextMenu();
       if (s) await toggleStarTrack(s);
-    });
-    on('ctx-edit-metadata', 'click', () => {
-      const s = state.ctxSong;
-      closeTrackContextMenu();
-      if (s) openMetadataEditorForSong(s, 'single');
     });
 
     // Initialize global Metadata & Cover Art Editor modal events
@@ -6489,6 +6548,11 @@
       }
 
       if (e.key === 'Escape') {
+        const volToggle = $('volume-toggle');
+        if (volToggle && volToggle.checked) {
+          volToggle.checked = false;
+          return;
+        }
         if (!$('track-context-menu').classList.contains('hidden')) return closeTrackContextMenu();
         if (metaEditorState.active || !$('files-metadata-modal')?.classList.contains('hidden')) return closeMetadataEditor();
         for (const id of ['add-to-playlist-modal', 'save-queue-playlist-modal', 'create-playlist-modal']) {

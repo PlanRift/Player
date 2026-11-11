@@ -301,15 +301,31 @@ input[type="range"].studio-range-thin:hover::-webkit-slider-thumb,
 input[type="range"].studio-range::-moz-range-track,
 input[type="range"].studio-range-thin::-moz-range-track {
   width: 100%;
-  height: 5px;
+  height: 2px;
   background: #383838;
-  border: 1px solid #222222;
+  transition: transform 400ms cubic-bezier(0.058, 0.621, 0.374, 0.997);
+  transform-origin: bottom center;
+}
+
+input[type="range"].studio-range::-moz-range-progress,
+.group:hover input[type="range"].studio-range-thin::-moz-range-progress {
+  transform: scaleY(5);
+  background: var(--primary);
+}
+
+input[type="range"].studio-range::-moz-range-track,
+.group:hover input[type="range"].studio-range-thin::-moz-range-track {
+  width: 100%;
+  transform: scaleY(5);
+  background: #383838;
 }
 
 input[type="range"].studio-range::-moz-range-progress,
 input[type="range"].studio-range-thin::-moz-range-progress {
-  height: 5px;
+  height: 2px;
   background: var(--primary);
+  transition: transform 400ms cubic-bezier(0.058, 0.621, 0.374, 0.997);
+  transform-origin: bottom center;
 }
 
 /* Firefox Thumb */
@@ -319,6 +335,7 @@ input[type="range"].studio-range::-moz-range-thumb {
   background: var(--foreground);
   border: 2px solid var(--primary);
   border-radius: 0;
+  opacity: 0;
   transition: transform 120ms ease;
 }
 
@@ -327,7 +344,34 @@ input[type="range"].studio-range-thin::-moz-range-thumb {
   height: 10px;
   background: var(--foreground);
   border: 1.5px solid var(--primary);
+  opacity: 0;
   border-radius: 0;
+}
+
+#time-current,
+#time-total {
+  top: 0rem;
+  opacity: 0;
+  transition: top 300ms cubic-bezier(0.058, 0.621, 0.374, 0.997), opacity 300ms cubic-bezier(0.058, 0.621, 0.374, 0.997);
+}
+
+.group:hover #time-current,
+.group:hover #time-total {
+top:-1rem;
+opacity: 1;
+}
+/* When checkbox is checked, hide the left icons */
+.volume-group:has(#volume-toggle:checked) .secondary-icons {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(4px);
+}
+
+/* When checkbox is checked, slide in and enable the volume slider */
+.volume-group:has(#volume-toggle:checked) .volume-slider-box {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) translateX(0);
 }
 
 /* Sidebar width & collapse behavior */
