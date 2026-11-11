@@ -945,6 +945,31 @@ async function resolveExistingLibraryTarget(rawRelPath, { expectDir = false, hin
 }
 
 /**
+ * Recursively collect all supported audio file paths within a directory up to maxDepth.
+ */
+async function collectAudioFilesRecursively(dirPath, currentDepth = 0, maxDepth = 4) {
+  const results = [];
+  if (currentDepth > maxDepth) return results;
+  let entries;
+  try {
+    entries = await fs.readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return results;
+  }
+  for (const e of entries) {
+    if (e.name.startsWith('.') || IGNORED_SYSTEM_NAMES.has(e.name.toLowerCase())) continue;
+    const full = path.join(dirPath, e.name);
+    if (e.isFile() && isAudioFileName(e.name)) {
+      results.push(full);
+    } else if (e.isDirectory() && !e.isSymbolicLink()) {
+      const sub = await collectAudioFilesRecursively(full, currentDepth + 1, maxDepth);
+      results.push(...sub);
+    }
+  }
+  return results;
+}
+
+/**
  * Helper to apply metadata/cover updates to either a single audio file or every audio file in an album folder.
  */
 async function applyMetadataByScope({
@@ -1003,7 +1028,7 @@ async function applyMetadataByScope({
     }
   }
 
-  // Also resolve the album folder itself and include all audio files inside it
+  // Also resolve the album folder itself and include all audio files inside it (including subfolders like CD1/CD2)
   let targetFolder = null;
   try {
     targetFolder = await resolveExistingLibraryTarget(targetRelPath, {
@@ -1019,21 +1044,14 @@ async function applyMetadataByScope({
   }
 
   if (targetFolder && fsSync.existsSync(targetFolder) && fsSync.lstatSync(targetFolder).isDirectory()) {
-    const entries = await fs.readdir(targetFolder, { withFileTypes: true });
-    for (const e of entries) {
-      if (
-        e.isFile() &&
-        !e.name.startsWith('._') &&
-        !IGNORED_SYSTEM_NAMES.has(e.name.toLowerCase()) &&
-        isAudioFileName(e.name)
-      ) {
-        targetTrackFiles.add(path.join(targetFolder, e.name));
-      }
+    const collected = await collectAudioFilesRecursively(targetFolder);
+    for (const f of collected) {
+      targetTrackFiles.add(f);
     }
   }
 
   if (targetTrackFiles.size === 0) {
-    throw new Error('No supported audio files found for the selected album');
+    throw new Error('No supported audio files found for the selected album folder');
   }
 
   const updatedFiles = [];
@@ -1053,6 +1071,10 @@ async function applyMetadataByScope({
     } catch (trackErr) {
       errors.push({ file: path.basename(safeTrackPath), error: trackErr.message });
     }
+  }
+
+  if (updatedFiles.length === 0 && errors.length > 0) {
+    throw new Error(errors[0].error || 'Failed to update audio files in folder');
   }
 
   return {
@@ -1151,10 +1173,7 @@ app.get(['/api/metadata/read', '/api/files/metadata/read'], async (req, res) => 
 
     const stat = await fs.lstat(target);
     if (stat.isDirectory()) {
-      const entries = await fs.readdir(target, { withFileTypes: true });
-      const audioFiles = entries
-        .filter((e) => e.isFile() && !e.name.startsWith('._') && isAudioFileName(e.name))
-        .map((e) => e.name)
+      const audioFiles = (await collectAudioFilesRecursively(target))
         .sort((a, b) => a.localeCompare(b));
 
       let sampleMeta = {
@@ -1167,8 +1186,7 @@ app.get(['/api/metadata/read', '/api/files/metadata/read'], async (req, res) => 
       };
 
       if (audioFiles.length > 0) {
-        const firstAudio = path.join(target, audioFiles[0]);
-        sampleMeta = await readAudioMetadata(firstAudio);
+        sampleMeta = await readAudioMetadata(audioFiles[0]);
       }
 
       const relFolder = path.relative(STORAGE_DIR, target).replace(/\\/g, '/');
@@ -1177,7 +1195,7 @@ app.get(['/api/metadata/read', '/api/files/metadata/read'], async (req, res) => 
         path: relFolder,
         folderPath: relFolder,
         audioTrackCount: audioFiles.length,
-        audioFiles,
+        audioFiles: audioFiles.map((f) => path.relative(target, f).replace(/\\/g, '/')),
         metadata: {
           title: '',
           artist: sampleMeta.artist || '',
@@ -1209,6 +1227,7 @@ app.get(['/api/metadata/read', '/api/files/metadata/read'], async (req, res) => 
 app.get(['/api/metadata/search', '/api/files/metadata/search'], async (req, res) => {
   try {
     const q = String(req.query.q || req.query.query || '').trim();
+    const scope = String(req.query.scope || '').toLowerCase();
     if (!q) {
       return res.status(400).json({ error: 'Missing search query parameter (?q=...)' });
     }
@@ -1219,6 +1238,7 @@ app.get(['/api/metadata/search', '/api/files/metadata/search'], async (req, res)
       req.headers['x-spotify-client-secret'] || req.query.spotifyClientSecret || process.env.SPOTIFY_CLIENT_SECRET || '';
 
     const data = await searchMetadataOnline(q, {
+      scope,
       spotifyClientId,
       spotifyClientSecret,
     });

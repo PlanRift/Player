@@ -2652,6 +2652,40 @@
 
     const foldersCount = filesState.items.filter((i) => i.isDirectory).length;
     const filesCount = filesState.items.length - foldersCount;
+    const audioItems = filesState.items.filter((i) => !i.isDirectory && isAudioFile(i.name));
+
+    const folderAlbumBar = $('files-folder-album-bar');
+    const folderAlbumName = $('files-folder-album-name');
+    const folderAlbumSub = $('files-folder-album-sub');
+    const folderAlbumTagBtn = $('files-folder-album-tag-btn');
+
+    if (folderAlbumBar) {
+      if (audioItems.length > 0 && filesState.currentPath) {
+        const currentFolderName = filesState.currentPath.split('/').filter(Boolean).pop() || 'Album Folder';
+        if (folderAlbumName) folderAlbumName.textContent = currentFolderName;
+        if (folderAlbumSub) {
+          folderAlbumSub.textContent = `${audioItems.length} audio track(s) in this folder · Sync album tags & high-res cover art across all songs`;
+        }
+        if (folderAlbumTagBtn) {
+          folderAlbumTagBtn.onclick = () => {
+            openMetadataEditor(
+              {
+                name: currentFolderName,
+                isDirectory: true,
+                type: 'folder',
+                relPath: filesState.currentPath,
+                filePaths: audioItems.map((a) => a.relPath || `${filesState.currentPath}/${a.name}`),
+              },
+              'album'
+            );
+          };
+        }
+        folderAlbumBar.classList.remove('hidden');
+      } else {
+        folderAlbumBar.classList.add('hidden');
+      }
+    }
+
     if (countLabel) {
       countLabel.textContent = filesState.searchResults
         ? `${filtered.length} result${filtered.length === 1 ? '' : 's'} for "${filesState.filterQuery}" (recursive, from /${filesState.currentPath || 'root'})`
@@ -3450,6 +3484,7 @@
     onlineResults: [],
     sourceFilter: 'all',
     selectedResultId: null,
+    searchMode: 'album',
     busy: false,
     initialized: false,
   };
@@ -3491,6 +3526,41 @@
     }
   }
 
+  function setMetaSearchMode(mode) {
+    const isAlbumSearch = mode === 'album';
+    metaEditorState.searchMode = isAlbumSearch ? 'album' : 'track';
+
+    const albumBtn = $('meta-search-type-album-btn');
+    const trackBtn = $('meta-search-type-track-btn');
+    const hintEl = $('meta-search-type-hint');
+    const searchInput = $('meta-online-search-input');
+
+    if (albumBtn) {
+      albumBtn.className = `px-3 py-1 inline-flex items-center gap-1.5 transition-colors ${
+        isAlbumSearch
+          ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40 font-semibold'
+          : 'text-zinc-400 hover:text-zinc-200 border-transparent'
+      }`;
+    }
+    if (trackBtn) {
+      trackBtn.className = `px-3 py-1 inline-flex items-center gap-1.5 transition-colors ${
+        !isAlbumSearch
+          ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 font-semibold'
+          : 'text-zinc-400 hover:text-zinc-200 border-transparent'
+      }`;
+    }
+    if (hintEl) {
+      hintEl.textContent = isAlbumSearch
+        ? 'Queries albums with high-res covers from Deezer, iTunes JP, Spotify JP & MusicBrainz'
+        : 'Queries individual song tracks from iTunes JP, Spotify JP, MusicBrainz & Deezer';
+    }
+    if (searchInput) {
+      searchInput.placeholder = isAlbumSearch
+        ? 'Search Japanese or global albums (e.g. Alea jacta est, Ave Mujica)...'
+        : 'Search song title or artist (e.g. 審美眼, Ave Mujica)...';
+    }
+  }
+
   function updateMetaScopeUI() {
     const isAlbum = metaEditorState.scope === 'album';
     const badge = $('meta-scope-badge');
@@ -3499,6 +3569,8 @@
     const saveLabel = $('meta-save-all-label');
     const overrideWrap = $('meta-override-album-titles-wrap');
     const titleInput = $('meta-input-title');
+    const singleTabBtn = $('meta-scope-btn-single');
+    const albumTabBtn = $('meta-scope-btn-album');
 
     if (badge) {
       badge.textContent = isAlbum ? 'ALBUM FOLDER' : 'SINGLE TRACK';
@@ -3506,6 +3578,21 @@
         isAlbum
           ? 'bg-amber-400/15 border border-amber-400/40 text-amber-300'
           : 'bg-emerald-400/15 border border-emerald-400/40 text-emerald-300'
+      }`;
+    }
+
+    if (singleTabBtn) {
+      singleTabBtn.className = `px-2.5 py-1 inline-flex items-center gap-1.5 transition-colors ${
+        !isAlbum
+          ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 font-semibold'
+          : 'text-zinc-400 hover:text-zinc-200 border-transparent'
+      }`;
+    }
+    if (albumTabBtn) {
+      albumTabBtn.className = `px-2.5 py-1 inline-flex items-center gap-1.5 transition-colors ${
+        isAlbum
+          ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40 font-semibold'
+          : 'text-zinc-400 hover:text-zinc-200 border-transparent'
       }`;
     }
 
@@ -3523,12 +3610,17 @@
       scopeHint.textContent = isAlbum
         ? trackCount > 0
           ? `Batch-updating all ${trackCount} track(s) in album folder`
-          : 'Batch-updating all audio tracks in folder'
+          : 'Batch-updating all audio tracks in album folder'
         : 'Editing single audio file';
     }
 
     if (saveLabel) {
-      saveLabel.textContent = isAlbum ? 'SAVE TO ALBUM FOLDER' : 'SAVE TO TRACK';
+      const trackCount = metaEditorState.filePaths?.length || 0;
+      saveLabel.textContent = isAlbum
+        ? trackCount > 0
+          ? `SAVE TO ALBUM FOLDER (${trackCount} TRACKS)`
+          : 'SAVE TO ALBUM FOLDER'
+        : 'SAVE TO TRACK';
     }
 
     if (overrideWrap) {
@@ -3544,7 +3636,29 @@
   }
 
   function setMetaEditorScope(newScope) {
-    metaEditorState.scope = newScope === 'album' ? 'album' : 'single';
+    const isAlbum = newScope === 'album';
+    metaEditorState.scope = isAlbum ? 'album' : 'single';
+    metaEditorState.targetType = isAlbum ? 'folder' : 'file';
+
+    if (isAlbum) {
+      if (!metaEditorState.folderPath && metaEditorState.filePath) {
+        const parts = metaEditorState.filePath.split('/').filter(Boolean);
+        parts.pop();
+        metaEditorState.folderPath = parts.join('/');
+      }
+      metaEditorState.targetPath = metaEditorState.folderPath || metaEditorState.targetPath;
+      setMetaSearchMode('album');
+
+      // If switching to album and we have an album or artist, suggest it in search
+      const curAlbum = $('meta-input-album')?.value?.trim() || '';
+      const curArtist = $('meta-input-artist')?.value?.trim() || '';
+      if ((curAlbum || curArtist) && $('meta-online-search-input')) {
+        $('meta-online-search-input').value = [curArtist, curAlbum].filter(Boolean).join(' ');
+      }
+    } else {
+      metaEditorState.targetPath = metaEditorState.filePath || metaEditorState.targetPath;
+    }
+
     updateMetaScopeUI();
   }
 
@@ -3576,6 +3690,7 @@
     metaEditorState.scope = isDir ? 'album' : 'single';
     metaEditorState.targetType = isDir ? 'folder' : 'file';
     metaEditorState.targetPath = relPath;
+    setMetaSearchMode('album');
 
     if (isDir) {
       metaEditorState.filePath = normalizeSubsonicPath(item?.firstFilePath || metaEditorState.filePaths[0] || '');
@@ -3682,7 +3797,7 @@
 
       const smartQueryParts = [
         meta.artist || initialArtist,
-        metaEditorState.scope === 'album'
+        metaEditorState.searchMode === 'album' || metaEditorState.scope === 'album'
           ? meta.album || initialAlbum
           : meta.title || initialTitle || meta.album || initialAlbum,
       ]
@@ -3813,26 +3928,69 @@
    * Direct browser-side fallback search (iTunes JP + MusicBrainz) used when the remote
    * File Bridge has not yet been updated/restarted with `/api/metadata/search` (HTTP 404).
    */
-  async function searchOnlineMetadataBrowserFallback(query) {
+  async function searchOnlineMetadataBrowserFallback(query, options = {}) {
+    const isAlbum = String(options.scope || metaEditorState.searchMode || metaEditorState.scope || '').toLowerCase() === 'album';
+
     const itunesTask = (async () => {
       try {
-        const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&country=jp&media=music&entity=song&limit=12`;
-        const res = await fetch(url);
+        const entity = isAlbum ? 'album' : 'song';
+        const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&country=jp&media=music&entity=${entity}&limit=12`;
+        let res = await fetch(url);
         if (!res.ok) return [];
-        const data = await res.json();
-        return (data.results || []).map((item) => {
+        let data = await res.json();
+        let results = data.results || [];
+        if (isAlbum && results.length === 0) {
+          const fallbackUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&country=jp&media=music&entity=song&limit=15`;
+          res = await fetch(fallbackUrl);
+          if (res.ok) {
+            const fbData = await res.json();
+            results = fbData.results || [];
+          }
+        }
+
+        if (isAlbum) {
+          const seen = new Set();
+          const albums = [];
+          for (const item of results) {
+            const colId = item.collectionId || item.collectionName;
+            if (!colId || seen.has(colId)) continue;
+            seen.add(colId);
+
+            const thumb = item.artworkUrl100 || item.artworkUrl60 || '';
+            const highRes = thumb ? thumb.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/1000x1000bb.$1') : '';
+            const albTitle = item.collectionName || item.trackName || 'Untitled Album';
+            albums.push({
+              source: 'iTunes JP',
+              sourceId: `itunes-album-${colId}`,
+              type: 'album',
+              title: albTitle,
+              artist: item.artistName || '',
+              album: albTitle,
+              year: item.releaseDate ? String(item.releaseDate).slice(0, 4) : '',
+              trackCount: item.trackCount || 0,
+              coverUrl: highRes || thumb,
+              thumbnailUrl: thumb ? thumb.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/300x300bb.$1') : '',
+              resolution: highRes ? '1000×1000' : '100×100',
+            });
+          }
+          return albums;
+        }
+
+        return results.map((item) => {
           const thumb = item.artworkUrl100 || item.artworkUrl60 || '';
           const highRes = thumb ? thumb.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/1000x1000bb.$1') : '';
           return {
             source: 'iTunes JP',
             sourceId: `itunes-${item.trackId || item.collectionId || Math.random()}`,
+            type: 'track',
             title: item.trackName || item.collectionName || '',
             artist: item.artistName || '',
             album: item.collectionName || '',
             year: item.releaseDate ? String(item.releaseDate).slice(0, 4) : '',
+            trackCount: item.trackCount || 0,
             coverUrl: highRes || thumb,
             thumbnailUrl: thumb,
-            resolution: highRes ? '1000x1000' : '100x100',
+            resolution: highRes ? '1000×1000' : '100×100',
           };
         });
       } catch (_) {
@@ -3842,10 +4000,46 @@
 
     const mbTask = (async () => {
       try {
-        const url = `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(query)}&fmt=json&limit=8`;
-        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        const cleanMbQuery = String(query || '').replace(/[+\-!(){}[\]^"~*?:\\\/]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!cleanMbQuery) return [];
+
+        const endpoint = isAlbum
+          ? `https://musicbrainz.org/ws/2/release/?query=${encodeURIComponent(cleanMbQuery)}&fmt=json&limit=12`
+          : `https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(cleanMbQuery)}&fmt=json&limit=8`;
+        const res = await fetch(endpoint, { headers: { Accept: 'application/json' } });
         if (!res.ok) return [];
         const data = await res.json();
+        if (isAlbum) {
+          const seen = new Set();
+          const albums = [];
+          for (const rel of (data.releases || [])) {
+            const releaseId = rel.id || '';
+            const artist = (rel['artist-credit'] || [])
+              .map((c) => c.name || c.artist?.name || '')
+              .filter(Boolean)
+              .join(', ');
+            const title = rel.title || '';
+            const dedupeKey = `${title.toLowerCase()}|${artist.toLowerCase()}`;
+            if (seen.has(dedupeKey)) continue;
+            seen.add(dedupeKey);
+
+            const dateStr = rel.date || '';
+            albums.push({
+              source: 'MusicBrainz',
+              sourceId: `mb-rel-${rel.id}`,
+              type: 'album',
+              title,
+              artist,
+              album: title,
+              year: dateStr ? String(dateStr).slice(0, 4) : '',
+              trackCount: rel['track-count'] || 0,
+              coverUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-1200` : '',
+              thumbnailUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-250` : '',
+              resolution: releaseId ? '1200×1200' : '',
+            });
+          }
+          return albums;
+        }
         return (data.recordings || []).map((rec) => {
           const artistCredit = Array.isArray(rec['artist-credit'])
             ? rec['artist-credit'].map((c) => c.name || c.artist?.name || '').join('')
@@ -3856,13 +4050,14 @@
           return {
             source: 'MusicBrainz',
             sourceId: `mb-${rec.id}`,
+            type: 'track',
             title: rec.title || '',
             artist: artistCredit,
             album: firstRelease?.title || '',
             year: dateStr ? String(dateStr).slice(0, 4) : '',
             coverUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-1200` : '',
             thumbnailUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-250` : '',
-            resolution: releaseId ? '1200x1200' : '',
+            resolution: releaseId ? '1200×1200' : '',
           };
         });
       } catch (_) {
@@ -3885,26 +4080,31 @@
     const listEl = $('meta-online-results-list');
     const summaryEl = $('meta-search-summary');
     const searchBtn = $('meta-online-search-btn');
+    const scope = metaEditorState.searchMode || metaEditorState.scope || 'single';
 
     if (searchBtn) searchBtn.disabled = true;
-    setMetaEditorStatus(`Searching iTunes JP, Spotify JP, MusicBrainz, and Deezer for "${query}"...`);
+    setMetaEditorStatus(
+      scope === 'album'
+        ? `Searching Deezer, iTunes JP, Spotify JP & MusicBrainz for album "${query}"...`
+        : `Searching Deezer, iTunes JP, Spotify JP & MusicBrainz for "${query}"...`
+    );
     if (listEl) {
       listEl.innerHTML = `
         <div class="p-8 flex flex-col items-center justify-center gap-2 text-xs font-mono text-zinc-400">
           <i data-lucide="loader-2" class="w-5 h-5 text-emerald-400 animate-spin"></i>
-          <span>Querying iTunes JP (&amp;country=jp), Spotify JP (&amp;market=JP), MusicBrainz &amp; Deezer...</span>
+          <span>Querying Deezer, iTunes JP, Spotify JP &amp; MusicBrainz (${scope === 'album' ? 'ALBUM' : 'TRACK'} mode)...</span>
         </div>
       `;
       refreshIcons();
     }
 
     try {
-      const res = await fetch(`${base}/api/metadata/search?q=${encodeURIComponent(query)}`, {
+      const res = await fetch(`${base}/api/metadata/search?q=${encodeURIComponent(query)}&scope=${encodeURIComponent(scope)}`, {
         headers: getFileBridgeHeaders(getSpotifyHeaders()),
       });
       if (res.status === 404) {
         // Remote File Bridge is still running older code — fall back to direct browser search
-        const fallbackResults = await searchOnlineMetadataBrowserFallback(query);
+        const fallbackResults = await searchOnlineMetadataBrowserFallback(query, { scope });
         metaEditorState.onlineResults = fallbackResults;
         if (summaryEl) {
           summaryEl.textContent = `${fallbackResults.length} results (Direct Browser Fallback)`;
@@ -3929,12 +4129,14 @@
       }
 
       setMetaEditorStatus(
-        `Found ${metaEditorState.onlineResults.length} matches across JP & global music databases. Click any result to auto-fill.`
+        scope === 'album'
+          ? `Found ${metaEditorState.onlineResults.length} album matches across Deezer, iTunes JP, Spotify JP & MusicBrainz. Click any album to choose its tags & cover.`
+          : `Found ${metaEditorState.onlineResults.length} matches across music databases. Click any result to auto-fill.`
       );
       renderOnlineMetadataResults();
     } catch (err) {
       // Also attempt browser fallback on network error
-      const fallbackResults = await searchOnlineMetadataBrowserFallback(query);
+      const fallbackResults = await searchOnlineMetadataBrowserFallback(query, { scope });
       if (fallbackResults.length > 0) {
         metaEditorState.onlineResults = fallbackResults;
         if (summaryEl) {
@@ -3975,7 +4177,7 @@
         <div class="p-8 text-center text-xs font-mono text-zinc-500">
           ${
             metaEditorState.onlineResults.length === 0
-              ? 'Click "AUTO-TAG / SEARCH ONLINE" to pull Kanji/Romaji tags and high-res covers from iTunes JP, Spotify JP, MusicBrainz, and Deezer.'
+              ? 'Click "AUTO-TAG / SEARCH ONLINE" to pull Kanji/Romaji tags and high-res covers from Deezer, iTunes JP, Spotify JP, and MusicBrainz.'
               : `No results from source "${escapeHtml(filter)}".`
           }
         </div>
@@ -3992,6 +4194,16 @@
         isSelected ? 'bg-emerald-950/30 border-l-2 border-l-emerald-400' : 'hover:bg-zinc-900/80'
       }`;
 
+      const isAlbumItem = item.type === 'album' || metaEditorState.searchMode === 'album' || metaEditorState.scope === 'album';
+      const typeBadge = isAlbumItem
+        ? `<span class="px-1.5 py-0.2 text-[9.5px] font-mono border border-amber-500/40 bg-amber-950/30 text-amber-300 font-semibold">ALBUM${item.trackCount ? ` · ${item.trackCount} TRK` : ''}</span>`
+        : `<span class="px-1.5 py-0.2 text-[9.5px] font-mono border border-zinc-700 bg-zinc-900 text-zinc-400">TRACK</span>`;
+
+      const displayTitle = isAlbumItem ? item.album || item.title || 'Untitled Album' : item.title || 'Untitled';
+      const displaySub = isAlbumItem
+        ? `${escapeHtml(item.artist || 'Unknown Artist')}${item.year ? ` · ${escapeHtml(String(item.year))}` : ''}`
+        : `${escapeHtml(item.artist || 'Unknown Artist')}${item.album ? ` · ${escapeHtml(item.album)}` : ''}`;
+
       const thumbUrl = item.thumbnailUrl || item.coverUrl || '';
       row.innerHTML = `
         <div class="relative w-12 h-12 bg-zinc-900 border border-zinc-700 shrink-0 overflow-hidden flex items-center justify-center">
@@ -4006,6 +4218,7 @@
             <span class="px-1.5 py-0.2 text-[9.5px] font-mono border ${getSourceBadgeClass(item.source)}">
               ${escapeHtml(item.source)}
             </span>
+            ${typeBadge}
             ${
               item.resolution
                 ? `<span class="px-1.5 py-0.2 text-[9.5px] font-mono border border-zinc-800 bg-zinc-900 text-zinc-400">${escapeHtml(item.resolution)}</span>`
@@ -4017,23 +4230,48 @@
                 : ''
             }
           </div>
-          <p class="text-xs font-medium text-zinc-100 truncate">${escapeHtml(item.title || 'Untitled')}</p>
-          <p class="text-[11px] text-zinc-400 truncate">
-            ${escapeHtml(item.artist || 'Unknown Artist')}${item.album ? ` · ${escapeHtml(item.album)}` : ''}
-          </p>
+          <p class="text-xs font-medium text-zinc-100 truncate">${escapeHtml(displayTitle)}</p>
+          <p class="text-[11px] text-zinc-400 truncate">${displaySub}</p>
         </div>
-        <div class="shrink-0 text-[10px] font-mono text-emerald-400 px-2">
-          ${isSelected ? 'SELECTED' : 'USE'}
+        <div class="shrink-0 text-[10px] font-mono text-emerald-400 px-2 font-semibold">
+          ${isSelected ? 'SELECTED' : isAlbumItem ? 'CHOOSE ALBUM' : 'USE'}
         </div>
       `;
 
       row.onclick = () => {
         metaEditorState.selectedResultId = item.sourceId;
-        // Auto-fill manual override inputs
-        if ($('meta-input-title') && item.title) $('meta-input-title').value = item.title;
-        if ($('meta-input-artist') && item.artist) $('meta-input-artist').value = item.artist;
-        if ($('meta-input-album') && item.album) $('meta-input-album').value = item.album;
-        if ($('meta-input-year') && item.year) $('meta-input-year').value = String(item.year);
+
+        const chosenAlbum = item.album || item.title || '';
+        const chosenArtist = item.artist || '';
+        const chosenYear = item.year ? String(item.year) : '';
+
+        if (metaEditorState.scope === 'album') {
+          // Album Folder Mode: auto-fill Album, Artist, Year, and Cover for the folder batch
+          if ($('meta-input-album')) $('meta-input-album').value = chosenAlbum;
+          if ($('meta-input-artist')) $('meta-input-artist').value = chosenArtist;
+          if ($('meta-input-year') && chosenYear) $('meta-input-year').value = chosenYear;
+
+          // If overrideAlbumTitles is checked, also fill title
+          if ($('meta-input-title') && $('meta-override-album-titles')?.checked) {
+            $('meta-input-title').value = item.title || chosenAlbum;
+          }
+
+          setMetaEditorStatus(`Selected album from ${item.source}: "${chosenAlbum}" by ${chosenArtist}. Ready to sync all tracks in folder.`);
+        } else {
+          // Single Track Mode
+          if ($('meta-input-title') && item.type !== 'album' && item.title) {
+            $('meta-input-title').value = item.title;
+          }
+          if ($('meta-input-artist') && chosenArtist) $('meta-input-artist').value = chosenArtist;
+          if ($('meta-input-album') && chosenAlbum) $('meta-input-album').value = chosenAlbum;
+          if ($('meta-input-year') && chosenYear) $('meta-input-year').value = chosenYear;
+
+          if (isAlbumItem) {
+            setMetaEditorStatus(`Selected album "${chosenAlbum}" by ${chosenArtist}. (Tip: Click "Entire Album Folder" above to sync all songs in this folder!)`);
+          } else {
+            setMetaEditorStatus(`Auto-filled tags & cover from ${item.source}: "${item.title}" — ${item.artist}`);
+          }
+        }
 
         // Load high-res cover art preview
         if (item.coverUrl) {
@@ -4044,7 +4282,6 @@
           setMetaCoverPreview(item.coverUrl, `${item.source} (${item.resolution || 'HIGH-RES'})`);
         }
 
-        setMetaEditorStatus(`Auto-filled tags & cover from ${item.source}: "${item.title}" — ${item.artist}`);
         renderOnlineMetadataResults();
       };
 
@@ -4168,14 +4405,26 @@
         metaEditorState.filePath.split('/').pop() ||
         metaEditorState.hints?.title ||
         'track';
+
+      if (!data.updatedCount) {
+        const detail = data.errors?.[0]?.error ? `: ${data.errors[0].error}` : '';
+        throw new Error(`0 tracks were updated${detail}`);
+      }
+
       const msg =
         metaEditorState.scope === 'album'
-          ? `Embedded cover art into ${data.updatedCount || 0} track(s) in album`
+          ? `Embedded cover art into ${data.updatedCount} track(s) in album`
           : `Updated embedded cover art for "${targetDesc}"`;
-      showToast(msg);
+
+      if (data.errors && data.errors.length > 0) {
+        showToast(`Updated ${data.updatedCount} track(s) (${data.errors.length} failed: ${data.errors[0].error})`, 'warning');
+      } else {
+        showToast(msg);
+      }
       setMetaEditorStatus(`${msg}. Triggered Navidrome library rescan.`);
 
       refreshMusicUIAfterMetadataUpdate(instantCoverPreview);
+      closeMetadataEditor();
     } catch (err) {
       setMetaEditorStatus(`Cover update failed: ${err.message}`, true);
       showToast(`Cover update failed: ${err.message}`, 'error');
@@ -4255,6 +4504,11 @@
         throw new Error(data.error || `HTTP ${res.status}`);
       }
 
+      if (!data.updatedCount) {
+        const detail = data.errors?.[0]?.error ? `: ${data.errors[0].error}` : '';
+        throw new Error(`0 audio files were updated${detail}`);
+      }
+
       const targetDesc =
         metaEditorState.filePath.split('/').pop() ||
         titleVal ||
@@ -4262,9 +4516,14 @@
         'track';
       const msg =
         metaEditorState.scope === 'album'
-          ? `Saved metadata & cover to ${data.updatedCount || 0} audio file(s) in album`
+          ? `Saved metadata & cover to ${data.updatedCount} audio file(s) in album`
           : `Saved metadata & cover to "${targetDesc}"`;
-      showToast(msg);
+
+      if (data.errors && data.errors.length > 0) {
+        showToast(`Saved to ${data.updatedCount} file(s) (${data.errors.length} failed: ${data.errors[0].error})`, 'warning');
+      } else {
+        showToast(msg);
+      }
       setMetaEditorStatus(msg);
 
       refreshMusicUIAfterMetadataUpdate(instantCoverPreview);
@@ -4299,6 +4558,20 @@
 
     on('meta-editor-close-btn', 'click', closeMetadataEditor);
     on('meta-editor-cancel-btn', 'click', closeMetadataEditor);
+
+    on('meta-scope-btn-single', 'click', () => setMetaEditorScope('single'));
+    on('meta-scope-btn-album', 'click', () => setMetaEditorScope('album'));
+
+    on('meta-search-type-album-btn', 'click', () => {
+      setMetaSearchMode('album');
+      const q = $('meta-online-search-input')?.value?.trim();
+      if (q) runOnlineMetadataSearch();
+    });
+    on('meta-search-type-track-btn', 'click', () => {
+      setMetaSearchMode('track');
+      const q = $('meta-online-search-input')?.value?.trim();
+      if (q) runOnlineMetadataSearch();
+    });
 
     const modal = $('files-metadata-modal');
     if (modal) {

@@ -332,7 +332,10 @@ function buildMp3WithUpdatedId3v2(fileBuf, updates) {
 
   const replacedFrameIds = new Set();
   if (updates.title !== undefined) replacedFrameIds.add('TIT2');
-  if (updates.artist !== undefined) replacedFrameIds.add('TPE1');
+  if (updates.artist !== undefined) {
+    replacedFrameIds.add('TPE1');
+    replacedFrameIds.add('TPE2');
+  }
   if (updates.album !== undefined) replacedFrameIds.add('TALB');
   if (updates.year !== undefined) {
     replacedFrameIds.add('TYER');
@@ -360,7 +363,10 @@ function buildMp3WithUpdatedId3v2(fileBuf, updates) {
   };
 
   if (updates.title !== undefined) pushTextFrame('TIT2', updates.title);
-  if (updates.artist !== undefined) pushTextFrame('TPE1', updates.artist);
+  if (updates.artist !== undefined) {
+    pushTextFrame('TPE1', updates.artist);
+    pushTextFrame('TPE2', updates.artist);
+  }
   if (updates.album !== undefined) pushTextFrame('TALB', updates.album);
   if (updates.year !== undefined) {
     const yr = String(updates.year ?? '').trim();
@@ -621,7 +627,11 @@ function buildFlacWithUpdatedTags(fileBuf, updates) {
         const vc = parseVorbisCommentBlock(blk.payload);
         const keysToReplace = new Set();
         if (updates.title !== undefined) keysToReplace.add('TITLE');
-        if (updates.artist !== undefined) keysToReplace.add('ARTIST');
+        if (updates.artist !== undefined) {
+          keysToReplace.add('ARTIST');
+          keysToReplace.add('ALBUMARTIST');
+          keysToReplace.add('ALBUM ARTIST');
+        }
         if (updates.album !== undefined) keysToReplace.add('ALBUM');
         if (updates.year !== undefined) {
           keysToReplace.add('DATE');
@@ -635,7 +645,10 @@ function buildFlacWithUpdatedTags(fileBuf, updates) {
         };
 
         if (updates.title !== undefined) pushTag('TITLE', updates.title);
-        if (updates.artist !== undefined) pushTag('ARTIST', updates.artist);
+        if (updates.artist !== undefined) {
+          pushTag('ARTIST', updates.artist);
+          pushTag('ALBUMARTIST', updates.artist);
+        }
         if (updates.album !== undefined) pushTag('ALBUM', updates.album);
         if (updates.year !== undefined) {
           pushTag('DATE', updates.year);
@@ -792,9 +805,11 @@ function parseOpusOrOggFile(buf) {
 async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
   const ext = path.extname(filePath).toLowerCase();
   const id = `ff_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
-  const tempCoverPath = updates.coverBuffer
+  const isOpusOrOgg = ext === '.opus' || ext === '.ogg';
+  const tempCoverPath = updates.coverBuffer && !isOpusOrOgg
     ? path.join(tmpDir, `${id}${updates.coverExt || '.jpg'}`)
     : null;
+  const tempMetaPath = isOpusOrOgg ? path.join(tmpDir, `${id}_meta.txt`) : null;
   const tempOutPath = path.join(tmpDir, `${id}${ext}`);
 
   try {
@@ -802,13 +817,57 @@ async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
       await fs.writeFile(tempCoverPath, updates.coverBuffer);
     }
 
-    const args = ['-y', '-i', filePath];
+    const args = ['-nostdin', '-y', '-i', filePath];
 
-    if (ext === '.opus' || ext === '.ogg') {
+    if (isOpusOrOgg) {
       // In Ogg Opus & Vorbis containers, cover art MUST be embedded via METADATA_BLOCK_PICTURE
-      // (a base64-encoded FLAC picture block). Video stream muxing fails in Opus muxers.
-      // Audio is copied losslessly with -c:a copy.
-      args.push('-map', '0:a:0', '-c:a', 'copy');
+      // (a base64-encoded FLAC picture block). To avoid Windows command-line length limits
+      // (32,767 chars, which causes "spawn ENAMETOOLONG"), all Vorbis comments and the base64 picture block
+      // are written to a temporary FFMETADATA file and mapped via -map_metadata.
+      let existingComments = [];
+      try {
+        const fileBuf = await fs.readFile(filePath);
+        const parsed = parseOpusOrOggFile(fileBuf);
+        if (parsed?.comments && Array.isArray(parsed.comments)) {
+          existingComments = parsed.comments;
+        }
+      } catch (readErr) {
+        console.warn(`[AudioTagger] Could not parse existing comments from ${path.basename(filePath)}: ${readErr.message}`);
+      }
+
+      const keysToReplace = new Set();
+      if (updates.coverBuffer) {
+        keysToReplace.add('METADATA_BLOCK_PICTURE');
+        keysToReplace.add('COVERART');
+      }
+      if (updates.title !== undefined) keysToReplace.add('TITLE');
+      if (updates.artist !== undefined) {
+        keysToReplace.add('ARTIST');
+        keysToReplace.add('ALBUMARTIST');
+        keysToReplace.add('ALBUM ARTIST');
+      }
+      if (updates.album !== undefined) keysToReplace.add('ALBUM');
+      if (updates.year !== undefined) {
+        keysToReplace.add('DATE');
+        keysToReplace.add('YEAR');
+      }
+
+      const mergedComments = existingComments.filter((c) => !keysToReplace.has(c.key));
+
+      const pushTag = (key, val) => {
+        const clean = String(val ?? '').normalize('NFC').trim();
+        if (clean) mergedComments.push({ key, val: clean });
+      };
+
+      if (updates.title !== undefined) pushTag('TITLE', updates.title);
+      if (updates.artist !== undefined) {
+        pushTag('ARTIST', updates.artist);
+        pushTag('ALBUMARTIST', updates.artist);
+      }
+      if (updates.album !== undefined) pushTag('ALBUM', updates.album);
+      if (updates.year !== undefined) {
+        pushTag('DATE', updates.year);
+      }
 
       if (updates.coverBuffer) {
         const picBlock = encodeFlacPictureBlock(
@@ -818,26 +877,31 @@ async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
           updates.coverHeight || 0
         );
         const base64Pic = picBlock.toString('base64');
-        args.push('-metadata', `METADATA_BLOCK_PICTURE=${base64Pic}`);
-        args.push('-metadata:s:a:0', `METADATA_BLOCK_PICTURE=${base64Pic}`);
+        mergedComments.push({ key: 'METADATA_BLOCK_PICTURE', val: base64Pic });
       }
 
-      if (updates.title !== undefined && String(updates.title).trim()) {
-        const val = String(updates.title).trim();
-        args.push('-metadata', `title=${val}`, '-metadata:s:a:0', `title=${val}`);
+      // Escape key/values according to FFMETADATA specification
+      const escapeFfMeta = (s) =>
+        String(s ?? '')
+          .replace(/\\/g, '\\\\')
+          .replace(/=/g, '\\=')
+          .replace(/;/g, '\\;')
+          .replace(/#/g, '\\#')
+          .replace(/\r?\n/g, '\\\n');
+
+      let metaText = ';FFMETADATA1\n';
+      for (const { key, val } of mergedComments) {
+        metaText += `${escapeFfMeta(key)}=${escapeFfMeta(val)}\n`;
       }
-      if (updates.artist !== undefined && String(updates.artist).trim()) {
-        const val = String(updates.artist).trim();
-        args.push('-metadata', `artist=${val}`, '-metadata:s:a:0', `artist=${val}`);
-      }
-      if (updates.album !== undefined && String(updates.album).trim()) {
-        const val = String(updates.album).trim();
-        args.push('-metadata', `album=${val}`, '-metadata:s:a:0', `album=${val}`);
-      }
-      if (updates.year !== undefined && String(updates.year).trim()) {
-        const val = String(updates.year).trim();
-        args.push('-metadata', `date=${val}`, '-metadata:s:a:0', `date=${val}`);
-      }
+      await fs.writeFile(tempMetaPath, metaText, 'utf8');
+
+      args.push(
+        '-i', tempMetaPath,
+        '-map', '0:a:0',
+        '-map_metadata', '1',
+        '-map_metadata:s:a:0', '1:g',
+        '-c:a', 'copy'
+      );
     } else {
       // Other containers (.m4a, .mp4, .wav, etc.)
       if (tempCoverPath) {
@@ -850,7 +914,8 @@ async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
         args.push('-metadata', `title=${String(updates.title).trim()}`);
       }
       if (updates.artist !== undefined && String(updates.artist).trim()) {
-        args.push('-metadata', `artist=${String(updates.artist).trim()}`);
+        const a = String(updates.artist).trim();
+        args.push('-metadata', `artist=${a}`, '-metadata', `album_artist=${a}`);
       }
       if (updates.album !== undefined && String(updates.album).trim()) {
         args.push('-metadata', `album=${String(updates.album).trim()}`);
@@ -867,6 +932,9 @@ async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
   } finally {
     if (tempCoverPath && fsSync.existsSync(tempCoverPath)) {
       await fs.unlink(tempCoverPath).catch(() => {});
+    }
+    if (tempMetaPath && fsSync.existsSync(tempMetaPath)) {
+      await fs.unlink(tempMetaPath).catch(() => {});
     }
     if (fsSync.existsSync(tempOutPath)) {
       await fs.unlink(tempOutPath).catch(() => {});
@@ -1056,16 +1124,17 @@ async function getSpotifyAccessToken(clientId, clientSecret) {
 /**
  * 1. iTunes Search API (Japan Store: &country=jp&lang=ja_jp)
  */
-async function searchItunesJP(query) {
+async function searchItunesJP(query, options = {}) {
+  const isAlbum = String(options.scope || '').toLowerCase() === 'album';
   const url = new URL('https://itunes.apple.com/search');
   url.searchParams.set('term', query);
   url.searchParams.set('media', 'music');
-  url.searchParams.set('entity', 'song');
+  url.searchParams.set('entity', isAlbum ? 'album' : 'song');
   url.searchParams.set('country', 'jp');
   url.searchParams.set('lang', 'ja_jp');
   url.searchParams.set('limit', '12');
 
-  const res = await fetch(url.toString(), {
+  let res = await fetch(url.toString(), {
     headers: {
       'User-Agent': USER_AGENT,
       'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
@@ -1073,17 +1142,68 @@ async function searchItunesJP(query) {
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`iTunes JP HTTP ${res.status}`);
-  const data = await res.json();
+  let data = await res.json();
+  let results = data.results || [];
 
-  return (data.results || []).map((item) => {
+  if (isAlbum && results.length === 0) {
+    // If no exact album was found, fallback to song search to extract unique albums containing this song
+    url.searchParams.set('entity', 'song');
+    try {
+      res = await fetch(url.toString(), {
+        headers: {
+          'User-Agent': USER_AGENT,
+          'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
+        },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        const fbData = await res.json();
+        results = fbData.results || [];
+      }
+    } catch (_) {}
+  }
+
+  if (isAlbum) {
+    // Deduplicate by collectionId so we return distinct albums, not duplicate tracks from the same album
+    const seenCollections = new Set();
+    const albumList = [];
+    for (const item of results) {
+      const colId = item.collectionId || item.collectionName;
+      if (!colId || seenCollections.has(colId)) continue;
+      seenCollections.add(colId);
+
+      const thumb = item.artworkUrl100 || item.artworkUrl60 || '';
+      const highResCover = thumb ? thumb.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/1000x1000bb.$1') : '';
+      const year = item.releaseDate ? String(item.releaseDate).slice(0, 4) : '';
+      const albumTitle = item.collectionName || item.trackName || 'Untitled Album';
+
+      albumList.push({
+        source: 'iTunes JP',
+        sourceId: `itunes_album_${item.collectionId || Math.random()}`,
+        type: 'album',
+        title: albumTitle,
+        artist: item.artistName || '',
+        album: albumTitle,
+        year,
+        trackCount: item.trackCount || 0,
+        coverUrl: highResCover || thumb,
+        thumbnailUrl: thumb ? thumb.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/300x300bb.$1') : '',
+        resolution: '1000×1000',
+      });
+    }
+    return albumList;
+  }
+
+  // Single track search
+  return results.map((item) => {
     const thumb = item.artworkUrl100 || item.artworkUrl60 || '';
-    // Upgrade iTunes 100x100 artwork to 1000x1000 high-resolution cover art
     const highResCover = thumb ? thumb.replace(/\/\d+x\d+bb\.(jpg|png)$/i, '/1000x1000bb.$1') : '';
     const year = item.releaseDate ? String(item.releaseDate).slice(0, 4) : '';
     return {
       source: 'iTunes JP',
       sourceId: `itunes_${item.trackId || item.collectionId}`,
-      title: item.trackName || item.collectionName || '',
+      type: 'track',
+      title: item.trackName || item.collectionName || 'Untitled Track',
       artist: item.artistName || '',
       album: item.collectionName || '',
       year,
@@ -1104,9 +1224,10 @@ async function searchSpotifyJP(query, options = {}) {
     return [];
   }
 
+  const isAlbum = String(options.scope || '').toLowerCase() === 'album';
   const url = new URL('https://api.spotify.com/v1/search');
   url.searchParams.set('q', query);
-  url.searchParams.set('type', 'track');
+  url.searchParams.set('type', isAlbum ? 'album' : 'track');
   url.searchParams.set('market', 'JP');
   url.searchParams.set('limit', '10');
 
@@ -1120,8 +1241,32 @@ async function searchSpotifyJP(query, options = {}) {
   });
   if (!res.ok) throw new Error(`Spotify JP HTTP ${res.status}`);
   const data = await res.json();
-  const items = data?.tracks?.items || [];
 
+  if (isAlbum) {
+    const items = data?.albums?.items || [];
+    return items.map((album) => {
+      const images = album?.images || [];
+      const largest = images[0]?.url || '';
+      const medium = images[1]?.url || largest;
+      const resLabel = images[0]?.width ? `${images[0].width}×${images[0].height}` : '640×640';
+      const year = album?.release_date ? String(album.release_date).slice(0, 4) : '';
+      return {
+        source: 'Spotify JP',
+        sourceId: `spotify_album_${album.id}`,
+        type: 'album',
+        title: album.name || '',
+        artist: (album.artists || []).map((a) => a.name).join(', '),
+        album: album.name || '',
+        year,
+        trackCount: album.total_tracks || 0,
+        coverUrl: largest,
+        thumbnailUrl: medium,
+        resolution: resLabel,
+      };
+    });
+  }
+
+  const items = data?.tracks?.items || [];
   return items.map((track) => {
     const images = track?.album?.images || [];
     const largest = images[0]?.url || '';
@@ -1131,6 +1276,7 @@ async function searchSpotifyJP(query, options = {}) {
     return {
       source: 'Spotify JP',
       sourceId: `spotify_${track.id}`,
+      type: 'track',
       title: track.name || '',
       artist: (track.artists || []).map((a) => a.name).join(', '),
       album: track?.album?.name || '',
@@ -1146,11 +1292,19 @@ async function searchSpotifyJP(query, options = {}) {
 /**
  * 3. MusicBrainz JSON API + Cover Art Archive
  */
-async function searchMusicBrainz(query) {
-  const url = new URL('https://musicbrainz.org/ws/2/recording/');
-  url.searchParams.set('query', query);
+async function searchMusicBrainz(query, options = {}) {
+  const isAlbum = String(options.scope || '').toLowerCase() === 'album';
+  // Strip Lucene punctuation that breaks query parsing or accidentally negates words (like '-')
+  const cleanQuery = String(query || '').replace(/[+\-!(){}[\]^"~*?:\\\/]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleanQuery) return [];
+
+  const endpoint = isAlbum
+    ? 'https://musicbrainz.org/ws/2/release/'
+    : 'https://musicbrainz.org/ws/2/recording/';
+  const url = new URL(endpoint);
+  url.searchParams.set('query', cleanQuery);
   url.searchParams.set('fmt', 'json');
-  url.searchParams.set('limit', '8');
+  url.searchParams.set('limit', isAlbum ? '12' : '8');
 
   const res = await fetch(url.toString(), {
     headers: {
@@ -1162,8 +1316,43 @@ async function searchMusicBrainz(query) {
   });
   if (!res.ok) throw new Error(`MusicBrainz HTTP ${res.status}`);
   const data = await res.json();
-  const recordings = data.recordings || [];
 
+  if (isAlbum) {
+    const releases = data.releases || [];
+    const seenTitles = new Set();
+    const albumList = [];
+
+    for (const rel of releases) {
+      const releaseId = rel.id || '';
+      const artist = (rel['artist-credit'] || [])
+        .map((ac) => ac.name || ac.artist?.name || '')
+        .filter(Boolean)
+        .join(', ');
+      const title = rel.title || '';
+      const dedupeKey = `${title.toLowerCase()}|${artist.toLowerCase()}`;
+      if (seenTitles.has(dedupeKey)) continue;
+      seenTitles.add(dedupeKey);
+
+      const dateStr = rel.date || '';
+      const year = dateStr ? String(dateStr).slice(0, 4) : '';
+      albumList.push({
+        source: 'MusicBrainz',
+        sourceId: `mb_release_${rel.id}`,
+        type: 'album',
+        title,
+        artist,
+        album: title,
+        year,
+        trackCount: rel['track-count'] || 0,
+        coverUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-1200` : '',
+        thumbnailUrl: releaseId ? `https://coverartarchive.org/release/${releaseId}/front-250` : '',
+        resolution: releaseId ? 'CAA High-Res' : 'Metadata Only',
+      });
+    }
+    return albumList;
+  }
+
+  const recordings = data.recordings || [];
   const results = [];
   for (const rec of recordings) {
     const releases = rec.releases || [];
@@ -1187,6 +1376,7 @@ async function searchMusicBrainz(query) {
     results.push({
       source: 'MusicBrainz',
       sourceId: `mb_${rec.id}`,
+      type: 'track',
       title: rec.title || '',
       artist,
       album: jpRelease?.title || '',
@@ -1204,12 +1394,14 @@ async function searchMusicBrainz(query) {
 /**
  * 4. Deezer Public Search API
  */
-async function searchDeezer(query) {
-  const url = new URL('https://api.deezer.com/search');
+async function searchDeezer(query, options = {}) {
+  const isAlbum = String(options.scope || '').toLowerCase() === 'album';
+  const endpoint = isAlbum ? 'https://api.deezer.com/search/album' : 'https://api.deezer.com/search';
+  const url = new URL(endpoint);
   url.searchParams.set('q', query);
-  url.searchParams.set('limit', '10');
+  url.searchParams.set('limit', '12');
 
-  const res = await fetch(url.toString(), {
+  let res = await fetch(url.toString(), {
     headers: {
       'User-Agent': USER_AGENT,
       'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
@@ -1217,15 +1409,96 @@ async function searchDeezer(query) {
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) throw new Error(`Deezer HTTP ${res.status}`);
-  const data = await res.json();
-  const items = data.data || [];
+  let data = await res.json();
+  let items = data.data || [];
 
+  if (isAlbum) {
+    if (items.length === 0) {
+      // If no exact album was found, search tracks and extract unique albums that contain this song/query
+      const fbUrl = new URL('https://api.deezer.com/search');
+      fbUrl.searchParams.set('q', query);
+      fbUrl.searchParams.set('limit', '15');
+      try {
+        res = await fetch(fbUrl.toString(), {
+          headers: {
+            'User-Agent': USER_AGENT,
+            'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
+          },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (res.ok) {
+          const fbData = await res.json();
+          const trackItems = fbData.data || [];
+          const seenAlbums = new Set();
+          items = [];
+          for (const trk of trackItems) {
+            const alb = trk.album;
+            if (!alb || !alb.id || seenAlbums.has(alb.id)) continue;
+            seenAlbums.add(alb.id);
+            items.push({
+              id: alb.id,
+              title: alb.title || 'Untitled Album',
+              cover_xl: alb.cover_xl,
+              cover_big: alb.cover_big,
+              cover_medium: alb.cover_medium,
+              artist: trk.artist || {},
+              nb_tracks: 0,
+              type: 'album',
+            });
+          }
+        }
+      } catch (_) {}
+    }
+
+    let releaseDateMap = new Map();
+    if (items.length > 0) {
+      try {
+        const details = await Promise.allSettled(
+          items.slice(0, 6).map((it) =>
+            fetch(`https://api.deezer.com/album/${it.id}`, { signal: AbortSignal.timeout(3000) })
+              .then((r) => r.json())
+              .catch(() => null)
+          )
+        );
+        for (let i = 0; i < details.length; i++) {
+          if (details[i].status === 'fulfilled' && details[i].value?.release_date) {
+            releaseDateMap.set(items[i].id, String(details[i].value.release_date).slice(0, 4));
+            if (details[i].value?.nb_tracks && !items[i].nb_tracks) {
+              items[i].nb_tracks = details[i].value.nb_tracks;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    return items.map((item) => {
+      const coverUrl = item.cover_xl || item.cover_big || item.cover_medium || '';
+      const thumbnailUrl = item.cover_medium || coverUrl;
+      const yr = releaseDateMap.get(item.id) || '';
+      return {
+        source: 'Deezer',
+        sourceId: `deezer_album_${item.id}`,
+        type: 'album',
+        title: item.title || '',
+        artist: item.artist?.name || '',
+        album: item.title || '',
+        year: yr,
+        trackCount: item.nb_tracks || 0,
+        coverUrl,
+        thumbnailUrl,
+        resolution: item.cover_xl ? '1000×1000' : '500×500',
+      };
+    });
+  }
+
+  // Single track search
   return items.map((item) => {
     const coverUrl = item.album?.cover_xl || item.album?.cover_big || item.album?.cover_medium || '';
     const thumbnailUrl = item.album?.cover_medium || coverUrl;
     return {
       source: 'Deezer',
       sourceId: `deezer_${item.id}`,
+      type: 'track',
       title: item.title || '',
       artist: item.artist?.name || '',
       album: item.album?.title || '',
@@ -1246,10 +1519,10 @@ export async function searchMetadataOnline(query, options = {}) {
   if (!cleanQuery) return { results: [], sources: {} };
 
   const [itunesRes, spotifyRes, mbRes, deezerRes] = await Promise.allSettled([
-    searchItunesJP(cleanQuery),
+    searchItunesJP(cleanQuery, options),
     searchSpotifyJP(cleanQuery, options),
-    searchMusicBrainz(cleanQuery),
-    searchDeezer(cleanQuery),
+    searchMusicBrainz(cleanQuery, options),
+    searchDeezer(cleanQuery, options),
   ]);
 
   const hasSpotifyCreds = Boolean(
@@ -1281,6 +1554,7 @@ export async function searchMetadataOnline(query, options = {}) {
     },
   };
 
+  const isAlbum = String(options.scope || '').toLowerCase() === 'album';
   const combined = [
     ...(itunesRes.status === 'fulfilled' ? itunesRes.value : []),
     ...(spotifyRes.status === 'fulfilled' ? spotifyRes.value : []),
@@ -1288,10 +1562,14 @@ export async function searchMetadataOnline(query, options = {}) {
     ...(mbRes.status === 'fulfilled' ? mbRes.value : []),
   ];
 
+  const finalResults = isAlbum
+    ? combined.filter((r) => r.type === 'album' && Boolean(r.album || r.title))
+    : combined;
+
   return {
     query: cleanQuery,
     sources,
-    results: combined,
+    results: finalResults,
   };
 }
 

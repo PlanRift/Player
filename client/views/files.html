@@ -149,6 +149,32 @@
     </div>
   </div>
 
+  <!-- Current Folder Album Info Banner (shown when current folder contains audio files) -->
+  <div id="files-folder-album-bar" class="hidden p-3.5 bg-zinc-900/90 border border-emerald-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="w-9 h-9 bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center shrink-0">
+        <i data-lucide="disc-3" class="w-5 h-5 text-emerald-400"></i>
+      </div>
+      <div class="min-w-0 space-y-0.5">
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-[10px] font-mono px-1.5 py-0.2 bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 font-semibold">ALBUM FOLDER</span>
+          <span id="files-folder-album-name" class="text-xs font-semibold text-zinc-100 truncate"></span>
+        </div>
+        <p id="files-folder-album-sub" class="text-[11px] font-mono text-zinc-400 truncate"></p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 shrink-0">
+      <button
+        id="files-folder-album-tag-btn"
+        type="button"
+        class="h-8 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center gap-1.5 transition-colors"
+      >
+        <i data-lucide="tags" class="w-3.5 h-3.5"></i>
+        <span>CHOOSE ALBUM TAGS &amp; COVER</span>
+      </button>
+    </div>
+  </div>
+
   <!-- Drag & Drop Zone / File Table Container -->
   <div id="files-dropzone" class="studio-panel border border-zinc-800 relative transition-colors">
     <div class="overflow-x-auto">

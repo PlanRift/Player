@@ -745,7 +745,7 @@
       <!-- Modal Header -->
       <div class="px-5 py-3.5 border-b border-zinc-700 bg-zinc-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
         <div class="min-w-0">
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <i data-lucide="tags" class="w-4 h-4 text-emerald-400 shrink-0"></i>
             <h2 class="font-display text-lg text-zinc-100 truncate">Metadata &amp; Cover Art Editor</h2>
             <span
@@ -760,7 +760,29 @@
           </p>
         </div>
 
-        <div class="flex items-center gap-2 shrink-0">
+        <div class="flex items-center gap-2.5 shrink-0">
+          <!-- Target Scope Switcher: Switch between editing this track or the entire album folder -->
+          <div class="inline-flex p-0.5 bg-zinc-950 border border-zinc-700 text-[11px] font-mono">
+            <button
+              id="meta-scope-btn-single"
+              type="button"
+              title="Apply changes only to this single track"
+              class="px-2.5 py-1 inline-flex items-center gap-1.5 transition-colors text-zinc-400 hover:text-zinc-200"
+            >
+              <i data-lucide="music-2" class="w-3.5 h-3.5"></i>
+              <span>Single Track</span>
+            </button>
+            <button
+              id="meta-scope-btn-album"
+              type="button"
+              title="Batch sync album metadata &amp; cover art to all audio files in folder"
+              class="px-2.5 py-1 inline-flex items-center gap-1.5 transition-colors text-zinc-400 hover:text-zinc-200"
+            >
+              <i data-lucide="folder" class="w-3.5 h-3.5"></i>
+              <span>Entire Album Folder</span>
+            </button>
+          </div>
+
           <button
             id="meta-editor-close-btn"
             type="button"
@@ -960,6 +982,36 @@
             </div>
           </div>
 
+          <!-- Search Target Toggle: ALBUMS vs TRACKS -->
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-mono uppercase tracking-wider text-zinc-400">Search Target:</span>
+              <div class="inline-flex p-0.5 bg-zinc-950 border border-zinc-700 text-[11px] font-mono">
+                <button
+                  id="meta-search-type-album-btn"
+                  type="button"
+                  title="Search full albums from online databases"
+                  class="px-3 py-1 inline-flex items-center gap-1.5 bg-amber-400/20 text-amber-300 border border-amber-400/40 font-semibold transition-colors"
+                >
+                  <i data-lucide="disc-3" class="w-3.5 h-3.5 text-amber-400"></i>
+                  <span>ALBUMS</span>
+                </button>
+                <button
+                  id="meta-search-type-track-btn"
+                  type="button"
+                  title="Search individual song tracks from online databases"
+                  class="px-3 py-1 inline-flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  <i data-lucide="music-2" class="w-3.5 h-3.5"></i>
+                  <span>INDIVIDUAL TRACKS</span>
+                </button>
+              </div>
+            </div>
+            <span id="meta-search-type-hint" class="text-[10px] font-mono text-zinc-400">
+              Queries albums with high-res covers from Deezer, iTunes JP, Spotify JP &amp; MusicBrainz
+            </span>
+          </div>
+
           <!-- Search Input Bar -->
           <form id="meta-online-search-form" class="flex gap-2">
             <div class="relative flex-1">
@@ -967,7 +1019,7 @@
               <input
                 id="meta-online-search-input"
                 type="text"
-                placeholder="Search Japanese or romaji artist / track / album (e.g. 和ぬか 審美眼)..."
+                placeholder="Search Japanese or global albums (e.g. Alea jacta est, Ave Mujica)..."
                 class="w-full h-9 pl-8 pr-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-sans select-text"
               />
             </div>
