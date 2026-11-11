@@ -5,9 +5,17 @@ import path from 'path';
 import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import ffmpegStatic from 'ffmpeg-static';
 
 const execFileAsync = promisify(execFile);
+
+// Gracefully resolve ffmpeg-static if present in node_modules, without crashing startup if npm install was pending
+let ffmpegStatic = null;
+try {
+  const mod = await import('ffmpeg-static');
+  ffmpegStatic = mod.default || mod;
+} catch (_) {
+  // ffmpeg-static not yet installed in node_modules; getFfmpegBinaryPath will fall back to system 'ffmpeg'
+}
 
 /**
  * Resolve the path to the ffmpeg executable:
