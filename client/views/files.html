@@ -368,66 +368,126 @@
       </div>
 
       <!-- URL Download Form -->
-      <form id="ytm-download-form" class="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
-        <div class="md:col-span-5 space-y-1">
-          <label for="ytm-url-input" class="block text-[10.5px] font-mono text-zinc-400">
-            YOUTUBE MUSIC TRACK / ALBUM / PLAYLIST URL
-          </label>
-          <input
-            id="ytm-url-input"
-            type="url"
-            required
-            placeholder="https://music.youtube.com/playlist?list=..."
-            class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono placeholder:text-zinc-500 select-text"
-          />
-        </div>
-
-        <div class="md:col-span-4 space-y-1">
-          <div class="flex items-center justify-between">
-            <label for="ytm-target-dir-input" class="block text-[10.5px] font-mono text-zinc-400">
-              DESTINATION FOLDER (INSIDE STORAGE)
+      <form id="ytm-download-form" class="space-y-3">
+        <!-- Row 1: URL + Submit -->
+        <div class="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-end">
+          <div class="flex-1 space-y-1">
+            <label for="ytm-url-input" class="block text-[10.5px] font-mono text-zinc-400">
+              YOUTUBE MUSIC TRACK / ALBUM / PLAYLIST URL
             </label>
-            <button
-              id="ytm-use-current-dir-btn"
-              type="button"
-              class="text-[10px] font-mono text-emerald-400 hover:text-emerald-300 transition-colors"
-            >
-              Use Current Folder
-            </button>
+            <input
+              id="ytm-url-input"
+              type="url"
+              required
+              placeholder="https://music.youtube.com/playlist?list=..."
+              class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono placeholder:text-zinc-500 select-text"
+            />
           </div>
-          <input
-            id="ytm-target-dir-input"
-            type="text"
-            placeholder="Music (auto-creates album subfolder)"
-            class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono placeholder:text-zinc-500 select-text"
-          />
-        </div>
 
-        <div class="md:col-span-1 space-y-1">
-          <label for="ytm-format-select" class="block text-[10.5px] font-mono text-zinc-400">
-            FORMAT
-          </label>
-          <select
-            id="ytm-format-select"
-            class="w-full h-9 px-2 bg-zinc-950 border border-zinc-700 text-xs font-mono text-zinc-100"
-          >
-            <option value="opus">.opus</option>
-            <option value="m4a">.m4a</option>
-            <option value="mp3">.mp3</option>
-            <option value="flac">.flac</option>
-            <option value="best">native</option>
-          </select>
-        </div>
-
-        <div class="md:col-span-2">
           <button
             id="ytm-submit-btn"
             type="submit"
-            class="w-full h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
+            class="h-9 px-5 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center justify-center gap-1.5 shrink-0 transition-colors"
           >
             <i data-lucide="download" class="w-3.5 h-3.5"></i>
             <span>DOWNLOAD</span>
           </button>
+        </div>
+
+        <!-- Row 2: Destination Routing Selector + Format Selector -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 pt-1">
+          <!-- Destination Routing (3 Modes) -->
+          <div class="lg:col-span-7 p-3 bg-zinc-950/70 border border-zinc-800 space-y-2">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="text-[10.5px] font-mono uppercase tracking-wider text-zinc-400">
+                Destination Routing
+              </span>
+              <span class="text-[10px] font-mono text-zinc-500">Scoped to Music root</span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-1.5" role="radiogroup" aria-label="Destination mode">
+              <button
+                id="ytm-dest-mode-current"
+                type="button"
+                data-ytm-dest-mode="current"
+                class="h-8 px-2.5 border text-[11px] font-mono inline-flex items-center justify-center gap-1.5 transition-colors border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100"
+              >
+                <i data-lucide="folder-open" class="w-3.5 h-3.5 shrink-0"></i>
+                <span class="truncate">Current Open Folder</span>
+              </button>
+
+              <button
+                id="ytm-dest-mode-choose"
+                type="button"
+                data-ytm-dest-mode="choose"
+                class="h-8 px-2.5 border text-[11px] font-mono inline-flex items-center justify-center gap-1.5 transition-colors border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100"
+              >
+                <i data-lucide="folder-search" class="w-3.5 h-3.5 shrink-0"></i>
+                <span class="truncate">Choose Folder...</span>
+              </button>
+
+              <button
+                id="ytm-dest-mode-auto"
+                type="button"
+                data-ytm-dest-mode="auto"
+                class="h-8 px-2.5 border text-[11px] font-mono inline-flex items-center justify-center gap-1.5 transition-colors border-emerald-400 bg-emerald-400/15 text-emerald-300 font-semibold"
+              >
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 shrink-0"></i>
+                <span class="truncate">Auto-Sort</span>
+              </button>
+            </div>
+
+            <div class="flex items-center justify-between gap-2 pt-0.5 min-h-[24px]">
+              <p id="ytm-dest-preview-text" class="text-[11px] font-mono text-zinc-400 truncate">
+                Auto-Sort → Music/(Artist)/(Album or Single)/(Song)
+              </p>
+              <button
+                id="ytm-open-folder-picker-btn"
+                type="button"
+                class="hidden h-6 px-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[10px] font-mono text-emerald-400 shrink-0 transition-colors"
+              >
+                BROWSE...
+              </button>
+            </div>
+          </div>
+
+          <!-- Format Selector UI -->
+          <div class="lg:col-span-5 p-3 bg-zinc-950/70 border border-zinc-800 space-y-2 flex flex-col justify-between">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[10.5px] font-mono uppercase tracking-wider text-zinc-400">
+                Audio Format
+              </span>
+              <span id="ytm-format-spec-hint" class="text-[10px] font-mono text-emerald-400">
+                -f 251 · Opus
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5" role="radiogroup" aria-label="Audio format">
+              <button
+                id="ytm-format-btn-opus"
+                type="button"
+                data-ytm-format="opus"
+                class="h-9 px-2.5 border text-[11px] font-mono inline-flex items-center justify-center gap-1.5 transition-colors border-emerald-400 bg-emerald-400/15 text-emerald-300 font-semibold"
+              >
+                <i data-lucide="disc-3" class="w-3.5 h-3.5 shrink-0"></i>
+                <span class="truncate">High-Quality Opus (.opus)</span>
+              </button>
+
+              <button
+                id="ytm-format-btn-m4a"
+                type="button"
+                data-ytm-format="m4a"
+                class="h-9 px-2.5 border text-[11px] font-mono inline-flex items-center justify-center gap-1.5 transition-colors border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100"
+              >
+                <i data-lucide="music-2" class="w-3.5 h-3.5 shrink-0"></i>
+                <span class="truncate">256kbps AAC (.m4a)</span>
+              </button>
+            </div>
+
+            <p id="ytm-format-subtext" class="text-[10.5px] font-mono text-zinc-500 truncate">
+              Best perceptual quality · Format 251/opus fallback
+            </p>
+          </div>
         </div>
       </form>
 
@@ -497,6 +557,101 @@
     <!-- Bottom Info Bar -->
     <div class="w-full text-center font-mono text-[11px] text-zinc-500 py-1">
       <span id="files-image-counter">1 of 1</span> · Use <kbd class="px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300">←</kbd> <kbd class="px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300">→</kbd> to navigate, <kbd class="px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 text-zinc-300">Esc</kbd> to close
+    </div>
+  </div>
+
+  <!-- Lightweight Choose Folder Modal for YTM Downloader (Strictly scoped to Music directory) -->
+  <div
+    id="ytm-folder-picker-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Choose Download Folder"
+    class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none"
+  >
+    <div class="w-full max-w-lg bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col max-h-[82vh]">
+      <!-- Modal Header -->
+      <div class="px-4 py-3 border-b border-zinc-700 bg-zinc-950/70 flex items-center justify-between gap-2 shrink-0">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <i data-lucide="folder-search" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+            <h3 class="font-display text-base text-zinc-100 truncate">Choose Destination Folder</h3>
+          </div>
+          <p id="ytm-fp-current-path" class="text-[11px] font-mono text-zinc-400 truncate mt-0.5">/Music</p>
+        </div>
+        <button
+          id="ytm-fp-close-btn"
+          type="button"
+          title="Close (Esc)"
+          class="w-7 h-7 inline-flex items-center justify-center bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Toolbar: Up + New Folder -->
+      <div class="px-4 py-2.5 border-b border-zinc-800 bg-zinc-950/40 flex items-center justify-between gap-2 shrink-0">
+        <button
+          id="ytm-fp-up-btn"
+          type="button"
+          disabled
+          class="h-7 px-2.5 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed border border-zinc-700 text-[11px] font-mono text-zinc-200 inline-flex items-center gap-1 transition-colors"
+        >
+          <i data-lucide="arrow-up" class="w-3 h-3"></i>
+          <span>UP</span>
+        </button>
+
+        <button
+          id="ytm-fp-new-folder-toggle-btn"
+          type="button"
+          class="h-7 px-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-emerald-400 inline-flex items-center gap-1.5 transition-colors"
+        >
+          <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i>
+          <span>NEW FOLDER</span>
+        </button>
+      </div>
+
+      <!-- Inline New Folder Input (collapsible) -->
+      <form id="ytm-fp-new-folder-form" class="hidden px-4 py-2.5 border-b border-zinc-800 bg-zinc-950 flex gap-2 shrink-0">
+        <input
+          id="ytm-fp-new-folder-input"
+          type="text"
+          placeholder="New folder name (e.g. Ave Mujica)..."
+          class="flex-1 h-8 px-2.5 bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 font-sans select-text"
+        />
+        <button
+          type="submit"
+          class="h-8 px-3 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-[11px] font-mono font-semibold shrink-0"
+        >
+          CREATE
+        </button>
+      </form>
+
+      <!-- Subfolders List -->
+      <div id="ytm-fp-list" class="flex-1 min-h-[200px] overflow-y-auto divide-y divide-zinc-800/70 bg-zinc-950">
+        <!-- Populated by app.js -->
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-4 py-3 border-t border-zinc-700 bg-zinc-950/70 flex items-center justify-between gap-2 shrink-0">
+        <span id="ytm-fp-status" class="text-[11px] font-mono text-zinc-400 truncate"></span>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            id="ytm-fp-cancel-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-zinc-300 transition-colors"
+          >
+            CANCEL
+          </button>
+          <button
+            id="ytm-fp-select-btn"
+            type="button"
+            class="h-8 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-[11px] font-mono font-semibold inline-flex items-center gap-1.5 transition-colors"
+          >
+            <i data-lucide="check" class="w-3.5 h-3.5"></i>
+            <span>SELECT THIS FOLDER</span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </section>

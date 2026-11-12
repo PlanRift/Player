@@ -18,7 +18,8 @@ export const COOKIES_CONFIG_DIR = path.resolve(__dirname, 'config');
 export const COOKIES_FILE_PATH = path.resolve(COOKIES_CONFIG_DIR, 'cookies.txt');
 
 export const LOW_BITRATE_THRESHOLD_KBPS = 135;
-const ALLOWED_FORMATS = new Set(['opus', 'm4a', 'mp3', 'flac', 'best']);
+const ALLOWED_FORMATS = new Set(['opus', 'm4a']);
+const ALLOWED_DEST_MODES = new Set(['current', 'choose', 'auto']);
 const YT_HOST_RE = /^(?:(?:www|music|m)\.)?(?:youtube\.com|youtu\.be)$/i;
 const YT_COOKIE_DOMAINS = ['youtube.com', 'google.com', 'googleusercontent.com'];
 const YT_AUTH_COOKIE_NAMES = new Set([
@@ -330,43 +331,146 @@ async function inspectLocalAudioFileBitrateKbps(filePath) {
 }
 
 /**
- * Extract the selected stream's bitrate & metadata using yt-dlp --dump-single-json.
+ * Spawn yt-dlp with `--js-runtimes node` and collect stdout/stderr cleanly.
  */
-async function inspectTrackStreamInfo(ytDlp, trackUrl, cookiesActivePath) {
+function spawnYtDlpCollect(ytDlp, args, { timeoutMs = 45000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const fullArgs = [...ytDlp.prefixArgs, '--js-runtimes', 'node', ...args];
+    const child = spawn(ytDlp.command, fullArgs, { windowsHide: true });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      killSpawnedProcess(child).finally(() => {
+        reject(new Error(`yt-dlp timed out after ${Math.round(timeoutMs / 1000)}s`));
+      });
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => {
+      if (stdout.length < 30 * 1024 * 1024) {
+        stdout += chunk.toString('utf8');
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr = (stderr + chunk.toString('utf8')).slice(-2000);
+    });
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        return reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function extractCleanArtist(info) {
+  if (!info || typeof info !== 'object') return '';
+  let raw =
+    info.album_artist ||
+    info.artist ||
+    (Array.isArray(info.artists) && info.artists.length > 0 ? info.artists[0] : '') ||
+    info.creator ||
+    info.uploader ||
+    info.channel ||
+    '';
+  if (Array.isArray(raw)) raw = raw[0] || '';
+  return String(raw || '')
+    .replace(/\s*-\s*Topic$/i, '')
+    .trim();
+}
+
+function pickAudioStreamFromInfo(info, requestedFormat = 'opus') {
+  const formats = Array.isArray(info?.formats) ? info.formats : [];
+  const audioOnly = formats.filter(
+    (f) => f && (!f.vcodec || f.vcodec === 'none') && f.acodec && f.acodec !== 'none'
+  );
+
+  const byBitrateDesc = (a, b) => (Number(b.abr || b.tbr) || 0) - (Number(a.abr || a.tbr) || 0);
+
+  let chosen = null;
+  if (audioOnly.length > 0) {
+    if (requestedFormat === 'm4a') {
+      chosen =
+        audioOnly.find((f) => String(f.format_id) === '141') ||
+        audioOnly
+          .filter((f) => f.ext === 'm4a' || f.audio_ext === 'm4a' || String(f.acodec).includes('mp4a'))
+          .sort(byBitrateDesc)[0] ||
+        audioOnly.slice().sort(byBitrateDesc)[0];
+    } else {
+      chosen =
+        audioOnly.find((f) => String(f.format_id) === '251') ||
+        audioOnly
+          .filter((f) => String(f.acodec).includes('opus') || f.ext === 'webm')
+          .sort(byBitrateDesc)[0] ||
+        audioOnly.slice().sort(byBitrateDesc)[0];
+    }
+  }
+
+  if (chosen) {
+    const abr = Number(chosen.abr);
+    const tbr = Number(chosen.tbr);
+    return {
+      formatId: String(chosen.format_id || ''),
+      acodec: String(chosen.acodec || ''),
+      ext: String(chosen.ext || ''),
+      streamBitrateKbps: abr > 0 ? Math.round(abr) : tbr > 0 ? Math.round(tbr) : 0,
+    };
+  }
+
+  const rawAbr = Number(info?.abr);
+  const rawTbr = Number(info?.tbr);
+  const isAudioOnly = !info?.vcodec || info.vcodec === 'none';
+  return {
+    formatId: String(info?.format_id || ''),
+    acodec: String(info?.acodec || ''),
+    ext: String(info?.ext || ''),
+    streamBitrateKbps: rawAbr > 0 ? Math.round(rawAbr) : isAudioOnly && rawTbr > 0 ? Math.round(rawTbr) : 0,
+  };
+}
+
+/**
+ * Extract stream bitrate & metadata using yt-dlp --dump-single-json (without -f format filtering).
+ */
+async function inspectTrackStreamInfo(ytDlp, trackUrl, cookiesActivePath, requestedFormat = 'opus') {
   const args = [
-    ...ytDlp.prefixArgs,
     '--no-playlist',
     '--no-warnings',
     '--dump-single-json',
-    '-f',
-    'bestaudio/best',
   ];
   if (cookiesActivePath) {
     args.push('--cookies', cookiesActivePath);
   }
   args.push('--', trackUrl);
 
-  const { stdout } = await execFileAsync(ytDlp.command, args, {
-    timeout: 45000,
-    maxBuffer: 25 * 1024 * 1024,
-    windowsHide: true,
-  });
+  const { stdout } = await spawnYtDlpCollect(ytDlp, args, { timeoutMs: 45000 });
   const info = JSON.parse(stdout);
-  const rawAbr = Number(info.abr);
-  const rawTbr = Number(info.tbr);
-  const isAudioOnly = !info.vcodec || info.vcodec === 'none';
-  const streamBitrateKbps =
-    rawAbr > 0 ? Math.round(rawAbr) : isAudioOnly && rawTbr > 0 ? Math.round(rawTbr) : 0;
+  const stream = pickAudioStreamFromInfo(info, requestedFormat);
 
   return {
     id: info.id || '',
     title: info.track || info.title || 'Unknown Track',
-    artist: info.artist || info.uploader || info.channel || '',
+    artist: extractCleanArtist(info),
     album: info.album || info.playlist_title || '',
-    formatId: String(info.format_id || ''),
-    acodec: String(info.acodec || ''),
-    ext: String(info.ext || ''),
-    streamBitrateKbps,
+    formatId: stream.formatId,
+    acodec: stream.acodec,
+    ext: stream.ext,
+    streamBitrateKbps: stream.streamBitrateKbps,
   };
 }
 
@@ -375,7 +479,6 @@ async function inspectTrackStreamInfo(ytDlp, trackUrl, cookiesActivePath) {
  */
 async function fetchUrlPlaylistInfo(ytDlp, url, cookiesActivePath) {
   const args = [
-    ...ytDlp.prefixArgs,
     '--flat-playlist',
     '--no-warnings',
     '--dump-single-json',
@@ -385,11 +488,7 @@ async function fetchUrlPlaylistInfo(ytDlp, url, cookiesActivePath) {
   }
   args.push('--', url);
 
-  const { stdout } = await execFileAsync(ytDlp.command, args, {
-    timeout: 45000,
-    maxBuffer: 30 * 1024 * 1024,
-    windowsHide: true,
-  });
+  const { stdout } = await spawnYtDlpCollect(ytDlp, args, { timeoutMs: 45000 });
   const data = JSON.parse(stdout);
 
   if (Array.isArray(data.entries) && data.entries.length > 0) {
@@ -403,8 +502,9 @@ async function fetchUrlPlaylistInfo(ytDlp, url, cookiesActivePath) {
         return {
           index: idx + 1,
           id: entry.id || '',
-          title: entry.title || `Track ${idx + 1}`,
-          artist: entry.artist || entry.uploader || entry.channel || data.uploader || '',
+          title: entry.track || entry.title || `Track ${idx + 1}`,
+          artist: extractCleanArtist(entry) || extractCleanArtist(data),
+          album: entry.album || data.album || data.title || data.playlist_title || '',
           url: entryUrl.startsWith('http') ? entryUrl : `https://music.youtube.com/watch?v=${entry.id}`,
         };
       })
@@ -425,7 +525,8 @@ async function fetchUrlPlaylistInfo(ytDlp, url, cookiesActivePath) {
         index: 1,
         id: data.id || '',
         title: data.track || data.title || 'YouTube Music Track',
-        artist: data.artist || data.uploader || data.channel || '',
+        artist: extractCleanArtist(data),
+        album: data.album || '',
         url: data.webpage_url || url,
       },
     ],
@@ -478,6 +579,132 @@ export function registerYtmRoutes(app, deps) {
   const jobs = new Map();
   const MAX_HISTORY_JOBS = 20;
 
+  const resolvedStorageRoot = path.resolve(STORAGE_DIR);
+  const resolvedMusicRoot = path.resolve(MUSIC_DIR);
+  const musicRelFromStorage = path.relative(resolvedStorageRoot, resolvedMusicRoot).replace(/\\/g, '/');
+
+  function canonicalComparePath(targetPath) {
+    const resolved = path.resolve(String(targetPath || ''));
+    const stripped = resolved.replace(/[\\/.\s]+$/, '');
+    return process.platform === 'win32' ? stripped.toLowerCase() : stripped;
+  }
+
+  const CANONICAL_MUSIC_ROOT = canonicalComparePath(resolvedMusicRoot);
+
+  function assertInsideMusicRoot(resolvedCandidate) {
+    const resolved = path.resolve(resolvedCandidate);
+    const canonical = canonicalComparePath(resolved);
+    if (
+      canonical !== CANONICAL_MUSIC_ROOT &&
+      !canonical.startsWith(CANONICAL_MUSIC_ROOT + path.sep)
+    ) {
+      throw new Error(
+        `Security boundary violation: Destination "${resolved}" must stay inside Music root "${resolvedMusicRoot}"`
+      );
+    }
+    return resolved;
+  }
+
+  /**
+   * Resolve a relative path strictly inside MUSIC_DIR via path.resolve.
+   * Accepts paths relative to MUSIC_DIR (e.g. "Artist/Album") or prefixed with musicRelFromStorage (e.g. "Music/Artist/Album").
+   */
+  function resolveSafeMusicSubPath(rawRel = '', { stripMusicPrefix = true } = {}) {
+    const input = String(rawRel ?? '').normalize('NFC').trim();
+    if (input.includes('\0')) {
+      throw new Error('Security boundary violation: null byte in destination path');
+    }
+
+    let parts = input.replace(/\\/g, '/').split('/').filter(Boolean);
+    if (
+      stripMusicPrefix &&
+      musicRelFromStorage &&
+      parts.length > 0 &&
+      parts[0].toLowerCase() === musicRelFromStorage.split('/')[0].toLowerCase()
+    ) {
+      const musicParts = musicRelFromStorage.split('/').filter(Boolean);
+      const matchesPrefix =
+        parts.length >= musicParts.length &&
+        musicParts.every((mp, idx) => parts[idx].toLowerCase() === mp.toLowerCase());
+      if (matchesPrefix) {
+        parts = parts.slice(musicParts.length);
+      }
+    }
+
+    const cleanParts = [];
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (trimmed === '.') continue;
+      if (/^\.{2,}$/.test(trimmed)) {
+        throw new Error(`Security boundary violation: traversal segment "${trimmed}" is forbidden`);
+      }
+      if (trimmed.replace(/[\s.]+$/, '') === '') {
+        throw new Error(`Security boundary violation: invalid segment "${trimmed}"`);
+      }
+      const clean = sanitizePathSegment(trimmed);
+      if (!clean) {
+        throw new Error(`Security boundary violation: invalid path segment "${trimmed}"`);
+      }
+      cleanParts.push(clean);
+    }
+
+    const resolved =
+      cleanParts.length > 0
+        ? path.resolve(resolvedMusicRoot, ...cleanParts)
+        : path.resolve(resolvedMusicRoot);
+    return assertInsideMusicRoot(resolved);
+  }
+
+  /**
+   * Resolve a Files UI active folder path (relative to STORAGE_DIR) and verify via path.resolve
+   * that it sits strictly inside MUSIC_DIR (G:\Server\Music).
+   */
+  function resolveCurrentFolderInMusic(rawStorageRel = '') {
+    const input = String(rawStorageRel ?? '').normalize('NFC').trim();
+    if (input.includes('\0')) {
+      throw new Error('Security boundary violation: null byte in folder path');
+    }
+    const parts = input.replace(/\\/g, '/').split('/').filter(Boolean);
+    const cleanParts = [];
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (trimmed === '.') continue;
+      if (/^\.{2,}$/.test(trimmed)) {
+        throw new Error(`Security boundary violation: traversal segment "${trimmed}" is forbidden`);
+      }
+      const clean = sanitizePathSegment(trimmed);
+      if (!clean) {
+        throw new Error(`Security boundary violation: invalid path segment "${trimmed}"`);
+      }
+      cleanParts.push(clean);
+    }
+
+    const resolved =
+      cleanParts.length > 0
+        ? path.resolve(resolvedStorageRoot, ...cleanParts)
+        : resolvedStorageRoot;
+
+    return assertInsideMusicRoot(resolved);
+  }
+
+  /**
+   * Compute and validate Root\Music\(Artist)\(Album/Single) directory via path.resolve for Auto-Sort mode.
+   */
+  function resolveAutoSortTrackDir({ artist, album, trackTitle, collectionTitle, isPlaylist }) {
+    const rawArtist = String(artist || '').replace(/\s*-\s*Topic$/i, '').trim();
+    const artistSeg = sanitizePathSegment(rawArtist) || 'Unknown Artist';
+
+    const rawAlbum =
+      String(album || '').trim() ||
+      String(collectionTitle || '').trim() ||
+      (isPlaylist ? 'Unknown Album' : String(trackTitle || '').trim()) ||
+      'Singles';
+    const albumSeg = sanitizePathSegment(rawAlbum) || 'Singles';
+
+    const candidate = path.resolve(resolvedMusicRoot, artistSeg, albumSeg);
+    return assertInsideMusicRoot(candidate);
+  }
+
   function pruneOldJobs() {
     if (jobs.size <= MAX_HISTORY_JOBS) return;
     const list = [...jobs.values()].sort((a, b) => a.createdAt - b.createdAt);
@@ -495,6 +722,7 @@ export function registerYtmRoutes(app, deps) {
       id: job.id,
       url: job.url,
       format: job.format,
+      destMode: job.destMode,
       destRelPath: job.destRelPath,
       collectionTitle: job.collectionTitle,
       status: job.status,
@@ -528,7 +756,8 @@ export function registerYtmRoutes(app, deps) {
    * Move a downloaded track from staging into its verified NTFS/Linux-safe MUSIC_DIR destination.
    */
   async function commitStagedTrackToDest(stagedFilePath, destDir, trackIndex, totalTracks, desiredBaseName = '') {
-    await fs.mkdir(destDir, { recursive: true });
+    const safeDestDir = assertInsideMusicRoot(destDir);
+    await fs.mkdir(safeDestDir, { recursive: true });
     const ext = path.extname(stagedFilePath);
     const rawStem = desiredBaseName || path.basename(stagedFilePath, ext);
     const cleanStem = sanitizePathSegment(rawStem) || `track_${trackIndex}`;
@@ -539,9 +768,11 @@ export function registerYtmRoutes(app, deps) {
     const baseWithPrefix = hasPrefix ? cleanStem : `${prefix}${cleanStem}`;
     const finalFileName = `${baseWithPrefix}${ext}`;
 
-    const relDestDir = path.relative(STORAGE_DIR, destDir);
+    const relDestDir = path.relative(STORAGE_DIR, safeDestDir);
     const verifiedDir = resolveSafePath(relDestDir, { forbidRoot: true });
-    const finalTarget = path.join(verifiedDir, finalFileName);
+    assertInsideMusicRoot(verifiedDir);
+    const finalTarget = path.resolve(verifiedDir, finalFileName);
+    assertInsideMusicRoot(finalTarget);
     assertSafeFileWriteTarget(finalTarget, verifiedDir);
 
     await fs.copyFile(stagedFilePath, finalTarget);
@@ -551,11 +782,12 @@ export function registerYtmRoutes(app, deps) {
       fileName: finalFileName,
       fullPath: finalTarget,
       relPath: path.relative(STORAGE_DIR, finalTarget).replace(/\\/g, '/'),
+      folderRelPath: path.relative(STORAGE_DIR, verifiedDir).replace(/\\/g, '/'),
     };
   }
 
   /**
-   * Download a single track into staging and return staged file path + bitrate metadata.
+   * Download a single track into staging using explicit format selectors & JS runtime.
    */
   async function downloadTrackIntoStaging(job, ytDlp, track, cookiesActivePath) {
     await fs.mkdir(job.stagingDir, { recursive: true });
@@ -567,22 +799,35 @@ export function registerYtmRoutes(app, deps) {
 
     const ffmpegBin = getFfmpegBinaryPath();
     const outTemplate = path.join(job.stagingDir, '%(title).180B.%(ext)s');
+
+    const formatSelector =
+      job.format === 'm4a'
+        ? '141/bestaudio[ext=m4a]/bestaudio'
+        : '251/bestaudio[acodec=opus]/bestaudio';
+    const audioFormat = job.format === 'm4a' ? 'm4a' : 'opus';
+
     const args = [
       ...ytDlp.prefixArgs,
+      '--js-runtimes',
+      'node',
       '--no-playlist',
       '--no-warnings',
       '--newline',
+      '--windows-filenames',
       '--ffmpeg-location',
       ffmpegBin.includes(path.sep) ? path.dirname(ffmpegBin) : ffmpegBin,
       '-f',
-      'bestaudio/best',
+      formatSelector,
+      '-x',
+      '--audio-format',
+      audioFormat,
+      '--audio-quality',
+      '0',
       '--add-metadata',
       '--embed-thumbnail',
+      '--write-info-json',
     ];
 
-    if (job.format !== 'best') {
-      args.push('--extract-audio', '--audio-format', job.format, '--audio-quality', '0');
-    }
     if (cookiesActivePath) {
       args.push('--cookies', cookiesActivePath);
     }
@@ -594,7 +839,7 @@ export function registerYtmRoutes(app, deps) {
       job.activeChild = child;
 
       child.stderr.on('data', (chunk) => {
-        stderrTail = (stderrTail + chunk.toString()).slice(-1200);
+        stderrTail = (stderrTail + chunk.toString()).slice(-1500);
       });
 
       child.on('error', (err) => {
@@ -614,14 +859,33 @@ export function registerYtmRoutes(app, deps) {
       });
     });
 
-    const files = (await fs.readdir(job.stagingDir)).filter((f) => !f.endsWith('.part') && !f.endsWith('.ytdl'));
-    if (files.length === 0) {
+    const stagingEntries = await fs.readdir(job.stagingDir);
+    let trackInfoJson = null;
+    const infoFile = stagingEntries.find((f) => f.endsWith('.info.json'));
+    if (infoFile) {
+      try {
+        trackInfoJson = JSON.parse(await fs.readFile(path.join(job.stagingDir, infoFile), 'utf8'));
+      } catch (_) {}
+    }
+
+    const audioFiles = stagingEntries.filter((f) => {
+      const lower = f.toLowerCase();
+      return (
+        !lower.endsWith('.part') &&
+        !lower.endsWith('.ytdl') &&
+        !lower.endsWith('.info.json') &&
+        !lower.endsWith('.temp') &&
+        /\.(opus|m4a|mp3|flac|ogg|aac|wav|webm|mp4)$/i.test(lower)
+      );
+    });
+
+    if (audioFiles.length === 0) {
       throw new Error('yt-dlp finished without producing an audio file');
     }
 
-    const stagedFilePath = path.join(job.stagingDir, files[0]);
+    const stagedFilePath = path.join(job.stagingDir, audioFiles[0]);
     const fileBitrateKbps = await inspectLocalAudioFileBitrateKbps(stagedFilePath);
-    return { stagedFilePath, fileBitrateKbps };
+    return { stagedFilePath, fileBitrateKbps, trackInfoJson };
   }
 
   /**
@@ -646,16 +910,7 @@ export function registerYtmRoutes(app, deps) {
         job.tracks = playlistInfo.tracks;
         job.totalTracks = playlistInfo.tracks.length;
         job.collectionTitle = playlistInfo.collectionTitle;
-
-        // If downloading a playlist/album into MUSIC_DIR or parent folder without explicit album folder, create safe subfolder
-        if (playlistInfo.isPlaylist && playlistInfo.collectionTitle && !job.explicitSubfolder) {
-          const folderSeg = sanitizePathSegment(playlistInfo.collectionTitle) || `YTM_Playlist_${Date.now()}`;
-          const candidateDir = path.join(job.baseDestDir, folderSeg);
-          const rel = path.relative(STORAGE_DIR, candidateDir);
-          job.destDir = resolveSafePath(rel, { forbidRoot: true });
-          job.destRelPath = path.relative(STORAGE_DIR, job.destDir).replace(/\\/g, '/');
-          job.createdDestFolder = !fsSync.existsSync(job.destDir);
-        }
+        job.isPlaylist = Boolean(playlistInfo.isPlaylist);
       }
 
       if (job.cancelRequested) {
@@ -678,11 +933,13 @@ export function registerYtmRoutes(app, deps) {
         try {
           let streamInfo = null;
           if (i === 0 && !job.allowLowBitrate) {
-            streamInfo = await inspectTrackStreamInfo(ytDlp, track.url, cookiesPathForCmd);
+            streamInfo = await inspectTrackStreamInfo(ytDlp, track.url, cookiesPathForCmd, job.format);
             if (streamInfo.title) {
               track.title = streamInfo.title;
               job.currentTrackTitle = streamInfo.title;
             }
+            if (streamInfo.artist) track.artist = streamInfo.artist;
+            if (streamInfo.album) track.album = streamInfo.album;
           }
 
           if (job.cancelRequested) {
@@ -693,12 +950,41 @@ export function registerYtmRoutes(app, deps) {
           job.status = 'downloading';
           job.updatedAt = Date.now();
 
-          const { stagedFilePath, fileBitrateKbps } = await downloadTrackIntoStaging(
+          const { stagedFilePath, fileBitrateKbps, trackInfoJson } = await downloadTrackIntoStaging(
             job,
             ytDlp,
             track,
             cookiesPathForCmd
           );
+
+          // Enrich track metadata from downloaded .info.json (crucial for Auto-Sort tracks 2..N)
+          if (trackInfoJson) {
+            const jsonTitle = trackInfoJson.track || trackInfoJson.title;
+            const jsonArtist = extractCleanArtist(trackInfoJson);
+            const jsonAlbum = trackInfoJson.album || trackInfoJson.playlist_title || '';
+            if (jsonTitle) {
+              track.title = jsonTitle;
+              job.currentTrackTitle = jsonTitle;
+            }
+            if (jsonArtist) track.artist = jsonArtist;
+            if (jsonAlbum) track.album = jsonAlbum;
+          }
+
+          // Determine track destination directory
+          let trackDestDir = job.destDir;
+          if (job.destMode === 'auto') {
+            trackDestDir = resolveAutoSortTrackDir({
+              artist: track.artist,
+              album: track.album,
+              trackTitle: track.title,
+              collectionTitle: job.collectionTitle,
+              isPlaylist: job.isPlaylist || job.totalTracks > 1,
+            });
+            job.destDir = trackDestDir;
+            job.destRelPath = path.relative(STORAGE_DIR, trackDestDir).replace(/\\/g, '/');
+          } else {
+            trackDestDir = assertInsideMusicRoot(job.destDir);
+          }
 
           // Determine pre-transcode source stream bitrate vs file bitrate
           const detectedKbps =
@@ -729,6 +1015,7 @@ export function registerYtmRoutes(app, deps) {
               formatId: streamInfo?.formatId || '',
               acodec: streamInfo?.acodec || '',
               stagedFilePath,
+              plannedDestDir: trackDestDir,
               plannedFileName: `${job.totalTracks > 1 ? '01 - ' : ''}${cleanTitle}${stagedExt}`,
               cookiesWereUsed: Boolean(cookiesPathForCmd),
             };
@@ -738,7 +1025,7 @@ export function registerYtmRoutes(app, deps) {
 
           const committed = await commitStagedTrackToDest(
             stagedFilePath,
-            job.destDir,
+            trackDestDir,
             i + 1,
             job.totalTracks,
             track.title
@@ -802,7 +1089,7 @@ export function registerYtmRoutes(app, deps) {
         .sort((a, b) => b.createdAt - a.createdAt)
         .map(serializeJob);
 
-      const defaultMusicRel = path.relative(STORAGE_DIR, MUSIC_DIR).replace(/\\/g, '/') || 'Music';
+      const defaultMusicRel = musicRelFromStorage || 'Music';
       res.json({
         ytDlp: {
           available: ytDlp.available,
@@ -813,11 +1100,89 @@ export function registerYtmRoutes(app, deps) {
         },
         cookies,
         defaultMusicRelPath: defaultMusicRel,
+        musicRootDisplay: resolvedMusicRoot,
         bitrateThresholdKbps: LOW_BITRATE_THRESHOLD_KBPS,
         jobs: jobList,
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/ytm/folders - Lightweight directory browser strictly scoped to G:\Server\Music (MUSIC_DIR)
+  app.get('/api/ytm/folders', async (req, res) => {
+    try {
+      const rawPath = String(req.query.path || '').trim();
+      const targetDir = resolveSafeMusicSubPath(rawPath, { stripMusicPrefix: true });
+
+      if (!fsSync.existsSync(targetDir)) {
+        return res.status(404).json({ error: 'Folder not found inside Music directory' });
+      }
+      const stat = await fs.lstat(targetDir);
+      if (!stat.isDirectory()) {
+        return res.status(400).json({ error: 'Requested path is not a folder' });
+      }
+
+      const entries = await fs.readdir(targetDir, { withFileTypes: true });
+      const folders = entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+        .map((e) => {
+          const full = path.resolve(targetDir, e.name);
+          return {
+            name: e.name,
+            musicSubPath: path.relative(resolvedMusicRoot, full).replace(/\\/g, '/'),
+            storageRelPath: path.relative(resolvedStorageRoot, full).replace(/\\/g, '/'),
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      const musicSubPath = path.relative(resolvedMusicRoot, targetDir).replace(/\\/g, '/');
+      const parentFull = path.dirname(targetDir);
+      const isRoot = canonicalComparePath(targetDir) === CANONICAL_MUSIC_ROOT;
+      const parentMusicSubPath = isRoot
+        ? ''
+        : path.relative(resolvedMusicRoot, parentFull).replace(/\\/g, '/');
+
+      res.json({
+        musicSubPath,
+        storageRelPath: path.relative(resolvedStorageRoot, targetDir).replace(/\\/g, '/'),
+        displayPath: targetDir,
+        parentMusicSubPath,
+        isRoot,
+        folders,
+      });
+    } catch (err) {
+      res.status(403).json({ error: err.message });
+    }
+  });
+
+  // POST /api/ytm/folders - Create a new subfolder strictly inside G:\Server\Music (MUSIC_DIR)
+  app.post('/api/ytm/folders', async (req, res) => {
+    try {
+      const rawParent = String(req.body?.path || '').trim();
+      const rawName = String(req.body?.name || '').trim();
+      if (!rawName || rawName.includes('/') || rawName.includes('\\') || /^\.+$/.test(rawName)) {
+        return res.status(400).json({ error: 'Invalid folder name' });
+      }
+      const cleanName = sanitizePathSegment(rawName);
+      if (!cleanName) {
+        return res.status(400).json({ error: 'Folder name contains only invalid characters' });
+      }
+
+      const parentDir = resolveSafeMusicSubPath(rawParent, { stripMusicPrefix: true });
+      const newDir = assertInsideMusicRoot(path.resolve(parentDir, cleanName));
+      await fs.mkdir(newDir, { recursive: true });
+
+      res.json({
+        success: true,
+        folder: {
+          name: cleanName,
+          musicSubPath: path.relative(resolvedMusicRoot, newDir).replace(/\\/g, '/'),
+          storageRelPath: path.relative(resolvedStorageRoot, newDir).replace(/\\/g, '/'),
+        },
+      });
+    } catch (err) {
+      res.status(403).json({ error: err.message });
     }
   });
 
@@ -873,22 +1238,35 @@ export function registerYtmRoutes(app, deps) {
       const url = validateYtmUrl(req.body?.url);
       const requestedFormat = String(req.body?.format || 'opus').toLowerCase();
       const format = ALLOWED_FORMATS.has(requestedFormat) ? requestedFormat : 'opus';
+
+      const requestedMode = String(req.body?.destMode || 'auto').toLowerCase();
+      const destMode = ALLOWED_DEST_MODES.has(requestedMode) ? requestedMode : 'auto';
       const rawTargetDir = String(req.body?.targetDir || '').trim();
 
-      let baseDestDir = MUSIC_DIR;
-      let explicitSubfolder = false;
-      if (rawTargetDir) {
-        const resolved = resolveSafePath(rawTargetDir, { forbidRoot: true });
-        if (fsSync.existsSync(resolved) && !fsSync.lstatSync(resolved).isDirectory()) {
+      let baseDestDir = resolvedMusicRoot;
+      if (destMode === 'current') {
+        if (!rawTargetDir) {
+          baseDestDir = resolvedMusicRoot;
+        } else {
+          try {
+            baseDestDir = resolveCurrentFolderInMusic(rawTargetDir);
+          } catch (boundaryErr) {
+            throw new Error(
+              `Current Open Folder must be inside ${resolvedMusicRoot}. Navigate into Music first or switch to Choose Folder / Auto-Sort.`
+            );
+          }
+        }
+        if (fsSync.existsSync(baseDestDir) && !fsSync.lstatSync(baseDestDir).isDirectory()) {
           throw new Error('Target download destination exists and is not a folder');
         }
-        baseDestDir = resolved;
-        // Treat explicit subfolder inside Music (e.g. "Music/Artist/Album") as user-chosen folder
-        const musicRel = path.relative(STORAGE_DIR, MUSIC_DIR).replace(/\\/g, '/');
-        const targetRel = path.relative(STORAGE_DIR, resolved).replace(/\\/g, '/');
-        if (targetRel !== musicRel) {
-          explicitSubfolder = true;
+      } else if (destMode === 'choose') {
+        baseDestDir = resolveSafeMusicSubPath(rawTargetDir, { stripMusicPrefix: true });
+        if (fsSync.existsSync(baseDestDir) && !fsSync.lstatSync(baseDestDir).isDirectory()) {
+          throw new Error('Target download destination exists and is not a folder');
         }
+      } else {
+        // auto mode
+        baseDestDir = resolvedMusicRoot;
       }
 
       const id = `ytm_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -897,11 +1275,13 @@ export function registerYtmRoutes(app, deps) {
         id,
         url,
         format,
+        destMode,
         baseDestDir,
         destDir: baseDestDir,
-        destRelPath: path.relative(STORAGE_DIR, baseDestDir).replace(/\\/g, '/'),
-        explicitSubfolder,
+        destRelPath: path.relative(resolvedStorageRoot, baseDestDir).replace(/\\/g, '/'),
+        explicitSubfolder: destMode !== 'auto',
         createdDestFolder: false,
+        isPlaylist: false,
         stagingDir,
         collectionTitle: '',
         tracks: [],
@@ -965,9 +1345,10 @@ export function registerYtmRoutes(app, deps) {
       const alert = job.lowBitrateAlert;
       if (alert?.stagedFilePath && fsSync.existsSync(alert.stagedFilePath)) {
         const track1 = job.tracks[0];
+        const destForTrack1 = alert.plannedDestDir || job.destDir;
         const committed = await commitStagedTrackToDest(
           alert.stagedFilePath,
-          job.destDir,
+          destForTrack1,
           1,
           job.totalTracks,
           track1?.title || alert.trackTitle

@@ -2577,6 +2577,7 @@
       updateBridgeStatusBadge(true, 'ONLINE');
       renderFilesBreadcrumbs();
       renderFilesList();
+      if (typeof syncYtmDestinationUI === 'function') syncYtmDestinationUI();
     } catch (err) {
       updateBridgeStatusBadge(false, err.message.includes('401') ? '401 UNAUTHORIZED' : 'OFFLINE');
       if (tbody) {
@@ -5145,12 +5146,134 @@
     cookies: null,
     jobs: [],
     defaultMusicRelPath: 'Music',
+    destMode: ['current', 'choose', 'auto'].includes(localStorage.getItem('century.ytm_dest_mode'))
+      ? localStorage.getItem('century.ytm_dest_mode')
+      : 'auto',
+    chosenMusicSubPath: localStorage.getItem('century.ytm_chosen_dir') || '',
+    format: localStorage.getItem('century.ytm_format') === 'm4a' ? 'm4a' : 'opus',
+    folderPicker: {
+      open: false,
+      browsingSubPath: '',
+      parentSubPath: '',
+      isRoot: true,
+      folders: [],
+      newFolderOpen: false,
+    },
     pollTimer: null,
     pausedAlertedJobIds: new Set(),
     completedSyncedJobIds: new Set(),
     busy: false,
     initialized: false,
   };
+
+  function isPathInsideMusicRoot(relStoragePath) {
+    const clean = normalizeSubsonicPath(relStoragePath || '');
+    const musicRoot = normalizeSubsonicPath(ytmState.defaultMusicRelPath || 'Music');
+    if (!musicRoot) return true;
+    return (
+      clean.toLowerCase() === musicRoot.toLowerCase() ||
+      clean.toLowerCase().startsWith(`${musicRoot.toLowerCase()}/`)
+    );
+  }
+
+  function syncYtmDestinationUI() {
+    const mode = ytmState.destMode || 'auto';
+    const previewEl = $('ytm-dest-preview-text');
+    const browseBtn = $('ytm-open-folder-picker-btn');
+    const musicRoot = normalizeSubsonicPath(ytmState.defaultMusicRelPath || 'Music') || 'Music';
+
+    const modeButtons = [
+      { id: 'ytm-dest-mode-current', key: 'current' },
+      { id: 'ytm-dest-mode-choose', key: 'choose' },
+      { id: 'ytm-dest-mode-auto', key: 'auto' },
+    ];
+    for (const item of modeButtons) {
+      const btn = $(item.id);
+      if (!btn) continue;
+      const active = mode === item.key;
+      btn.className = `h-8 px-2.5 border text-[11px] font-mono inline-flex items-center justify-center gap-1.5 transition-colors ${
+        active
+          ? 'border-emerald-400 bg-emerald-400/15 text-emerald-300 font-semibold'
+          : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100'
+      }`;
+    }
+
+    if (browseBtn) {
+      browseBtn.classList.toggle('hidden', mode !== 'choose');
+    }
+
+    if (previewEl) {
+      if (mode === 'current') {
+        const cur = normalizeSubsonicPath(filesState.currentPath || '');
+        if (!cur) {
+          previewEl.textContent = `Current folder is root — navigate into /${musicRoot} above to save here`;
+          previewEl.className = 'text-[11px] font-mono text-amber-300 truncate';
+        } else if (!isPathInsideMusicRoot(cur)) {
+          previewEl.textContent = `/${cur} is outside /${musicRoot} — open /${musicRoot} or switch mode`;
+          previewEl.className = 'text-[11px] font-mono text-amber-300 truncate';
+        } else {
+          previewEl.textContent = `Saving directly into: /${cur}`;
+          previewEl.className = 'text-[11px] font-mono text-emerald-300 truncate';
+        }
+      } else if (mode === 'choose') {
+        const chosen = normalizeSubsonicPath(ytmState.chosenMusicSubPath || '');
+        const fullDisplay = chosen ? `/${musicRoot}/${chosen}` : `/${musicRoot}`;
+        previewEl.textContent = `Selected custom folder: ${fullDisplay}`;
+        previewEl.className = 'text-[11px] font-mono text-emerald-300 truncate';
+      } else {
+        previewEl.textContent = `Auto-Sort → /${musicRoot}/(Artist)/(Album or Single)/(Song) [Windows-safe]`;
+        previewEl.className = 'text-[11px] font-mono text-zinc-400 truncate';
+      }
+    }
+  }
+
+  function setYtmDestMode(mode, { openPickerIfChoose = false } = {}) {
+    const next = ['current', 'choose', 'auto'].includes(mode) ? mode : 'auto';
+    ytmState.destMode = next;
+    localStorage.setItem('century.ytm_dest_mode', next);
+    syncYtmDestinationUI();
+    if (next === 'choose' && openPickerIfChoose) {
+      openYtmFolderPicker(ytmState.chosenMusicSubPath || '');
+    }
+  }
+
+  function syncYtmFormatUI() {
+    const fmt = ytmState.format === 'm4a' ? 'm4a' : 'opus';
+    const opusBtn = $('ytm-format-btn-opus');
+    const m4aBtn = $('ytm-format-btn-m4a');
+    const hintEl = $('ytm-format-spec-hint');
+    const subEl = $('ytm-format-subtext');
+
+    if (opusBtn) {
+      opusBtn.className = `h-9 px-2.5 border text-[11px] font-mono inline-flex items-center justify-center gap-1.5 transition-colors ${
+        fmt === 'opus'
+          ? 'border-emerald-400 bg-emerald-400/15 text-emerald-300 font-semibold'
+          : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100'
+      }`;
+    }
+    if (m4aBtn) {
+      m4aBtn.className = `h-9 px-2.5 border text-[11px] font-mono inline-flex items-center justify-center gap-1.5 transition-colors ${
+        fmt === 'm4a'
+          ? 'border-emerald-400 bg-emerald-400/15 text-emerald-300 font-semibold'
+          : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:text-zinc-100'
+      }`;
+    }
+    if (hintEl) {
+      hintEl.textContent = fmt === 'm4a' ? '-f 141 · 256kbps AAC' : '-f 251 · High-Quality Opus';
+    }
+    if (subEl) {
+      subEl.textContent =
+        fmt === 'm4a'
+          ? 'Format 141 / bestaudio[ext=m4a] · Embedded tags & cover'
+          : 'Format 251 / bestaudio[acodec=opus] · Embedded tags & cover';
+    }
+  }
+
+  function setYtmFormat(fmt) {
+    ytmState.format = fmt === 'm4a' ? 'm4a' : 'opus';
+    localStorage.setItem('century.ytm_format', ytmState.format);
+    syncYtmFormatUI();
+  }
 
   function formatYtmRelativeTime(ms) {
     if (!ms) return '';
@@ -5456,6 +5579,7 @@
       ytmState.ytDlpVersion = data.ytDlp?.version || null;
       ytmState.defaultMusicRelPath = data.defaultMusicRelPath || 'Music';
       ytmState.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      syncYtmDestinationUI();
 
       const engineBadge = $('ytm-engine-badge');
       if (engineBadge) {
@@ -5552,12 +5676,156 @@
     }
   }
 
+  function closeYtmFolderPicker() {
+    ytmState.folderPicker.open = false;
+    $('ytm-folder-picker-modal')?.classList.add('hidden');
+  }
+
+  function setYtmPickerNewFolderOpen(open) {
+    ytmState.folderPicker.newFolderOpen = Boolean(open);
+    const form = $('ytm-fp-new-folder-form');
+    if (form) {
+      form.classList.toggle('hidden', !ytmState.folderPicker.newFolderOpen);
+      if (ytmState.folderPicker.newFolderOpen) {
+        setTimeout(() => $('ytm-fp-new-folder-input')?.focus(), 40);
+      }
+    }
+  }
+
+  async function loadYtmFolderPicker(musicSubPath = '') {
+    const listEl = $('ytm-fp-list');
+    const pathEl = $('ytm-fp-current-path');
+    const upBtn = $('ytm-fp-up-btn');
+    const statusEl = $('ytm-fp-status');
+    const musicRoot = normalizeSubsonicPath(ytmState.defaultMusicRelPath || 'Music') || 'Music';
+
+    if (listEl) {
+      listEl.innerHTML = `
+        <div class="p-6 flex items-center justify-center gap-2 text-xs font-mono text-zinc-400">
+          <i data-lucide="loader-2" class="w-4 h-4 text-emerald-400 animate-spin"></i>
+          <span>Loading folders...</span>
+        </div>
+      `;
+      refreshIcons();
+    }
+
+    try {
+      const res = await fetch(
+        `${getFileBridgeBase()}/api/ytm/folders?path=${encodeURIComponent(musicSubPath || '')}`,
+        { headers: getFileBridgeHeaders() }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      ytmState.folderPicker.browsingSubPath = data.musicSubPath || '';
+      ytmState.folderPicker.parentSubPath = data.parentMusicSubPath || '';
+      ytmState.folderPicker.isRoot = Boolean(data.isRoot);
+      ytmState.folderPicker.folders = Array.isArray(data.folders) ? data.folders : [];
+
+      if (pathEl) {
+        pathEl.textContent = data.musicSubPath ? `/${musicRoot}/${data.musicSubPath}` : `/${musicRoot}`;
+      }
+      if (upBtn) {
+        upBtn.disabled = Boolean(data.isRoot);
+      }
+      if (statusEl) {
+        statusEl.textContent = `${ytmState.folderPicker.folders.length} subfolder(s)`;
+      }
+
+      if (!listEl) return;
+      if (ytmState.folderPicker.folders.length === 0) {
+        listEl.innerHTML = `
+          <div class="p-8 text-center text-xs font-mono text-zinc-500">
+            No subfolders here. Select this folder or create a new folder above.
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = '';
+      for (const folder of ytmState.folderPicker.folders) {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'w-full px-4 py-2.5 text-left flex items-center justify-between gap-2 hover:bg-zinc-900 transition-colors';
+        row.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <i data-lucide="folder" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+            <span class="text-xs text-zinc-100 truncate">${escapeHtml(folder.name)}</span>
+          </div>
+          <i data-lucide="chevron-right" class="w-3.5 h-3.5 text-zinc-500 shrink-0"></i>
+        `;
+        row.onclick = () => loadYtmFolderPicker(folder.musicSubPath);
+        listEl.appendChild(row);
+      }
+      refreshIcons();
+    } catch (err) {
+      if (listEl) {
+        listEl.innerHTML = `<div class="p-6 text-center text-xs font-mono text-[#f0605a]">${escapeHtml(err.message)}</div>`;
+      }
+      if (statusEl) {
+        statusEl.textContent = err.message;
+      }
+    }
+  }
+
+  async function openYtmFolderPicker(initialSubPath = '') {
+    ytmState.folderPicker.open = true;
+    setYtmPickerNewFolderOpen(false);
+    $('ytm-folder-picker-modal')?.classList.remove('hidden');
+    refreshIcons();
+    await loadYtmFolderPicker(initialSubPath || ytmState.chosenMusicSubPath || '');
+  }
+
+  async function createYtmPickerSubfolder() {
+    const input = $('ytm-fp-new-folder-input');
+    const name = input?.value?.trim() || '';
+    if (!name) return;
+
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/folders`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          path: ytmState.folderPicker.browsingSubPath || '',
+          name,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      if (input) input.value = '';
+      setYtmPickerNewFolderOpen(false);
+      showToast(`Created folder "${data.folder?.name || name}"`);
+      await loadYtmFolderPicker(data.folder?.musicSubPath ?? ytmState.folderPicker.browsingSubPath);
+    } catch (err) {
+      showToast(`Create folder failed: ${err.message}`, 'error');
+    }
+  }
+
   async function submitYtmDownload() {
     const urlInput = $('ytm-url-input');
-    const dirInput = $('ytm-target-dir-input');
-    const fmtSelect = $('ytm-format-select');
     const url = urlInput?.value?.trim() || '';
     if (!url) return;
+
+    const destMode = ytmState.destMode || 'auto';
+    let targetDir = '';
+    if (destMode === 'current') {
+      const cur = normalizeSubsonicPath(filesState.currentPath || '');
+      if (!cur || !isPathInsideMusicRoot(cur)) {
+        const musicRoot = normalizeSubsonicPath(ytmState.defaultMusicRelPath || 'Music') || 'Music';
+        showToast(
+          `Current Open Folder must be inside /${musicRoot}. Navigate into Music above or switch destination mode.`,
+          'error'
+        );
+        return;
+      }
+      targetDir = cur;
+    } else if (destMode === 'choose') {
+      targetDir = ytmState.chosenMusicSubPath || '';
+    }
 
     const submitBtn = $('ytm-submit-btn');
     if (submitBtn) submitBtn.disabled = true;
@@ -5568,8 +5836,9 @@
         headers: getFileBridgeHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           url,
-          targetDir: dirInput?.value?.trim() || '',
-          format: fmtSelect?.value || 'opus',
+          destMode,
+          targetDir,
+          format: ytmState.format === 'm4a' ? 'm4a' : 'opus',
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -5636,6 +5905,8 @@
     ytmState.initialized = true;
 
     syncYtmPanelCollapsedUI();
+    syncYtmDestinationUI();
+    syncYtmFormatUI();
 
     on('ytm-panel-toggle-btn', 'click', () => {
       setYtmPanelExpanded(!ytmState.expanded);
@@ -5660,10 +5931,51 @@
       });
     }
 
-    on('ytm-use-current-dir-btn', 'click', () => {
-      const dirInput = $('ytm-target-dir-input');
-      if (dirInput) {
-        dirInput.value = filesState.currentPath || ytmState.defaultMusicRelPath || 'Music';
+    // Destination routing mode selector
+    on('ytm-dest-mode-current', 'click', () => setYtmDestMode('current'));
+    on('ytm-dest-mode-choose', 'click', () => setYtmDestMode('choose', { openPickerIfChoose: true }));
+    on('ytm-dest-mode-auto', 'click', () => setYtmDestMode('auto'));
+    on('ytm-open-folder-picker-btn', 'click', () => openYtmFolderPicker(ytmState.chosenMusicSubPath || ''));
+
+    // Format toggle selector
+    on('ytm-format-btn-opus', 'click', () => setYtmFormat('opus'));
+    on('ytm-format-btn-m4a', 'click', () => setYtmFormat('m4a'));
+
+    // Choose Folder modal events
+    on('ytm-fp-close-btn', 'click', closeYtmFolderPicker);
+    on('ytm-fp-cancel-btn', 'click', closeYtmFolderPicker);
+    on('ytm-fp-up-btn', 'click', () => {
+      if (!ytmState.folderPicker.isRoot) {
+        loadYtmFolderPicker(ytmState.folderPicker.parentSubPath || '');
+      }
+    });
+    on('ytm-fp-new-folder-toggle-btn', 'click', () => {
+      setYtmPickerNewFolderOpen(!ytmState.folderPicker.newFolderOpen);
+    });
+    on('ytm-fp-new-folder-form', 'submit', (e) => {
+      e.preventDefault();
+      createYtmPickerSubfolder();
+    });
+    on('ytm-fp-select-btn', 'click', () => {
+      ytmState.chosenMusicSubPath = ytmState.folderPicker.browsingSubPath || '';
+      localStorage.setItem('century.ytm_chosen_dir', ytmState.chosenMusicSubPath);
+      ytmState.destMode = 'choose';
+      localStorage.setItem('century.ytm_dest_mode', 'choose');
+      closeYtmFolderPicker();
+      syncYtmDestinationUI();
+    });
+
+    const fpModal = $('ytm-folder-picker-modal');
+    if (fpModal) {
+      fpModal.addEventListener('click', (e) => {
+        if (e.target === fpModal) closeYtmFolderPicker();
+      });
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (ytmState.folderPicker.open && e.key === 'Escape') {
+        e.preventDefault();
+        closeYtmFolderPicker();
       }
     });
 
