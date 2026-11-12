@@ -219,6 +219,229 @@
     </button>
   </div>
 
+  <!-- Collapsible YTM Downloader Panel (Auth-gated to authenticated Files UI sessions only) -->
+  <div id="ytm-downloader-section" class="hidden studio-panel border border-zinc-800 bg-zinc-950/70">
+    <!-- Collapsible Header Bar -->
+    <button
+      id="ytm-panel-toggle-btn"
+      type="button"
+      aria-expanded="false"
+      class="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-zinc-900/60 transition-colors"
+    >
+      <div class="flex items-center gap-2.5 flex-wrap min-w-0">
+        <i data-lucide="download-cloud" class="w-4 h-4 text-emerald-400 shrink-0"></i>
+        <span class="font-mono text-xs font-semibold uppercase tracking-wider text-zinc-100">
+          YTM Downloader
+        </span>
+        <span
+          id="ytm-cookies-status-badge"
+          class="px-2 py-0.5 text-[10px] font-mono border border-zinc-700 bg-zinc-900 text-zinc-400"
+        >
+          Cookies: Checking...
+        </span>
+        <span
+          id="ytm-engine-badge"
+          class="px-2 py-0.5 text-[10px] font-mono border border-zinc-800 bg-zinc-900/80 text-zinc-400"
+        >
+          yt-dlp: Checking...
+        </span>
+        <span
+          id="ytm-queue-badge"
+          class="hidden px-2 py-0.5 text-[10px] font-mono font-semibold border border-emerald-500/40 bg-emerald-950/30 text-emerald-300"
+        >
+        </span>
+      </div>
+      <div class="flex items-center gap-2 shrink-0 text-zinc-400">
+        <span id="ytm-toggle-hint" class="hidden sm:inline text-[10px] font-mono">EXPAND</span>
+        <i id="ytm-panel-chevron" data-lucide="chevron-down" class="w-4 h-4 transition-transform duration-150"></i>
+      </div>
+    </button>
+
+    <!-- Collapsible Downloader Body -->
+    <div id="ytm-panel-body" class="hidden border-t border-zinc-800 p-4 sm:p-5 space-y-4 bg-zinc-900/40">
+      <!-- Persistent Cookie Status Row & Updater Toggle -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 bg-zinc-950/80 border border-zinc-800">
+        <div class="min-w-0 space-y-0.5">
+          <div class="flex items-center gap-2 flex-wrap">
+            <i data-lucide="cookie" class="w-3.5 h-3.5 text-emerald-400 shrink-0"></i>
+            <span class="text-[11px] font-mono text-zinc-200 font-semibold">Server-Side Session Cookies</span>
+            <span id="ytm-cookies-meta-text" class="text-[11px] font-mono text-zinc-400">Checking status...</span>
+          </div>
+          <p id="ytm-cookies-warning-text" class="hidden text-[10.5px] font-mono text-amber-300"></p>
+        </div>
+
+        <button
+          id="ytm-cookies-toggle-btn"
+          type="button"
+          class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-zinc-200 inline-flex items-center gap-1.5 shrink-0 transition-colors"
+        >
+          <i data-lucide="key-round" class="w-3.5 h-3.5 text-emerald-400"></i>
+          <span>UPDATE COOKIES.TXT</span>
+        </button>
+      </div>
+
+      <!-- Cookie Updater Box (Paste or Upload cookies.txt) -->
+      <div id="ytm-cookies-drawer" class="hidden p-3.5 bg-zinc-950 border border-zinc-700 space-y-3">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <p class="text-xs font-mono font-semibold text-zinc-100">Update Persistent cookies.txt</p>
+            <p class="text-[10.5px] font-mono text-zinc-400">
+              Saved securely on the server outside your Music folder (<code class="text-zinc-300">server/config/cookies.txt</code>). Export Netscape cookies while signed in to YouTube Music.
+            </p>
+          </div>
+          <label class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-zinc-200 inline-flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors">
+            <i data-lucide="file-up" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>UPLOAD COOKIES.TXT</span>
+            <input id="ytm-cookies-file-input" type="file" accept=".txt,text/plain" class="hidden" />
+          </label>
+        </div>
+
+        <textarea
+          id="ytm-cookies-textarea"
+          rows="5"
+          placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1799999999&#9;SID&#9;..."
+          class="w-full p-2.5 bg-zinc-900 border border-zinc-700 text-[11px] font-mono text-zinc-100 placeholder:text-zinc-500 select-text resize-y"
+        ></textarea>
+
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <button
+            id="ytm-cookies-clear-btn"
+            type="button"
+            class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-[#f0605a] inline-flex items-center gap-1.5 transition-colors"
+          >
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            <span>DELETE SERVER COOKIES</span>
+          </button>
+
+          <div class="flex items-center gap-2">
+            <button
+              id="ytm-cookies-close-btn"
+              type="button"
+              class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[11px] font-mono text-zinc-300 transition-colors"
+            >
+              CLOSE
+            </button>
+            <button
+              id="ytm-cookies-save-btn"
+              type="button"
+              class="h-8 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-[11px] font-mono font-semibold inline-flex items-center gap-1.5 transition-colors"
+            >
+              <i data-lucide="save" class="w-3.5 h-3.5"></i>
+              <span>SAVE COOKIES</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 128kbps Expiration Safeguard Alert Banner -->
+      <div
+        id="ytm-safeguard-banner"
+        class="hidden p-4 bg-amber-950/30 border border-amber-500/60 border-l-4 border-l-amber-400 space-y-3"
+      >
+        <div class="flex items-start gap-3">
+          <i data-lucide="shield-alert" class="w-5 h-5 text-amber-400 shrink-0 mt-0.5"></i>
+          <div class="min-w-0 flex-1 space-y-1">
+            <h3 class="text-xs font-mono font-bold uppercase tracking-wider text-amber-300">
+              128kbps Safeguard Triggered — Download Queue Paused
+            </h3>
+            <p id="ytm-safeguard-details" class="text-xs text-zinc-200 leading-relaxed"></p>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-2 flex-wrap pt-1">
+          <button
+            id="ytm-safeguard-continue-btn"
+            type="button"
+            class="h-8 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-600 text-[11px] font-mono text-zinc-200 inline-flex items-center gap-1.5 transition-colors"
+          >
+            <i data-lucide="play" class="w-3.5 h-3.5 text-zinc-300"></i>
+            <span>CONTINUE ANYWAY</span>
+          </button>
+          <button
+            id="ytm-safeguard-cancel-btn"
+            type="button"
+            class="h-8 px-4 bg-[#f0605a] hover:bg-red-400 text-zinc-950 text-[11px] font-mono font-semibold inline-flex items-center gap-1.5 transition-colors"
+          >
+            <i data-lucide="cookie" class="w-3.5 h-3.5"></i>
+            <span>CANCEL &amp; UPDATE COOKIES</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- URL Download Form -->
+      <form id="ytm-download-form" class="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
+        <div class="md:col-span-5 space-y-1">
+          <label for="ytm-url-input" class="block text-[10.5px] font-mono text-zinc-400">
+            YOUTUBE MUSIC TRACK / ALBUM / PLAYLIST URL
+          </label>
+          <input
+            id="ytm-url-input"
+            type="url"
+            required
+            placeholder="https://music.youtube.com/playlist?list=..."
+            class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono placeholder:text-zinc-500 select-text"
+          />
+        </div>
+
+        <div class="md:col-span-4 space-y-1">
+          <div class="flex items-center justify-between">
+            <label for="ytm-target-dir-input" class="block text-[10.5px] font-mono text-zinc-400">
+              DESTINATION FOLDER (INSIDE STORAGE)
+            </label>
+            <button
+              id="ytm-use-current-dir-btn"
+              type="button"
+              class="text-[10px] font-mono text-emerald-400 hover:text-emerald-300 transition-colors"
+            >
+              Use Current Folder
+            </button>
+          </div>
+          <input
+            id="ytm-target-dir-input"
+            type="text"
+            placeholder="Music (auto-creates album subfolder)"
+            class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono placeholder:text-zinc-500 select-text"
+          />
+        </div>
+
+        <div class="md:col-span-1 space-y-1">
+          <label for="ytm-format-select" class="block text-[10.5px] font-mono text-zinc-400">
+            FORMAT
+          </label>
+          <select
+            id="ytm-format-select"
+            class="w-full h-9 px-2 bg-zinc-950 border border-zinc-700 text-xs font-mono text-zinc-100"
+          >
+            <option value="opus">.opus</option>
+            <option value="m4a">.m4a</option>
+            <option value="mp3">.mp3</option>
+            <option value="flac">.flac</option>
+            <option value="best">native</option>
+          </select>
+        </div>
+
+        <div class="md:col-span-2">
+          <button
+            id="ytm-submit-btn"
+            type="submit"
+            class="w-full h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            <span>DOWNLOAD</span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Active & Recent Jobs Queue -->
+      <div id="ytm-jobs-container" class="hidden space-y-2 pt-1">
+        <div class="flex items-center justify-between text-[10.5px] font-mono uppercase tracking-wider text-zinc-400">
+          <span>Download Queue</span>
+          <span id="ytm-jobs-summary"></span>
+        </div>
+        <div id="ytm-jobs-list" class="space-y-2"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Image Viewer Modal Lightbox -->
   <div id="files-image-modal" role="dialog" aria-modal="true" aria-label="Image Preview" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col justify-between p-4 select-none">
     <!-- Top Bar -->

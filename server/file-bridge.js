@@ -15,6 +15,7 @@ import {
   searchMetadataOnline,
   fetchRemoteCoverBuffer,
 } from './audio-tagger.js';
+import { registerYtmRoutes } from './ytm-downloader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = path.resolve(__dirname, '..');
@@ -1326,6 +1327,23 @@ app.post(['/api/metadata/apply', '/api/files/metadata/apply'], stagingUpload.any
       await safeRemoveStagingFile(f?.path);
     }
   }
+});
+
+// ============================================================================
+// 7. YTM DOWNLOADER FOUNDATION & COOKIE MANAGEMENT (/api/ytm/*)
+// ============================================================================
+registerYtmRoutes(app, {
+  STORAGE_DIR,
+  MUSIC_DIR,
+  TMP_CHUNKS_DIR,
+  stagingUpload,
+  resolveSafePath,
+  sanitizePathSegment,
+  assertSafeFileWriteTarget,
+  verifyFilesAccess: (req) => {
+    const apiKey = req.headers['x-api-key'] || req.headers['X-API-Key'];
+    return Boolean(apiKey && apiKey === NAS_API_KEY);
+  },
 });
 
 const bridgeServer = app.listen(PORT, '0.0.0.0', () => {

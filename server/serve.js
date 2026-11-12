@@ -48,14 +48,16 @@ const server = http.createServer((req, res) => {
   let rawUrl = req.url || '/';
   let pathname = decodeURI(rawUrl.split('?')[0]);
 
-  // Reverse proxy for NAS file bridge (/bridge/*, /api/files/*, /api/update-cover, /api/metadata/*)
+  // Reverse proxy for NAS file bridge (/bridge/*, /api/files/*, /api/update-cover, /api/metadata/*, /api/ytm/*)
   if (
     pathname === '/bridge' ||
     pathname.startsWith('/bridge/') ||
     pathname === '/api/files' ||
     pathname.startsWith('/api/files/') ||
     pathname.startsWith('/api/update-cover') ||
-    pathname.startsWith('/api/metadata')
+    pathname.startsWith('/api/metadata') ||
+    pathname === '/api/ytm' ||
+    pathname.startsWith('/api/ytm/')
   ) {
     const bridgePort = Number(process.env.FILE_BRIDGE_PORT || process.env.BRIDGE_PORT || 3001);
     const targetPath = rawUrl.startsWith('/bridge') ? (rawUrl.replace(/^\/bridge/, '') || '/') : rawUrl;

@@ -2432,6 +2432,9 @@
       }
     }
     updateSettingsNasBadge(online, text);
+    if (typeof updateYtmAuthVisibility === 'function') {
+      updateYtmAuthVisibility(online);
+    }
   }
 
   function updateSettingsNasBadge(online, text) {
@@ -5128,6 +5131,546 @@
 
     initImageViewerEvents();
     initMetadataEditorEvents();
+    initYtmDownloaderEvents();
+  }
+
+  // ============================================================================
+  // YTM Downloader Foundation & Cookie Management (Auth-Gated inside Files UI)
+  // ============================================================================
+  const ytmState = {
+    expanded: localStorage.getItem('century.ytm_panel_expanded') === 'true',
+    cookiesDrawerOpen: false,
+    ytDlpAvailable: false,
+    ytDlpVersion: null,
+    cookies: null,
+    jobs: [],
+    defaultMusicRelPath: 'Music',
+    pollTimer: null,
+    pausedAlertedJobIds: new Set(),
+    completedSyncedJobIds: new Set(),
+    busy: false,
+    initialized: false,
+  };
+
+  function formatYtmRelativeTime(ms) {
+    if (!ms) return '';
+    const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (diffSec < 60) return 'just now';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return new Date(ms).toLocaleDateString();
+  }
+
+  function updateYtmAuthVisibility(online) {
+    const section = $('ytm-downloader-section');
+    if (!section) return;
+    if (online && getFileBridgeApiKey()) {
+      section.classList.remove('hidden');
+      initYtmDownloaderEvents();
+      syncYtmPanelCollapsedUI();
+      refreshYtmStatus();
+    } else {
+      section.classList.add('hidden');
+      if (ytmState.pollTimer) {
+        clearTimeout(ytmState.pollTimer);
+        ytmState.pollTimer = null;
+      }
+    }
+  }
+
+  function syncYtmPanelCollapsedUI() {
+    const body = $('ytm-panel-body');
+    const toggleBtn = $('ytm-panel-toggle-btn');
+    const chevron = $('ytm-panel-chevron');
+    const hint = $('ytm-toggle-hint');
+    if (body) body.classList.toggle('hidden', !ytmState.expanded);
+    if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(ytmState.expanded));
+    if (chevron) chevron.style.transform = ytmState.expanded ? 'rotate(180deg)' : 'rotate(0deg)';
+    if (hint) hint.textContent = ytmState.expanded ? 'COLLAPSE' : 'EXPAND';
+  }
+
+  function setYtmPanelExpanded(expanded) {
+    ytmState.expanded = Boolean(expanded);
+    localStorage.setItem('century.ytm_panel_expanded', String(ytmState.expanded));
+    syncYtmPanelCollapsedUI();
+  }
+
+  function setYtmCookiesDrawerOpen(open) {
+    ytmState.cookiesDrawerOpen = Boolean(open);
+    const drawer = $('ytm-cookies-drawer');
+    if (drawer) {
+      drawer.classList.toggle('hidden', !ytmState.cookiesDrawerOpen);
+      if (ytmState.cookiesDrawerOpen) {
+        setTimeout(() => $('ytm-cookies-textarea')?.focus(), 50);
+      }
+    }
+  }
+
+  function renderYtmCookieStatus(cookies) {
+    ytmState.cookies = cookies || null;
+    const badge = $('ytm-cookies-status-badge');
+    const metaText = $('ytm-cookies-meta-text');
+    const warnText = $('ytm-cookies-warning-text');
+
+    if (badge) {
+      if (cookies?.active) {
+        const updated = cookies.lastUpdated ? ` · ${formatYtmRelativeTime(cookies.lastUpdated)}` : '';
+        badge.textContent = `Cookies: Active${updated}`;
+        badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-emerald-500/40 bg-emerald-950/30 text-emerald-300';
+      } else if (cookies?.exists) {
+        badge.textContent = 'Cookies: Check / Expired';
+        badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-amber-500/40 bg-amber-950/30 text-amber-300';
+      } else {
+        badge.textContent = 'Cookies: Missing (128kbps)';
+        badge.className = 'px-2 py-0.5 text-[10px] font-mono border border-zinc-700 bg-zinc-900 text-zinc-400';
+      }
+    }
+
+    if (metaText) {
+      if (cookies?.exists) {
+        const lastStr = cookies.lastUpdated ? new Date(cookies.lastUpdated).toLocaleString() : 'Unknown';
+        metaText.textContent = `Last Updated: ${lastStr} (${cookies.youtubeCookieCount || 0} YT cookies)`;
+      } else {
+        metaText.textContent = 'Not set — server will use free-tier quality unless cookies.txt is uploaded.';
+      }
+    }
+
+    if (warnText) {
+      if (cookies?.warning) {
+        warnText.textContent = cookies.warning;
+        warnText.classList.remove('hidden');
+      } else {
+        warnText.textContent = '';
+        warnText.classList.add('hidden');
+      }
+    }
+  }
+
+  function renderYtmSafeguardBanner() {
+    const banner = $('ytm-safeguard-banner');
+    const details = $('ytm-safeguard-details');
+    const cancelBtn = $('ytm-safeguard-cancel-btn');
+    const continueBtn = $('ytm-safeguard-continue-btn');
+    if (!banner || !details) return;
+
+    const pausedJob = (ytmState.jobs || []).find(
+      (j) => j.status === 'paused_low_bitrate' && j.lowBitrateAlert
+    );
+
+    if (!pausedJob) {
+      banner.classList.add('hidden');
+      return;
+    }
+
+    // Ensure downloader panel is expanded so user immediately sees the safeguard prompt
+    if (!ytmState.expanded) {
+      setYtmPanelExpanded(true);
+    }
+
+    const alert = pausedJob.lowBitrateAlert;
+    const cookieHint = alert.cookiesWereUsed
+      ? 'Your server cookies.txt appears expired or lacked YouTube Music Premium auth, causing a free-tier 128kbps fallback.'
+      : 'No active cookies.txt was present, so YouTube served free-tier 128kbps quality.';
+
+    details.innerHTML = `
+      First track <strong class="text-zinc-100">${escapeHtml(alert.trackTitle)}</strong> streamed at
+      <span class="px-1.5 py-0.5 font-mono bg-amber-950 border border-amber-500/40 text-amber-300 font-semibold">${escapeHtml(String(alert.bitrateKbps))} kbps</span>
+      (≤ ${escapeHtml(String(alert.thresholdKbps || 135))} kbps). ${escapeHtml(cookieHint)}
+      Remaining tracks are paused before committing <code class="text-zinc-300">${escapeHtml(alert.plannedFileName)}</code>.
+    `;
+
+    banner.classList.remove('hidden');
+
+    if (!ytmState.pausedAlertedJobIds.has(pausedJob.id)) {
+      ytmState.pausedAlertedJobIds.add(pausedJob.id);
+      showToast(`128kbps Safeguard: Paused "${alert.trackTitle}" (${alert.bitrateKbps} kbps)`, 'error');
+    }
+
+    if (cancelBtn) {
+      cancelBtn.onclick = () => cancelYtmJob(pausedJob.id, true, true);
+    }
+    if (continueBtn) {
+      continueBtn.onclick = () => resumeYtmJob(pausedJob.id);
+    }
+  }
+
+  function renderYtmJobs() {
+    const container = $('ytm-jobs-container');
+    const listEl = $('ytm-jobs-list');
+    const summaryEl = $('ytm-jobs-summary');
+    const queueBadge = $('ytm-queue-badge');
+    const jobs = Array.isArray(ytmState.jobs) ? ytmState.jobs : [];
+
+    const activeJobs = jobs.filter((j) =>
+      j.status === 'queued' || j.status === 'inspecting' || j.status === 'downloading'
+    );
+    const pausedJob = jobs.find((j) => j.status === 'paused_low_bitrate');
+
+    if (queueBadge) {
+      if (pausedJob) {
+        queueBadge.textContent = 'PAUSED: 128KBPS SAFEGUARD';
+        queueBadge.className = 'px-2 py-0.5 text-[10px] font-mono font-semibold border border-amber-500/50 bg-amber-950/40 text-amber-300';
+        queueBadge.classList.remove('hidden');
+      } else if (activeJobs.length > 0) {
+        queueBadge.textContent = `${activeJobs.length} ACTIVE`;
+        queueBadge.className = 'px-2 py-0.5 text-[10px] font-mono font-semibold border border-emerald-500/40 bg-emerald-950/30 text-emerald-300';
+        queueBadge.classList.remove('hidden');
+      } else {
+        queueBadge.classList.add('hidden');
+      }
+    }
+
+    renderYtmSafeguardBanner();
+
+    if (!container || !listEl) return;
+    if (jobs.length === 0) {
+      container.classList.add('hidden');
+      return;
+    }
+
+    container.classList.remove('hidden');
+    if (summaryEl) {
+      summaryEl.textContent = `${jobs.length} job(s)`;
+    }
+
+    listEl.innerHTML = '';
+    for (const job of jobs) {
+      const card = document.createElement('div');
+      card.className = 'p-3 bg-zinc-950 border border-zinc-800 space-y-2';
+
+      const pct =
+        job.totalTracks > 0
+          ? Math.round((job.completedTracks / job.totalTracks) * 100)
+          : job.status === 'completed'
+            ? 100
+            : 0;
+
+      let statusLabel = String(job.status || '').toUpperCase();
+      let statusCls = 'border-zinc-700 text-zinc-400 bg-zinc-900';
+      if (job.status === 'downloading' || job.status === 'inspecting' || job.status === 'queued') {
+        statusCls = 'border-emerald-500/40 text-emerald-300 bg-emerald-950/30';
+        if (job.status === 'inspecting') statusLabel = 'INSPECTING BITRATE...';
+        else if (job.status === 'downloading') statusLabel = `DOWNLOADING ${job.currentTrackIndex || 0}/${job.totalTracks || '?'}`;
+      } else if (job.status === 'paused_low_bitrate') {
+        statusCls = 'border-amber-500/50 text-amber-300 bg-amber-950/40';
+        statusLabel = 'PAUSED (128KBPS SAFEGUARD)';
+      } else if (job.status === 'completed') {
+        statusCls = 'border-emerald-500/40 text-emerald-400 bg-emerald-950/20';
+      } else if (job.status === 'failed' || job.status === 'cancelled') {
+        statusCls = 'border-[#f0605a]/40 text-[#f0605a] bg-[#f0605a]/10';
+      }
+
+      const brBadge =
+        job.detectedBitrateKbps > 0
+          ? `<span class="px-1.5 py-0.5 text-[10px] font-mono border ${
+              job.detectedBitrateKbps <= 135
+                ? 'border-amber-500/40 bg-amber-950/30 text-amber-300'
+                : 'border-emerald-500/40 bg-emerald-950/20 text-emerald-300'
+            }">${escapeHtml(String(job.detectedBitrateKbps))} kbps</span>`
+          : '';
+
+      const titleText = job.collectionTitle || job.currentTrackTitle || job.url;
+      const canCancel =
+        job.status === 'queued' ||
+        job.status === 'inspecting' ||
+        job.status === 'downloading' ||
+        job.status === 'paused_low_bitrate';
+
+      card.innerHTML = `
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="min-w-0 flex-1 space-y-0.5">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="px-1.5 py-0.5 text-[10px] font-mono border ${statusCls}">${escapeHtml(statusLabel)}</span>
+              ${brBadge}
+              <span class="px-1.5 py-0.5 text-[10px] font-mono border border-zinc-800 bg-zinc-900 text-zinc-400">.${escapeHtml(job.format)}</span>
+              <span class="text-[11px] font-mono text-zinc-400 truncate">→ /${escapeHtml(job.destRelPath || 'Music')}</span>
+            </div>
+            <p class="text-xs font-medium text-zinc-100 truncate">${escapeHtml(titleText)}</p>
+            ${
+              job.currentTrackTitle && (job.status === 'downloading' || job.status === 'inspecting')
+                ? `<p class="text-[11px] font-mono text-zinc-400 truncate">Track ${job.currentTrackIndex}: ${escapeHtml(job.currentTrackTitle)}</p>`
+                : ''
+            }
+            ${job.error ? `<p class="text-[11px] font-mono text-[#f0605a]">${escapeHtml(job.error)}</p>` : ''}
+          </div>
+          ${
+            canCancel
+              ? `<button type="button" data-ytm-cancel-id="${escapeHtml(job.id)}" class="h-7 px-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-[10.5px] font-mono text-[#f0605a] shrink-0">ABORT</button>`
+              : ''
+          }
+        </div>
+        ${
+          job.totalTracks > 0
+            ? `<div class="h-1 bg-zinc-800 overflow-hidden"><div class="h-full ${
+                job.status === 'paused_low_bitrate' ? 'bg-amber-400' : 'bg-emerald-400'
+              } transition-all duration-200" style="width:${pct}%"></div></div>`
+            : ''
+        }
+      `;
+
+      const abortBtn = card.querySelector('[data-ytm-cancel-id]');
+      if (abortBtn) {
+        abortBtn.onclick = () => cancelYtmJob(job.id, job.status === 'paused_low_bitrate', false);
+      }
+
+      listEl.appendChild(card);
+
+      // Refresh Files view & Navidrome library once when a job newly finishes
+      if (
+        job.status === 'completed' &&
+        job.completedTracks > 0 &&
+        !ytmState.completedSyncedJobIds.has(job.id)
+      ) {
+        ytmState.completedSyncedJobIds.add(job.id);
+        client.request('startScan').catch(() => {});
+        if (state.route === 'files') {
+          loadFilesView();
+        }
+        showToast(`YTM download finished: ${job.completedTracks} track(s) saved to /${job.destRelPath}`);
+      }
+    }
+    refreshIcons();
+  }
+
+  async function refreshYtmStatus() {
+    if (!filesState.isOnline || !getFileBridgeApiKey()) return;
+    if (ytmState.pollTimer) {
+      clearTimeout(ytmState.pollTimer);
+      ytmState.pollTimer = null;
+    }
+
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/status`, {
+        headers: getFileBridgeHeaders(),
+      });
+      if (res.status === 401 || res.status === 403) {
+        $('ytm-downloader-section')?.classList.add('hidden');
+        return;
+      }
+      if (!res.ok) return;
+
+      const data = await res.json();
+      ytmState.ytDlpAvailable = Boolean(data.ytDlp?.available);
+      ytmState.ytDlpVersion = data.ytDlp?.version || null;
+      ytmState.defaultMusicRelPath = data.defaultMusicRelPath || 'Music';
+      ytmState.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+
+      const engineBadge = $('ytm-engine-badge');
+      if (engineBadge) {
+        if (ytmState.ytDlpAvailable) {
+          engineBadge.textContent = `yt-dlp: ${ytmState.ytDlpVersion || 'Ready'}`;
+          engineBadge.className = 'px-2 py-0.5 text-[10px] font-mono border border-zinc-700 bg-zinc-900 text-zinc-300';
+        } else {
+          engineBadge.textContent = 'yt-dlp: Not Found';
+          engineBadge.className = 'px-2 py-0.5 text-[10px] font-mono border border-[#f0605a]/40 bg-[#f0605a]/10 text-[#f0605a]';
+        }
+      }
+
+      renderYtmCookieStatus(data.cookies);
+      renderYtmJobs();
+
+      // Poll continuously while any job is running or paused
+      const hasLiveJobs = ytmState.jobs.some(
+        (j) =>
+          j.status === 'queued' ||
+          j.status === 'inspecting' ||
+          j.status === 'downloading'
+      );
+      if (hasLiveJobs && state.route === 'files') {
+        ytmState.pollTimer = setTimeout(refreshYtmStatus, 1800);
+      }
+    } catch (_) {}
+  }
+
+  async function saveYtmCookiesFromText(rawText) {
+    const clean = String(rawText || '').trim();
+    if (!clean) {
+      showToast('Paste cookies.txt content or upload a cookies.txt file first', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/cookies`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ content: clean }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      renderYtmCookieStatus(data.cookies);
+      const textarea = $('ytm-cookies-textarea');
+      if (textarea) textarea.value = '';
+      setYtmCookiesDrawerOpen(false);
+      showToast('Saved persistent cookies.txt to server');
+    } catch (err) {
+      showToast(`Cookie save failed: ${err.message}`, 'error');
+    }
+  }
+
+  async function saveYtmCookiesFromFile(file) {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/cookies`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders(),
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      renderYtmCookieStatus(data.cookies);
+      const textarea = $('ytm-cookies-textarea');
+      if (textarea) textarea.value = '';
+      setYtmCookiesDrawerOpen(false);
+      showToast(`Uploaded ${file.name} securely to server`);
+    } catch (err) {
+      showToast(`Cookie upload failed: ${err.message}`, 'error');
+    }
+  }
+
+  async function deleteServerYtmCookies() {
+    if (!confirm('Delete server/config/cookies.txt from the backend server?')) return;
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/cookies`, {
+        method: 'DELETE',
+        headers: getFileBridgeHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      renderYtmCookieStatus(data.cookies);
+      showToast('Deleted server cookies.txt');
+    } catch (err) {
+      showToast(`Delete failed: ${err.message}`, 'error');
+    }
+  }
+
+  async function submitYtmDownload() {
+    const urlInput = $('ytm-url-input');
+    const dirInput = $('ytm-target-dir-input');
+    const fmtSelect = $('ytm-format-select');
+    const url = urlInput?.value?.trim() || '';
+    if (!url) return;
+
+    const submitBtn = $('ytm-submit-btn');
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/download`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          url,
+          targetDir: dirInput?.value?.trim() || '',
+          format: fmtSelect?.value || 'opus',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      if (urlInput) urlInput.value = '';
+      showToast('Queued YTM download (checking Track 1 bitrate)...');
+      await refreshYtmStatus();
+    } catch (err) {
+      showToast(`Download failed: ${err.message}`, 'error');
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
+  async function resumeYtmJob(jobId) {
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/jobs/${encodeURIComponent(jobId)}/resume`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      showToast('Resuming queue at available stream quality...');
+      await refreshYtmStatus();
+    } catch (err) {
+      showToast(`Resume failed: ${err.message}`, 'error');
+    }
+  }
+
+  async function cancelYtmJob(jobId, deleteLowBitrateFile = true, openCookiesUpdater = false) {
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/jobs/${encodeURIComponent(jobId)}/cancel`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ deleteLowBitrateFile }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const deletedCount = Array.isArray(data.deletedFiles) ? data.deletedFiles.length : 0;
+      if (openCookiesUpdater) {
+        setYtmCookiesDrawerOpen(true);
+        showToast(
+          deletedCount > 0
+            ? `Aborted & deleted low-bitrate file. Upload or paste fresh cookies.txt below.`
+            : 'Aborted queue. Upload or paste fresh cookies.txt below.'
+        );
+      } else {
+        showToast('Download job aborted');
+      }
+      await refreshYtmStatus();
+    } catch (err) {
+      showToast(`Cancel failed: ${err.message}`, 'error');
+    }
+  }
+
+  function initYtmDownloaderEvents() {
+    if (ytmState.initialized) return;
+    ytmState.initialized = true;
+
+    syncYtmPanelCollapsedUI();
+
+    on('ytm-panel-toggle-btn', 'click', () => {
+      setYtmPanelExpanded(!ytmState.expanded);
+    });
+
+    on('ytm-cookies-toggle-btn', 'click', () => {
+      setYtmCookiesDrawerOpen(!ytmState.cookiesDrawerOpen);
+    });
+    on('ytm-cookies-close-btn', 'click', () => setYtmCookiesDrawerOpen(false));
+    on('ytm-cookies-save-btn', 'click', () => {
+      saveYtmCookiesFromText($('ytm-cookies-textarea')?.value || '');
+    });
+    on('ytm-cookies-clear-btn', 'click', deleteServerYtmCookies);
+
+    const cookieFileInput = $('ytm-cookies-file-input');
+    if (cookieFileInput) {
+      cookieFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        await saveYtmCookiesFromFile(file);
+        cookieFileInput.value = '';
+      });
+    }
+
+    on('ytm-use-current-dir-btn', 'click', () => {
+      const dirInput = $('ytm-target-dir-input');
+      if (dirInput) {
+        dirInput.value = filesState.currentPath || ytmState.defaultMusicRelPath || 'Music';
+      }
+    });
+
+    on('ytm-download-form', 'submit', (e) => {
+      e.preventDefault();
+      submitYtmDownload();
+    });
   }
 
   // ============================================================================

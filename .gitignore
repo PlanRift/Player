@@ -16,3 +16,6 @@ plenripbackup
 .nas-api-key
 storage
 music
+server/config/cookies.txt
+server/config/.cookies*.tmp
+server/bin
