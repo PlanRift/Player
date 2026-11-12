@@ -888,16 +888,72 @@
               />
             </div>
 
-            <div class="space-y-1">
-              <label for="meta-input-artist" class="block text-[11px] font-mono text-zinc-400">
-                ARTIST
-              </label>
-              <input
-                id="meta-input-artist"
-                type="text"
-                placeholder="Artist name (e.g. ダズビー / DAZBEE)..."
-                class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-sans select-text"
-              />
+            <div class="space-y-1.5" id="meta-artist-field-wrap">
+              <div class="flex items-center justify-between gap-2 flex-wrap">
+                <label for="meta-input-artist" class="block text-[11px] font-mono text-zinc-400">
+                  ARTIST
+                </label>
+                <!-- Artist Source Mode: Auto-match existing DB artist vs Follow chosen online source -->
+                <div
+                  class="inline-flex items-center bg-zinc-950 border border-zinc-700 p-0.5 text-[9.5px] font-mono"
+                  title="AUTO DB avoids duplicate artists by matching/keeping existing artists from your Navidrome database. USE SOURCE follows the artist name from the selected online result."
+                >
+                  <button
+                    id="meta-artist-mode-db-btn"
+                    type="button"
+                    class="px-2 py-0.5 transition-colors bg-emerald-400 text-zinc-950 font-semibold"
+                  >
+                    AUTO DB
+                  </button>
+                  <button
+                    id="meta-artist-mode-source-btn"
+                    type="button"
+                    class="px-2 py-0.5 transition-colors text-zinc-400 hover:text-zinc-100"
+                  >
+                    USE SOURCE
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex gap-1.5">
+                <input
+                  id="meta-input-artist"
+                  type="text"
+                  placeholder="Artist name (e.g. ダズビー / DAZBEE)..."
+                  class="flex-1 min-w-0 h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-sans select-text"
+                />
+                <button
+                  id="meta-artist-db-picker-btn"
+                  type="button"
+                  title="Pick an existing artist from your Navidrome database"
+                  class="h-9 px-2.5 bg-zinc-950 hover:bg-zinc-800 border border-zinc-700 text-[10.5px] font-mono text-zinc-300 hover:text-emerald-400 inline-flex items-center gap-1.5 shrink-0 transition-colors"
+                >
+                  <i data-lucide="database" class="w-3.5 h-3.5 text-emerald-400"></i>
+                  <span>DB</span>
+                  <i data-lucide="chevron-down" class="w-3 h-3 text-zinc-500"></i>
+                </button>
+              </div>
+
+              <!-- Quick swap / status hint when online source artist differs from DB artist -->
+              <div id="meta-artist-alt-bar" class="hidden flex items-center gap-1.5 flex-wrap text-[10px] font-mono text-zinc-400"></div>
+
+              <!-- Searchable Existing Database Artists Picker -->
+              <div
+                id="meta-artist-db-dropdown"
+                class="hidden bg-zinc-950 border border-zinc-600 shadow-xl flex flex-col max-h-52 overflow-hidden"
+              >
+                <div class="px-2.5 py-1.5 border-b border-zinc-800 flex items-center gap-2 bg-zinc-900/70 shrink-0">
+                  <i data-lucide="search" class="w-3 h-3 text-zinc-400 shrink-0"></i>
+                  <input
+                    id="meta-artist-db-search"
+                    type="text"
+                    placeholder="Filter existing artists in database..."
+                    class="flex-1 bg-transparent text-xs text-zinc-100 placeholder:text-zinc-500 outline-none select-text"
+                  />
+                  <span id="meta-artist-db-count" class="text-[10px] font-mono text-zinc-500 shrink-0"></span>
+                </div>
+                <div id="meta-artist-db-list" class="overflow-y-auto divide-y divide-zinc-800/60 flex-1"></div>
+              </div>
             </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">

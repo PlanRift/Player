@@ -3485,9 +3485,276 @@
     sourceFilter: 'all',
     selectedResultId: null,
     searchMode: 'album',
+    artistMode: localStorage.getItem('century.meta_artist_mode') === 'source' ? 'source' : 'db',
+    originalArtist: '',
+    sourceArtist: '',
+    lockedDbArtist: '',
+    matchedDbArtist: '',
+    dbArtists: [],
+    dbPickerOpen: false,
     busy: false,
     initialized: false,
   };
+
+  function normArtistKey(str) {
+    return String(str || '')
+      .normalize('NFKC')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+  }
+
+  function stripArtistExtras(str) {
+    let s = String(str || '').normalize('NFKC').trim();
+    s = s.replace(/\s*[\(\[]?\b(feat\.?|ft\.?|featuring)\b.*$/i, '').trim();
+    const parts = s.split(/\s*(?:,|、|\/|×|✕|\bwith\b|\b&\b)\s*/i);
+    return (parts[0] || s).trim();
+  }
+
+  function findExactOrBaseDbArtist(candidate, dbArtists) {
+    const clean = String(candidate || '').trim();
+    if (!clean || !Array.isArray(dbArtists) || dbArtists.length === 0) return null;
+
+    const exactKey = normArtistKey(clean);
+    const exactMatch = dbArtists.find((a) => normArtistKey(a.name) === exactKey);
+    if (exactMatch) return exactMatch;
+
+    const baseKey = normArtistKey(stripArtistExtras(clean));
+    if (baseKey) {
+      const baseMatch = dbArtists.find((a) => normArtistKey(a.name) === baseKey);
+      if (baseMatch) return baseMatch;
+    }
+
+    const parenMatch = clean.match(/\(([^)]+)\)/);
+    if (parenMatch && parenMatch[1]) {
+      const parenKey = normArtistKey(parenMatch[1]);
+      const m = dbArtists.find((a) => normArtistKey(a.name) === parenKey);
+      if (m) return m;
+    }
+
+    return null;
+  }
+
+  function resolveDbArtistCandidate(sourceArtist = '') {
+    const dbArtists = metaEditorState.dbArtists || [];
+    if (metaEditorState.lockedDbArtist) {
+      return { name: metaEditorState.lockedDbArtist, reason: 'chosen' };
+    }
+
+    if (sourceArtist) {
+      const mSource = findExactOrBaseDbArtist(sourceArtist, dbArtists);
+      if (mSource) return { name: mSource.name, reason: 'source-db' };
+    }
+
+    const orig = metaEditorState.originalArtist || metaEditorState.hints?.artist || '';
+    if (orig) {
+      const mOrig = findExactOrBaseDbArtist(orig, dbArtists);
+      if (mOrig) return { name: mOrig.name, reason: 'existing-db' };
+    }
+
+    const relPath = metaEditorState.folderPath || metaEditorState.filePath || '';
+    const segments = relPath.split('/').filter(Boolean).reverse();
+    for (const seg of segments) {
+      if (['music', 'storage', 'flac', 'mp3', 'opus'].includes(seg.toLowerCase())) continue;
+      const mSeg = findExactOrBaseDbArtist(seg, dbArtists);
+      if (mSeg) return { name: mSeg.name, reason: 'folder-db' };
+    }
+
+    return null;
+  }
+
+  function refreshMatchedDbArtist() {
+    const resolved = resolveDbArtistCandidate(metaEditorState.sourceArtist);
+    metaEditorState.matchedDbArtist = resolved ? resolved.name : '';
+    return resolved;
+  }
+
+  function updateMetaArtistModeUI() {
+    const isDb = metaEditorState.artistMode !== 'source';
+    const dbBtn = $('meta-artist-mode-db-btn');
+    const srcBtn = $('meta-artist-mode-source-btn');
+
+    if (dbBtn) {
+      dbBtn.className = `px-2 py-0.5 transition-colors ${
+        isDb ? 'bg-emerald-400 text-zinc-950 font-semibold' : 'text-zinc-400 hover:text-zinc-100'
+      }`;
+    }
+    if (srcBtn) {
+      srcBtn.className = `px-2 py-0.5 transition-colors ${
+        !isDb ? 'bg-emerald-400 text-zinc-950 font-semibold' : 'text-zinc-400 hover:text-zinc-100'
+      }`;
+    }
+
+    const altBar = $('meta-artist-alt-bar');
+    if (!altBar) return;
+
+    const currentInput = $('meta-input-artist')?.value?.trim() || '';
+    const dbName = metaEditorState.lockedDbArtist || metaEditorState.matchedDbArtist || '';
+    const srcName = metaEditorState.sourceArtist || '';
+    const hasAlt = (dbName && dbName !== currentInput) || (srcName && srcName !== currentInput) || Boolean(metaEditorState.lockedDbArtist);
+
+    if (!hasAlt) {
+      altBar.classList.add('hidden');
+      altBar.innerHTML = '';
+      return;
+    }
+
+    const parts = [];
+    if (dbName && dbName !== currentInput) {
+      parts.push(
+        `<button type="button" data-meta-pick-artist="${escapeHtml(dbName)}" data-meta-pick-mode="db" class="px-1.5 py-0.5 bg-zinc-900 hover:bg-zinc-800 border border-emerald-500/40 text-emerald-300 transition-colors">Use DB: ${escapeHtml(dbName)}</button>`
+      );
+    } else if (metaEditorState.lockedDbArtist && metaEditorState.lockedDbArtist === currentInput) {
+      parts.push(`<span class="text-emerald-400">Locked DB: ${escapeHtml(metaEditorState.lockedDbArtist)}</span>`);
+    } else if (dbName && dbName === currentInput && srcName && srcName !== dbName) {
+      parts.push(`<span class="text-emerald-400">Matched DB: ${escapeHtml(dbName)}</span>`);
+    }
+
+    if (srcName && srcName !== currentInput) {
+      parts.push(
+        `<button type="button" data-meta-pick-artist="${escapeHtml(srcName)}" data-meta-pick-mode="source" class="px-1.5 py-0.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 transition-colors">Use Source: ${escapeHtml(srcName)}</button>`
+      );
+    }
+
+    altBar.innerHTML = parts.join('');
+    altBar.classList.toggle('hidden', parts.length === 0);
+
+    altBar.querySelectorAll('[data-meta-pick-artist]').forEach((btn) => {
+      btn.onclick = () => {
+        const chosenName = btn.getAttribute('data-meta-pick-artist') || '';
+        const chosenMode = btn.getAttribute('data-meta-pick-mode') || 'db';
+        if ($('meta-input-artist')) $('meta-input-artist').value = chosenName;
+        if (chosenMode === 'db') {
+          metaEditorState.lockedDbArtist = chosenName;
+          setMetaArtistMode('db', { skipApply: true });
+        } else {
+          metaEditorState.lockedDbArtist = '';
+          setMetaArtistMode('source', { skipApply: true });
+        }
+        updateMetaArtistModeUI();
+      };
+    });
+  }
+
+  function setMetaArtistMode(mode, { skipApply = false } = {}) {
+    metaEditorState.artistMode = mode === 'source' ? 'source' : 'db';
+    localStorage.setItem('century.meta_artist_mode', metaEditorState.artistMode);
+
+    if (!skipApply) {
+      refreshMatchedDbArtist();
+      const inputEl = $('meta-input-artist');
+      if (metaEditorState.artistMode === 'source') {
+        if (inputEl && metaEditorState.sourceArtist) {
+          inputEl.value = metaEditorState.sourceArtist;
+        }
+      } else {
+        const targetDb = metaEditorState.lockedDbArtist || metaEditorState.matchedDbArtist;
+        if (inputEl && targetDb) {
+          inputEl.value = targetDb;
+        } else if (inputEl && metaEditorState.sourceArtist) {
+          inputEl.value = metaEditorState.sourceArtist;
+        }
+      }
+    }
+
+    updateMetaArtistModeUI();
+  }
+
+  function renderMetaDbArtistsList(query = '') {
+    const listEl = $('meta-artist-db-list');
+    const countEl = $('meta-artist-db-count');
+    if (!listEl) return;
+
+    const all = Array.isArray(metaEditorState.dbArtists) ? [...metaEditorState.dbArtists] : [];
+    all.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+
+    const qNorm = normArtistKey(query);
+    const filtered = qNorm ? all.filter((a) => normArtistKey(a.name).includes(qNorm)) : all;
+
+    if (countEl) {
+      countEl.textContent = `${filtered.length}/${all.length}`;
+    }
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = `<div class="p-3 text-center text-[11px] font-mono text-zinc-500">${
+        all.length === 0 ? 'No artists loaded from database' : 'No matching DB artists'
+      }</div>`;
+      return;
+    }
+
+    const currentVal = normArtistKey($('meta-input-artist')?.value || '');
+    listEl.innerHTML = '';
+    for (const artist of filtered.slice(0, 150)) {
+      const isCurrent = normArtistKey(artist.name) === currentVal;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `w-full px-3 py-1.5 text-left flex items-center justify-between gap-2 text-xs transition-colors ${
+        isCurrent ? 'bg-emerald-950/40 text-emerald-300' : 'text-zinc-200 hover:bg-zinc-900'
+      }`;
+      const albums = typeof artist.albumCount === 'number' ? `${artist.albumCount} alb` : '';
+      btn.innerHTML = `
+        <span class="truncate">${escapeHtml(artist.name)}</span>
+        <span class="text-[10px] font-mono text-zinc-500 shrink-0">${escapeHtml(albums)}</span>
+      `;
+      btn.onclick = () => {
+        metaEditorState.lockedDbArtist = artist.name;
+        metaEditorState.matchedDbArtist = artist.name;
+        if ($('meta-input-artist')) $('meta-input-artist').value = artist.name;
+        setMetaArtistMode('db', { skipApply: true });
+        toggleMetaDbDropdown(false);
+        setMetaEditorStatus(`Locked artist to existing database entry: "${artist.name}"`);
+      };
+      listEl.appendChild(btn);
+    }
+  }
+
+  function toggleMetaDbDropdown(forceOpen = null) {
+    const dropdown = $('meta-artist-db-dropdown');
+    if (!dropdown) return;
+    const nextOpen = forceOpen !== null ? Boolean(forceOpen) : dropdown.classList.contains('hidden');
+    metaEditorState.dbPickerOpen = nextOpen;
+    dropdown.classList.toggle('hidden', !nextOpen);
+
+    if (nextOpen) {
+      const searchInput = $('meta-artist-db-search');
+      if (searchInput) {
+        searchInput.value = '';
+        searchInput.focus();
+      }
+      if ((!metaEditorState.dbArtists || metaEditorState.dbArtists.length === 0) && typeof loadAllArtists === 'function') {
+        const listEl = $('meta-artist-db-list');
+        if (listEl) listEl.innerHTML = '<div class="p-3 text-center text-[11px] font-mono text-zinc-400">Loading DB artists...</div>';
+        loadAllArtists()
+          .then((list) => {
+            metaEditorState.dbArtists = Array.isArray(list) ? list : [];
+            renderMetaDbArtistsList($('meta-artist-db-search')?.value || '');
+          })
+          .catch(() => {
+            renderMetaDbArtistsList('');
+          });
+      } else {
+        renderMetaDbArtistsList('');
+      }
+    }
+  }
+
+  async function ensureMetaDbArtistsLoaded() {
+    if (Array.isArray(state.artists) && state.artists.length > 0) {
+      metaEditorState.dbArtists = state.artists;
+      refreshMatchedDbArtist();
+      updateMetaArtistModeUI();
+      return state.artists;
+    }
+    try {
+      const list = await loadAllArtists();
+      metaEditorState.dbArtists = Array.isArray(list) ? list : [];
+      refreshMatchedDbArtist();
+      updateMetaArtistModeUI();
+      return metaEditorState.dbArtists;
+    } catch {
+      return [];
+    }
+  }
 
   function normalizeSubsonicPath(rawPath) {
     return String(rawPath || '')
@@ -3711,7 +3978,14 @@
     metaEditorState.onlineResults = [];
     metaEditorState.selectedResultId = null;
     metaEditorState.sourceFilter = 'all';
+    metaEditorState.sourceArtist = '';
+    metaEditorState.lockedDbArtist = '';
+    metaEditorState.matchedDbArtist = '';
+    metaEditorState.dbPickerOpen = false;
     metaEditorState.active = true;
+
+    const dbDropdown = $('meta-artist-db-dropdown');
+    if (dbDropdown) dbDropdown.classList.add('hidden');
 
     const fileInput = $('meta-cover-file-input');
     if (fileInput) fileInput.value = '';
@@ -3727,10 +4001,15 @@
     const initialAlbum = metaEditorState.hints.album || (isDir ? item?.name || '' : '');
     const initialYear = metaEditorState.hints.year || '';
 
+    metaEditorState.originalArtist = initialArtist;
+
     if ($('meta-input-title')) $('meta-input-title').value = initialTitle;
     if ($('meta-input-artist')) $('meta-input-artist').value = initialArtist;
     if ($('meta-input-album')) $('meta-input-album').value = initialAlbum;
     if ($('meta-input-year')) $('meta-input-year').value = initialYear;
+
+    updateMetaArtistModeUI();
+    ensureMetaDbArtistsLoaded();
 
     const initialSearchParts = [
       initialArtist,
@@ -3791,9 +4070,14 @@
       }
 
       if ($('meta-input-title') && meta.title) $('meta-input-title').value = meta.title;
-      if ($('meta-input-artist') && meta.artist) $('meta-input-artist').value = meta.artist;
+      if ($('meta-input-artist') && meta.artist) {
+        $('meta-input-artist').value = meta.artist;
+        metaEditorState.originalArtist = meta.artist;
+      }
       if ($('meta-input-album') && meta.album) $('meta-input-album').value = meta.album;
       if ($('meta-input-year') && meta.year) $('meta-input-year').value = meta.year;
+      refreshMatchedDbArtist();
+      updateMetaArtistModeUI();
 
       const smartQueryParts = [
         meta.artist || initialArtist,
@@ -3907,6 +4191,9 @@
 
   function closeMetadataEditor() {
     metaEditorState.active = false;
+    metaEditorState.dbPickerOpen = false;
+    const dbDropdown = $('meta-artist-db-dropdown');
+    if (dbDropdown) dbDropdown.classList.add('hidden');
     if (metaEditorState.previewObjectUrl) {
       URL.revokeObjectURL(metaEditorState.previewObjectUrl);
       metaEditorState.previewObjectUrl = null;
@@ -4242,13 +4529,29 @@
         metaEditorState.selectedResultId = item.sourceId;
 
         const chosenAlbum = item.album || item.title || '';
-        const chosenArtist = item.artist || '';
         const chosenYear = item.year ? String(item.year) : '';
+
+        metaEditorState.sourceArtist = String(item.artist || '').trim();
+        const dbMatch = refreshMatchedDbArtist();
+        let chosenArtist = metaEditorState.sourceArtist;
+        let artistNote = '';
+
+        if (metaEditorState.artistMode !== 'source') {
+          if (metaEditorState.lockedDbArtist) {
+            chosenArtist = metaEditorState.lockedDbArtist;
+            artistNote = ` · Kept selected DB artist "${chosenArtist}"`;
+          } else if (dbMatch && dbMatch.name) {
+            chosenArtist = dbMatch.name;
+            if (normArtistKey(chosenArtist) !== normArtistKey(metaEditorState.sourceArtist)) {
+              artistNote = ` · Kept DB artist "${chosenArtist}" instead of "${metaEditorState.sourceArtist}"`;
+            }
+          }
+        }
 
         if (metaEditorState.scope === 'album') {
           // Album Folder Mode: auto-fill Album, Artist, Year, and Cover for the folder batch
           if ($('meta-input-album')) $('meta-input-album').value = chosenAlbum;
-          if ($('meta-input-artist')) $('meta-input-artist').value = chosenArtist;
+          if ($('meta-input-artist') && chosenArtist) $('meta-input-artist').value = chosenArtist;
           if ($('meta-input-year') && chosenYear) $('meta-input-year').value = chosenYear;
 
           // If overrideAlbumTitles is checked, also fill title
@@ -4256,7 +4559,9 @@
             $('meta-input-title').value = item.title || chosenAlbum;
           }
 
-          setMetaEditorStatus(`Selected album from ${item.source}: "${chosenAlbum}" by ${chosenArtist}. Ready to sync all tracks in folder.`);
+          setMetaEditorStatus(
+            `Selected album from ${item.source}: "${chosenAlbum}" by ${chosenArtist || item.artist}${artistNote}. Ready to sync all tracks in folder.`
+          );
         } else {
           // Single Track Mode
           if ($('meta-input-title') && item.type !== 'album' && item.title) {
@@ -4267,11 +4572,17 @@
           if ($('meta-input-year') && chosenYear) $('meta-input-year').value = chosenYear;
 
           if (isAlbumItem) {
-            setMetaEditorStatus(`Selected album "${chosenAlbum}" by ${chosenArtist}. (Tip: Click "Entire Album Folder" above to sync all songs in this folder!)`);
+            setMetaEditorStatus(
+              `Selected album "${chosenAlbum}" by ${chosenArtist || item.artist}${artistNote}.`
+            );
           } else {
-            setMetaEditorStatus(`Auto-filled tags & cover from ${item.source}: "${item.title}" — ${item.artist}`);
+            setMetaEditorStatus(
+              `Auto-filled tags & cover from ${item.source}: "${item.title}" — ${chosenArtist || item.artist}${artistNote}`
+            );
           }
         }
+
+        updateMetaArtistModeUI();
 
         // Load high-res cover art preview
         if (item.coverUrl) {
@@ -4582,6 +4893,16 @@
 
     on('meta-override-album-titles', 'change', () => updateMetaScopeUI());
 
+    // Existing DB Artist Mode & Picker controls
+    on('meta-artist-mode-db-btn', 'click', () => setMetaArtistMode('db'));
+    on('meta-artist-mode-source-btn', 'click', () => setMetaArtistMode('source'));
+    on('meta-artist-db-picker-btn', 'click', () => toggleMetaDbDropdown());
+    on('meta-artist-db-search', 'input', (e) => renderMetaDbArtistsList(e.target.value));
+    on('meta-input-artist', 'input', () => {
+      metaEditorState.lockedDbArtist = '';
+      updateMetaArtistModeUI();
+    });
+
     // Local cover art file picker (.jpg, .png, .webp)
     const coverInput = $('meta-cover-file-input');
     if (coverInput) {
@@ -4647,6 +4968,10 @@
     window.addEventListener('keydown', (e) => {
       if (metaEditorState.active && e.key === 'Escape') {
         e.preventDefault();
+        if (metaEditorState.dbPickerOpen) {
+          toggleMetaDbDropdown(false);
+          return;
+        }
         closeMetadataEditor();
       }
     });
