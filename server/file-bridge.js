@@ -442,6 +442,46 @@ app.get(['/api/health', '/api/files/health'], (req, res) => {
   res.json({ status: 'ok', service: 'file-bridge', storage: STORAGE_DIR, music: MUSIC_DIR });
 });
 
+// Fast helper to compute the most recent modification timestamp within a directory and subdirectories
+async function getDirectoryLatestMtime(dirPath, maxFiles = 200) {
+  let maxMtime = 0;
+  let visited = 0;
+  try {
+    const stat = await fs.stat(dirPath);
+    maxMtime = stat.mtimeMs || 0;
+    const queue = [{ dir: dirPath, depth: 0 }];
+
+    while (queue.length > 0 && visited < maxFiles) {
+      const current = queue.shift();
+      let entries;
+      try {
+        entries = await fs.readdir(current.dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const ent of entries) {
+        if (visited >= maxFiles) break;
+        const nameLower = ent.name.toLowerCase();
+        if (ent.name.startsWith('.') || IGNORED_SYSTEM_NAMES.has(nameLower)) continue;
+        visited++;
+
+        const full = path.join(current.dir, ent.name);
+        try {
+          const s = await fs.stat(full);
+          if (s.mtimeMs > maxMtime) {
+            maxMtime = s.mtimeMs;
+          }
+          if (ent.isDirectory() && current.depth < 3) {
+            queue.push({ dir: full, depth: current.depth + 1 });
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (_) {}
+  return maxMtime;
+}
+
 // 1. List directory
 app.get(['/api/files', '/api/files/list'], async (req, res) => {
   try {
@@ -453,10 +493,25 @@ app.get(['/api/files', '/api/files/list'], async (req, res) => {
     const items = await Promise.all(
       visibleEntries.map(async (e) => {
         try {
-          const s = await fs.stat(path.join(dir, e.name));
-          return { name: e.name, isDirectory: e.isDirectory(), size: s.size, mtime: s.mtimeMs };
+          const itemPath = path.join(dir, e.name);
+          const s = await fs.stat(itemPath);
+          const isDir = e.isDirectory();
+          let latestMtime = s.mtimeMs;
+          if (isDir) {
+            const nestedLatest = await getDirectoryLatestMtime(itemPath);
+            if (nestedLatest > latestMtime) {
+              latestMtime = nestedLatest;
+            }
+          }
+          return {
+            name: e.name,
+            isDirectory: isDir,
+            size: s.size,
+            mtime: s.mtimeMs,
+            latestMtime,
+          };
         } catch {
-          return { name: e.name, isDirectory: e.isDirectory(), size: 0, mtime: 0 };
+          return { name: e.name, isDirectory: e.isDirectory(), size: 0, mtime: 0, latestMtime: 0 };
         }
       })
     );
@@ -751,6 +806,97 @@ app.delete('/api/files', async (req, res) => {
     }
     res.json({ success: true });
   } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// 4b. Rename file or directory
+app.post(['/api/files/rename', '/api/files/move'], async (req, res) => {
+  try {
+    const rawPath = String(req.body.path || req.body.oldPath || '').trim();
+    const rawNewName = String(req.body.newName || req.body.name || '').trim();
+
+    if (!rawPath) {
+      return res.status(400).json({ error: 'Missing path parameter for rename' });
+    }
+    if (!rawNewName) {
+      return res.status(400).json({ error: 'Missing newName parameter for rename' });
+    }
+
+    if (rawNewName.includes('/') || rawNewName.includes('\\') || /^\.+$/.test(rawNewName)) {
+      return res.status(400).json({ error: 'New name must be a single file or folder name' });
+    }
+
+    const cleanNewName = sanitizePathSegment(rawNewName);
+    if (!cleanNewName) {
+      return res.status(400).json({ error: 'New name is invalid or contains only forbidden characters' });
+    }
+
+    const oldTarget = resolveSafePath(rawPath, {
+      forbidRoot: true,
+      forbidProtected: true,
+    });
+
+    const canonicalOld = canonicalizePath(oldTarget);
+    // Never allow renaming root or protected directories
+    if (
+      CANONICAL_MUSIC_ROOT.startsWith(canonicalOld + path.sep) ||
+      CANONICAL_PROJECT_ROOT.startsWith(canonicalOld + path.sep) ||
+      canonicalOld === CANONICAL_STORAGE_ROOT ||
+      canonicalOld === CANONICAL_MUSIC_ROOT ||
+      canonicalOld === CANONICAL_PROJECT_ROOT
+    ) {
+      return res.status(403).json({
+        error: 'FATAL SECURITY BOUNDARY: Cannot rename root or protected parent directories',
+      });
+    }
+
+    // Verify source exists
+    try {
+      await fs.access(oldTarget);
+    } catch {
+      return res.status(404).json({ error: 'Source file or folder does not exist' });
+    }
+
+    const parentDir = path.dirname(oldTarget);
+    const newTarget = path.join(parentDir, cleanNewName);
+
+    const validatedNewTarget = resolveSafePath(path.relative(STORAGE_DIR, newTarget), {
+      forbidRoot: true,
+      forbidProtected: true,
+    });
+
+    if (path.dirname(validatedNewTarget) !== parentDir) {
+      return res.status(400).json({ error: 'Security boundary violation: rename cannot change directory' });
+    }
+
+    // Check if target already exists (allow case-only rename of the exact same item on case-insensitive filesystems)
+    if (oldTarget !== validatedNewTarget) {
+      try {
+        await fs.access(validatedNewTarget);
+        const canonicalNew = canonicalizePath(validatedNewTarget);
+        if (canonicalOld !== canonicalNew) {
+          return res.status(409).json({ error: `An item named "${cleanNewName}" already exists in this folder` });
+        }
+      } catch {
+        // Target does not exist, good to proceed
+      }
+    }
+
+    // Perform rename
+    await fs.rename(oldTarget, validatedNewTarget);
+
+    const relOld = path.relative(STORAGE_DIR, oldTarget).replace(/\\/g, '/');
+    const relNew = path.relative(STORAGE_DIR, validatedNewTarget).replace(/\\/g, '/');
+
+    res.json({
+      success: true,
+      oldPath: relOld,
+      newPath: relNew,
+      newName: cleanNewName,
+    });
+  } catch (err) {
+    console.error(`[Rename Error] ${err.message}`);
     res.status(400).json({ error: err.message });
   }
 });

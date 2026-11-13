@@ -2396,6 +2396,29 @@
     }
   }
 
+  function formatLastEdited(ms) {
+    if (!ms || isNaN(ms)) return '-';
+    const now = Date.now();
+    const diff = Math.max(0, now - Number(ms));
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) return 'just now';
+    const min = Math.floor(sec / 60);
+    if (min === 1) return '1 minute ago';
+    if (min < 60) return `${min} minutes ago`;
+    const hours = Math.floor(min / 60);
+    if (hours === 1) return '1 hour ago';
+    if (hours < 24) return `${hours} hours ago`;
+    const days = Math.floor(hours / 24);
+    if (days === 1) return 'yesterday';
+    if (days < 30) return `${days} days ago`;
+    const months = Math.floor(days / 30);
+    if (months === 1) return '1 month ago';
+    if (months < 12) return `${months} months ago`;
+    const years = Math.floor(days / 365);
+    if (years === 1) return '1 year ago';
+    return `${years} years ago`;
+  }
+
   function isImageFile(name) {
     if (!name || typeof name !== 'string') return false;
     const ext = name.split('.').pop().toLowerCase();
@@ -2721,27 +2744,60 @@
       const iconColor = item.isDirectory ? 'text-emerald-400' : 'text-zinc-400';
       const isImg = !item.isDirectory && isImageFile(item.name);
       const isAudio = !item.isDirectory && isAudioFile(item.name);
+      const targetRel = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
+
+      // Timestamps & relative "last edited ... ago" calculations
+      const mtime = Number(item.mtime) || 0;
+      const latestMtime = Number(item.latestMtime) || mtime;
+      const effectiveMtime = item.isDirectory ? latestMtime : mtime;
+      const relTime = formatLastEdited(effectiveMtime);
+      const exactTime = formatFileDate(effectiveMtime);
+
+      // Folder recent activity badge (e.g. edited within 14 days)
+      const now = Date.now();
+      const diffMs = Math.max(0, now - effectiveMtime);
+      const isRecentFolder = item.isDirectory && effectiveMtime > 0 && diffMs <= 14 * 86400 * 1000;
+      const isVeryRecentFolder = isRecentFolder && diffMs <= 24 * 3600 * 1000;
+
+      const folderBadgeHtml = isRecentFolder
+        ? `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9.5px] font-mono font-medium ${
+            isVeryRecentFolder
+              ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/40'
+              : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
+          } shrink-0" title="Recent activity: edited ${relTime} (${exactTime})">
+            <i data-lucide="clock" class="w-3 h-3"></i>
+            <span>Edited ${relTime}</span>
+          </span>`
+        : '';
 
       tr.innerHTML = `
         <td class="py-2.5 px-4 text-center font-mono text-[11px] text-zinc-500">${idx + 1}</td>
         <td class="py-2.5 px-4">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <i data-lucide="${iconName}" class="w-4 h-4 shrink-0 ${iconColor}"></i>
-            <button
-              type="button"
-              class="file-item-btn text-left truncate font-sans text-xs ${
-                item.isDirectory || isImg || isAudio
-                  ? 'font-medium text-zinc-100 hover:text-emerald-400 hover:underline cursor-pointer'
-                  : 'text-zinc-200 select-text cursor-default'
-              }"
-              title="${escapeHtml(item.name)}"
-            >
-              ${escapeHtml(item.name)}
-            </button>
+          <div class="flex items-center gap-2.5 min-w-0 flex-wrap">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <i data-lucide="${iconName}" class="w-4 h-4 shrink-0 ${iconColor}"></i>
+              <button
+                type="button"
+                class="file-item-btn text-left truncate font-sans text-xs ${
+                  item.isDirectory || isImg || isAudio
+                    ? 'font-medium text-zinc-100 hover:text-emerald-400 hover:underline cursor-pointer'
+                    : 'text-zinc-200 select-text cursor-default'
+                }"
+                title="${escapeHtml(item.name)}"
+              >
+                ${escapeHtml(item.name)}
+              </button>
+            </div>
+            ${folderBadgeHtml}
           </div>
         </td>
         <td class="py-2.5 px-4 text-right font-mono text-[11px] text-zinc-400">${formatFileSize(item.size)}</td>
-        <td class="py-2.5 px-4 text-right font-mono text-[11px] text-zinc-400 whitespace-nowrap">${formatFileDate(item.mtime)}</td>
+        <td class="py-2.5 px-4 text-right font-mono text-[11px] whitespace-nowrap" title="${exactTime}">
+          ${effectiveMtime ? `
+            <div class="${isAudio ? 'text-emerald-300 font-medium' : 'text-zinc-300'}">${relTime}</div>
+            <div class="text-[10px] text-zinc-400">${exactTime}</div>
+          ` : '-'}
+        </td>
         <td class="py-2.5 px-4 text-center">
           <div class="inline-flex items-center justify-center gap-1">
             ${item.isDirectory || isAudio ? `
@@ -2753,6 +2809,13 @@
                 <i data-lucide="tags" class="w-3.5 h-3.5"></i>
               </button>
             ` : ''}
+            <button
+              type="button"
+              title="Rename ${item.isDirectory ? 'folder' : 'file'}"
+              class="file-rename-btn w-7 h-7 inline-flex items-center justify-center text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 transition-colors"
+            >
+              <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+            </button>
             ${isImg ? `
               <button
                 type="button"
@@ -2814,6 +2877,14 @@
             type: item.isDirectory ? 'folder' : 'file',
             isDirectory: Boolean(item.isDirectory),
           }, item.isDirectory ? 'album' : 'single');
+        };
+      }
+
+      const renameBtn = tr.querySelector('.file-rename-btn');
+      if (renameBtn) {
+        renameBtn.onclick = (e) => {
+          e.stopPropagation();
+          renameFileItem(item);
         };
       }
 
@@ -3200,6 +3271,62 @@
     if (bar) bar.classList.add('hidden');
   }
 
+  async function renameFileItem(item) {
+    if (!item || !item.name) return;
+    const isDir = Boolean(item.isDirectory);
+    const targetRel = item.relPath || (filesState.currentPath ? `${filesState.currentPath}/${item.name}` : item.name);
+    const currentName = item.name;
+    const promptMsg = isDir ? `Enter new name for folder "${currentName}":` : `Enter new name for file "${currentName}":`;
+    const entered = window.prompt(promptMsg, currentName);
+    if (!entered) return;
+    const newName = entered.trim();
+    if (!newName || newName === currentName) return;
+
+    const base = getFileBridgeBase();
+    try {
+      const res = await fetch(`${base}/api/files/rename`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ path: targetRel, newName }),
+      });
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('401 Unauthorized: Invalid or missing NAS API Key.');
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      showToast(`Renamed to "${data.newName || newName}"`);
+
+      // If a folder that is part of current path was renamed, update currentPath
+      if (isDir && filesState.currentPath) {
+        const normalizedOld = targetRel.replace(/\\/g, '/');
+        const normalizedCurrent = filesState.currentPath.replace(/\\/g, '/');
+        if (normalizedCurrent === normalizedOld) {
+          filesState.currentPath = data.newPath || normalizedOld;
+        } else if (normalizedCurrent.startsWith(normalizedOld + '/')) {
+          filesState.currentPath = (data.newPath || normalizedOld) + normalizedCurrent.slice(normalizedOld.length);
+        }
+      }
+
+      // If metadata editor is active and points to this item, update its paths
+      if (metaEditorState.active) {
+        const normalizedOld = targetRel.replace(/\\/g, '/');
+        const normalizedNew = (data.newPath || '').replace(/\\/g, '/');
+        if (normalizedNew) {
+          if (metaEditorState.targetPath === normalizedOld) metaEditorState.targetPath = normalizedNew;
+          if (metaEditorState.filePath === normalizedOld) metaEditorState.filePath = normalizedNew;
+          if (metaEditorState.folderPath === normalizedOld) metaEditorState.folderPath = normalizedNew;
+          updateMetaScopeUI();
+        }
+      }
+
+      client.request('startScan').catch(() => {});
+      await loadFilesView();
+    } catch (err) {
+      showToast(`Failed to rename: ${err.message}`, 'error');
+    }
+  }
+
   async function deleteFileItem(item) {
     const isDir = item.isDirectory;
     const confirmed = window.confirm(
@@ -3481,6 +3608,7 @@
     filePath: '',
     folderPath: '',
     filePaths: [],
+    audioTrackCount: null,
     hints: { title: '', artist: '', album: '', year: '', coverUrl: '' },
     selectedCoverFile: null,
     selectedCoverUrl: '',
@@ -3852,6 +3980,28 @@
       }`;
     }
 
+    const countBadge = $('meta-track-count-badge');
+    if (countBadge) {
+      if (isAlbum) {
+        countBadge.classList.remove('hidden');
+        const count =
+          typeof metaEditorState.audioTrackCount === 'number'
+            ? metaEditorState.audioTrackCount
+            : metaEditorState.filePaths?.length || null;
+        if (count !== null) {
+          countBadge.textContent = count === 1 ? '1 track found' : `${count} tracks found`;
+          countBadge.className =
+            'px-2 py-0.5 text-[10px] font-mono font-semibold bg-amber-400/15 border border-amber-400/40 text-amber-300 shrink-0';
+        } else {
+          countBadge.textContent = 'Scanning tracks...';
+          countBadge.className =
+            'px-2 py-0.5 text-[10px] font-mono font-semibold bg-zinc-800 border border-zinc-700 text-zinc-400 shrink-0 animate-pulse';
+        }
+      } else {
+        countBadge.classList.add('hidden');
+      }
+    }
+
     if (singleTabBtn) {
       singleTabBtn.className = `px-2.5 py-1 inline-flex items-center gap-1.5 transition-colors ${
         !isAlbum
@@ -3957,6 +4107,7 @@
     metaEditorState.filePaths = Array.isArray(item?.filePaths)
       ? item.filePaths.map(normalizeSubsonicPath).filter(Boolean)
       : [];
+    metaEditorState.audioTrackCount = isDir && Array.isArray(item?.filePaths) ? item.filePaths.length : null;
 
     metaEditorState.scope = isDir ? 'album' : 'single';
     metaEditorState.targetType = isDir ? 'folder' : 'file';
@@ -4063,6 +4214,13 @@
       }
       const data = await res.json();
       const meta = data.metadata || {};
+
+      if (typeof data.audioTrackCount === 'number') {
+        metaEditorState.audioTrackCount = data.audioTrackCount;
+      }
+      if (Array.isArray(data.audioFiles)) {
+        metaEditorState.filePaths = data.audioFiles;
+      }
 
       if (data.path) {
         if (metaEditorState.scope === 'album' && !metaEditorState.folderPath) {
