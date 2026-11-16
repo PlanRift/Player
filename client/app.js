@@ -3604,6 +3604,9 @@
   // ============================================================================
   const metaEditorState = {
     active: false,
+    isYtmStaging: false,
+    ytmStagedJob: null,
+    onlineAlbumTracks: [],
     scope: 'single', // 'single' | 'album'
     filePath: '',
     folderPath: '',
@@ -3962,6 +3965,7 @@
 
   function updateMetaScopeUI() {
     const isAlbum = metaEditorState.scope === 'album';
+    const isStaging = Boolean(metaEditorState.isYtmStaging);
     const badge = $('meta-scope-badge');
     const targetLabel = $('meta-editor-target-label');
     const scopeHint = $('meta-scope-hint');
@@ -3970,24 +3974,37 @@
     const titleInput = $('meta-input-title');
     const singleTabBtn = $('meta-scope-btn-single');
     const albumTabBtn = $('meta-scope-btn-album');
+    const coverOnlyBtn = $('meta-apply-cover-only-btn');
+    const stagedTracksSection = $('meta-staged-tracks-section');
+
+    const count =
+      typeof metaEditorState.audioTrackCount === 'number'
+        ? metaEditorState.audioTrackCount
+        : isStaging && Array.isArray(metaEditorState.ytmStagedJob?.tracks)
+          ? metaEditorState.ytmStagedJob.tracks.length
+          : metaEditorState.filePaths?.length || null;
 
     if (badge) {
-      badge.textContent = isAlbum ? 'ALBUM FOLDER' : 'SINGLE TRACK';
-      badge.className = `px-2 py-0.5 text-[10px] font-mono font-semibold shrink-0 ${
-        isAlbum
-          ? 'bg-amber-400/15 border border-amber-400/40 text-amber-300'
-          : 'bg-emerald-400/15 border border-emerald-400/40 text-emerald-300'
-      }`;
+      if (isStaging) {
+        badge.textContent = isAlbum
+          ? 'PRE-DOWNLOAD STAGING · ALBUM'
+          : 'PRE-DOWNLOAD STAGING · TRACK';
+        badge.className =
+          'px-2 py-0.5 text-[10px] font-mono font-semibold shrink-0 bg-emerald-400/20 border border-emerald-400/50 text-emerald-300';
+      } else {
+        badge.textContent = isAlbum ? 'ALBUM FOLDER' : 'SINGLE TRACK';
+        badge.className = `px-2 py-0.5 text-[10px] font-mono font-semibold shrink-0 ${
+          isAlbum
+            ? 'bg-amber-400/15 border border-amber-400/40 text-amber-300'
+            : 'bg-emerald-400/15 border border-emerald-400/40 text-emerald-300'
+        }`;
+      }
     }
 
     const countBadge = $('meta-track-count-badge');
     if (countBadge) {
-      if (isAlbum) {
+      if (isStaging || isAlbum) {
         countBadge.classList.remove('hidden');
-        const count =
-          typeof metaEditorState.audioTrackCount === 'number'
-            ? metaEditorState.audioTrackCount
-            : metaEditorState.filePaths?.length || null;
         if (count !== null) {
           countBadge.textContent = count === 1 ? '1 track found' : `${count} tracks found`;
           countBadge.className =
@@ -4002,51 +4019,79 @@
       }
     }
 
+    if (coverOnlyBtn) {
+      coverOnlyBtn.classList.toggle('hidden', isStaging);
+    }
+    if (stagedTracksSection) {
+      stagedTracksSection.classList.toggle('hidden', !isStaging);
+    }
+
     if (singleTabBtn) {
+      singleTabBtn.disabled = isStaging;
       singleTabBtn.className = `px-2.5 py-1 inline-flex items-center gap-1.5 transition-colors ${
         !isAlbum
           ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 font-semibold'
           : 'text-zinc-400 hover:text-zinc-200 border-transparent'
-      }`;
+      } ${isStaging ? 'opacity-50 cursor-not-allowed' : ''}`;
     }
     if (albumTabBtn) {
+      albumTabBtn.disabled = isStaging;
       albumTabBtn.className = `px-2.5 py-1 inline-flex items-center gap-1.5 transition-colors ${
         isAlbum
           ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40 font-semibold'
           : 'text-zinc-400 hover:text-zinc-200 border-transparent'
-      }`;
+      } ${isStaging ? 'opacity-50 cursor-not-allowed' : ''}`;
     }
 
     if (targetLabel) {
-      const displayTarget = isAlbum
-        ? metaEditorState.folderPath || metaEditorState.targetPath || metaEditorState.hints?.album || '(album folder)'
-        : metaEditorState.filePath || metaEditorState.targetPath || metaEditorState.hints?.title || '-';
-      targetLabel.textContent = `${isAlbum ? 'Album Folder' : 'Single Track'}: ${
-        displayTarget.startsWith('(') ? displayTarget : `/${displayTarget}`
-      }`;
+      if (isStaging && metaEditorState.ytmStagedJob) {
+        const sj = metaEditorState.ytmStagedJob;
+        targetLabel.textContent = `Pre-Download Staging (.${sj.format || 'opus'}) · ${sj.url || ''}`;
+      } else {
+        const displayTarget = isAlbum
+          ? metaEditorState.folderPath || metaEditorState.targetPath || metaEditorState.hints?.album || '(album folder)'
+          : metaEditorState.filePath || metaEditorState.targetPath || metaEditorState.hints?.title || '-';
+        targetLabel.textContent = `${isAlbum ? 'Album Folder' : 'Single Track'}: ${
+          displayTarget.startsWith('(') ? displayTarget : `/${displayTarget}`
+        }`;
+      }
     }
 
     if (scopeHint) {
-      const trackCount = metaEditorState.filePaths?.length || 0;
-      scopeHint.textContent = isAlbum
-        ? trackCount > 0
-          ? `Batch-updating all ${trackCount} track(s) in album folder`
-          : 'Batch-updating all audio tracks in album folder'
-        : 'Editing single audio file';
+      const trackCount = count || 0;
+      if (isStaging) {
+        scopeHint.textContent =
+          trackCount > 1
+            ? `Staging ${trackCount} tracks (skipping YT thumbnails)`
+            : 'Staging 1 track (skipping YT thumbnail)';
+      } else {
+        scopeHint.textContent = isAlbum
+          ? trackCount > 0
+            ? `Batch-updating all ${trackCount} track(s) in album folder`
+            : 'Batch-updating all audio tracks in album folder'
+          : 'Editing single audio file';
+      }
     }
 
     if (saveLabel) {
-      const trackCount = metaEditorState.filePaths?.length || 0;
-      saveLabel.textContent = isAlbum
-        ? trackCount > 0
-          ? `SAVE TO ALBUM FOLDER (${trackCount} TRACKS)`
-          : 'SAVE TO ALBUM FOLDER'
-        : 'SAVE TO TRACK';
+      const trackCount = count || 0;
+      if (isStaging) {
+        saveLabel.textContent =
+          trackCount > 1
+            ? `CONFIRM & START DOWNLOAD (${trackCount} TRACKS)`
+            : 'CONFIRM & START DOWNLOAD';
+      } else {
+        saveLabel.textContent = isAlbum
+          ? trackCount > 0
+            ? `SAVE TO ALBUM FOLDER (${trackCount} TRACKS)`
+            : 'SAVE TO ALBUM FOLDER'
+          : 'SAVE TO TRACK';
+      }
     }
 
     if (overrideWrap) {
-      overrideWrap.classList.toggle('hidden', !isAlbum);
-      overrideWrap.classList.toggle('inline-flex', isAlbum);
+      overrideWrap.classList.toggle('hidden', !isAlbum || isStaging);
+      overrideWrap.classList.toggle('inline-flex', isAlbum && !isStaging);
     }
 
     if (titleInput) {
@@ -4086,6 +4131,10 @@
   async function openMetadataEditor(item, initialScope = null) {
     // Ensure modal listeners are always bound even if opened before visiting Files tab
     initMetadataEditorEvents();
+
+    metaEditorState.isYtmStaging = false;
+    metaEditorState.ytmStagedJob = null;
+    metaEditorState.onlineAlbumTracks = [];
 
     const relPath = normalizeSubsonicPath(
       item?.relPath ?? (filesState.currentPath ? `${filesState.currentPath}/${item?.name || ''}` : item?.name || '')
@@ -4353,6 +4402,9 @@
 
   function closeMetadataEditor() {
     metaEditorState.active = false;
+    metaEditorState.isYtmStaging = false;
+    metaEditorState.ytmStagedJob = null;
+    metaEditorState.onlineAlbumTracks = [];
     metaEditorState.dbPickerOpen = false;
     const dbDropdown = $('meta-artist-db-dropdown');
     if (dbDropdown) dbDropdown.classList.add('hidden');
@@ -4362,6 +4414,234 @@
     }
     const modal = $('files-metadata-modal');
     if (modal) modal.classList.add('hidden');
+  }
+
+  /**
+   * Render the Pre-Download Staged Tracklist (editable individual track titles + track numbers).
+   */
+  function renderStagedTracksList() {
+    const listEl = $('meta-staged-tracks-list');
+    const syncBtn = $('meta-staged-sync-online-titles-btn');
+    const resetBtn = $('meta-staged-reset-yt-titles-btn');
+    if (!listEl) return;
+
+    const tracks = metaEditorState.ytmStagedJob?.tracks || [];
+    const hasOnlineTracks = Array.isArray(metaEditorState.onlineAlbumTracks) && metaEditorState.onlineAlbumTracks.length > 0;
+    const hasModifiedTitles = tracks.some((t) => t.title !== t.ytTitle);
+
+    if (syncBtn) {
+      syncBtn.classList.toggle('hidden', !hasOnlineTracks);
+      if (hasOnlineTracks) {
+        syncBtn.textContent = `USE ONLINE TRACKLIST (${metaEditorState.onlineAlbumTracks.length})`;
+      }
+    }
+    if (resetBtn) {
+      resetBtn.classList.toggle('hidden', !hasModifiedTitles);
+    }
+
+    listEl.innerHTML = '';
+    tracks.forEach((trk, idx) => {
+      const row = document.createElement('div');
+      row.className = 'px-2.5 py-1.5 flex items-center gap-2 bg-zinc-950/80';
+      const numStr = String(trk.trackNumber || idx + 1).padStart(2, '0');
+      row.innerHTML = `
+        <span class="w-6 text-[10px] font-mono text-emerald-400 shrink-0">#${escapeHtml(numStr)}</span>
+        <input
+          type="text"
+          data-staged-track-idx="${idx}"
+          value="${escapeHtml(trk.title || '')}"
+          placeholder="Track ${idx + 1} title..."
+          class="flex-1 min-w-0 h-7 px-2 bg-zinc-900 border border-zinc-800 focus:border-emerald-400 text-xs text-zinc-100 font-sans select-text outline-none"
+        />
+      `;
+      const input = row.querySelector('input');
+      if (input) {
+        input.addEventListener('input', (e) => {
+          trk.title = e.target.value;
+          if (tracks.length === 1 && $('meta-input-title')) {
+            $('meta-input-title').value = trk.title;
+          }
+          const anyDiff = tracks.some((t) => t.title !== t.ytTitle);
+          if (resetBtn) resetBtn.classList.toggle('hidden', !anyDiff);
+        });
+      }
+      listEl.appendChild(row);
+    });
+  }
+
+  function applyOnlineAlbumTracksToStaged() {
+    const tracks = metaEditorState.ytmStagedJob?.tracks || [];
+    const online = metaEditorState.onlineAlbumTracks || [];
+    if (!tracks.length || !online.length) return;
+
+    let applied = 0;
+    for (let i = 0; i < tracks.length; i++) {
+      if (online[i]?.title) {
+        tracks[i].title = String(online[i].title).trim();
+        applied++;
+      }
+    }
+    if (tracks.length === 1 && tracks[0]?.title && $('meta-input-title')) {
+      $('meta-input-title').value = tracks[0].title;
+    }
+    renderStagedTracksList();
+    if (applied > 0) {
+      showToast(`Applied ${applied} official track title(s) to staged tracklist`);
+    }
+  }
+
+  function resetStagedTracksToYoutubeTitles() {
+    const tracks = metaEditorState.ytmStagedJob?.tracks || [];
+    for (const trk of tracks) {
+      if (trk.ytTitle) {
+        trk.title = trk.ytTitle;
+      }
+    }
+    if (tracks.length === 1 && tracks[0]?.title && $('meta-input-title')) {
+      $('meta-input-title').value = tracks[0].title;
+    }
+    renderStagedTracksList();
+    showToast('Restored YouTube Music track titles');
+  }
+
+  async function fetchOnlineAlbumTracksForStaging(albumItem) {
+    if (!metaEditorState.isYtmStaging || !albumItem?.sourceId) return;
+    try {
+      const base = getFileBridgeBase();
+      const res = await fetch(
+        `${base}/api/metadata/album-tracks?sourceId=${encodeURIComponent(albumItem.sourceId)}`,
+        { headers: getFileBridgeHeaders(getSpotifyHeaders()) }
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const tracks = Array.isArray(data.tracks) ? data.tracks : [];
+      if (tracks.length > 0) {
+        metaEditorState.onlineAlbumTracks = tracks;
+        applyOnlineAlbumTracksToStaged();
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Open the Metadata & Cover Art Editor Modal in "Pre-Download Staging Mode"
+   * after fetching link metadata via yt-dlp --dump-single-json --flat-playlist.
+   */
+  async function openMetadataEditorForYtmStaging(staged, downloadParams = {}) {
+    initMetadataEditorEvents();
+
+    const rawTracks = Array.isArray(staged?.tracks) ? staged.tracks : [];
+    const isAlbum = Boolean(staged?.isPlaylist || rawTracks.length > 1 || staged?.scope === 'album');
+
+    metaEditorState.isYtmStaging = true;
+    metaEditorState.onlineAlbumTracks = [];
+    metaEditorState.scope = isAlbum ? 'album' : 'single';
+    metaEditorState.targetType = isAlbum ? 'folder' : 'file';
+    metaEditorState.audioTrackCount = rawTracks.length || 1;
+    metaEditorState.filePaths = [];
+    metaEditorState.filePath = '';
+    metaEditorState.folderPath = '';
+    metaEditorState.targetPath = '';
+
+    metaEditorState.ytmStagedJob = {
+      url: staged?.url || downloadParams.url || '',
+      format: downloadParams.format || 'opus',
+      destMode: downloadParams.destMode || 'auto',
+      targetDir: downloadParams.targetDir || '',
+      isPlaylist: isAlbum,
+      tracks: rawTracks.map((t, idx) => {
+        const cleanTitle = String(t.title || `Track ${idx + 1}`).trim();
+        return {
+          index: idx + 1,
+          trackNumber: Number(t.trackNumber) || idx + 1,
+          id: String(t.id || ''),
+          url: String(t.url || ''),
+          title: cleanTitle,
+          ytTitle: cleanTitle,
+          artist: String(t.artist || staged?.artist || '').trim(),
+          album: String(t.album || staged?.album || '').trim(),
+          duration: Number(t.duration) || 0,
+        };
+      }),
+    };
+
+    const initialTitle = isAlbum
+      ? ''
+      : String(staged?.title || rawTracks[0]?.title || '').trim();
+    const initialArtist = String(staged?.artist || rawTracks[0]?.artist || '').trim();
+    const initialAlbum = String(staged?.album || staged?.collectionTitle || '').trim();
+    const initialYear = String(staged?.year || '').trim();
+
+    metaEditorState.hints = {
+      title: initialTitle,
+      artist: initialArtist,
+      album: initialAlbum,
+      year: initialYear,
+      coverUrl: '',
+    };
+    metaEditorState.originalArtist = initialArtist;
+
+    if (metaEditorState.previewObjectUrl) {
+      URL.revokeObjectURL(metaEditorState.previewObjectUrl);
+      metaEditorState.previewObjectUrl = null;
+    }
+    metaEditorState.selectedCoverFile = null;
+    metaEditorState.selectedCoverUrl = '';
+    metaEditorState.onlineResults = [];
+    metaEditorState.selectedResultId = null;
+    metaEditorState.sourceFilter = 'all';
+    metaEditorState.sourceArtist = initialArtist;
+    metaEditorState.lockedDbArtist = '';
+    metaEditorState.matchedDbArtist = '';
+    metaEditorState.dbPickerOpen = false;
+    metaEditorState.active = true;
+
+    const dbDropdown = $('meta-artist-db-dropdown');
+    if (dbDropdown) dbDropdown.classList.add('hidden');
+    const fileInput = $('meta-cover-file-input');
+    if (fileInput) fileInput.value = '';
+    if ($('meta-override-album-titles')) $('meta-override-album-titles').checked = false;
+
+    if ($('meta-input-title')) $('meta-input-title').value = initialTitle;
+    if ($('meta-input-artist')) $('meta-input-artist').value = initialArtist;
+    if ($('meta-input-album')) $('meta-input-album').value = initialAlbum;
+    if ($('meta-input-year')) $('meta-input-year').value = initialYear;
+
+    await ensureMetaDbArtistsLoaded();
+    const dbMatch = refreshMatchedDbArtist();
+    if (metaEditorState.artistMode !== 'source' && dbMatch?.name && $('meta-input-artist')) {
+      $('meta-input-artist').value = dbMatch.name;
+    }
+    updateMetaArtistModeUI();
+
+    setMetaSearchMode(isAlbum ? 'album' : 'track');
+    const searchQuery = [
+      initialArtist,
+      isAlbum ? initialAlbum || rawTracks[0]?.title : initialTitle || initialAlbum,
+    ]
+      .map((s) => String(s || '').trim())
+      .filter(Boolean)
+      .join(' ');
+    if ($('meta-online-search-input')) {
+      $('meta-online-search-input').value = searchQuery;
+    }
+    if ($('meta-search-summary')) $('meta-search-summary').textContent = '';
+
+    setMetaCoverPreview('', 'NO COVER (SKIPPING YT THUMB)');
+    updateMetaScopeUI();
+    renderStagedTracksList();
+    renderOnlineMetadataResults();
+
+    const modal = $('files-metadata-modal');
+    if (modal) modal.classList.remove('hidden');
+    refreshIcons();
+
+    setMetaEditorStatus(
+      `Staged ${rawTracks.length} track(s) from YouTube Music. Choose online metadata/cover or upload local art, then click Confirm & Start Download.`
+    );
+
+    if (searchQuery) {
+      runOnlineMetadataSearch();
+    }
   }
 
   function getSpotifyHeaders() {
@@ -4722,12 +5002,19 @@
           }
 
           setMetaEditorStatus(
-            `Selected album from ${item.source}: "${chosenAlbum}" by ${chosenArtist || item.artist}${artistNote}. Ready to sync all tracks in folder.`
+            `Selected album from ${item.source}: "${chosenAlbum}" by ${chosenArtist || item.artist}${artistNote}. Ready to sync all tracks.`
           );
         } else {
           // Single Track Mode
           if ($('meta-input-title') && item.type !== 'album' && item.title) {
             $('meta-input-title').value = item.title;
+            if (
+              metaEditorState.isYtmStaging &&
+              metaEditorState.ytmStagedJob?.tracks?.length === 1
+            ) {
+              metaEditorState.ytmStagedJob.tracks[0].title = item.title;
+              renderStagedTracksList();
+            }
           }
           if ($('meta-input-artist') && chosenArtist) $('meta-input-artist').value = chosenArtist;
           if ($('meta-input-album') && chosenAlbum) $('meta-input-album').value = chosenAlbum;
@@ -4742,6 +5029,10 @@
               `Auto-filled tags & cover from ${item.source}: "${item.title}" — ${chosenArtist || item.artist}${artistNote}`
             );
           }
+        }
+
+        if (metaEditorState.isYtmStaging && isAlbumItem && item.sourceId) {
+          fetchOnlineAlbumTracksForStaging(item);
         }
 
         updateMetaArtistModeUI();
@@ -4907,12 +5198,106 @@
   }
 
   /**
+   * Confirm & Start Staged YTM Download -> POST /api/ytm/download
+   * Sends confirmed cover art (file or URL), artist, album, year, and individual track titles/numbers.
+   */
+  async function submitStagedYtmDownload() {
+    if (metaEditorState.busy || !metaEditorState.ytmStagedJob) return;
+
+    const sj = metaEditorState.ytmStagedJob;
+    const titleVal = $('meta-input-title')?.value?.trim() ?? '';
+    const artistVal = $('meta-input-artist')?.value?.trim() ?? '';
+    const albumVal = $('meta-input-album')?.value?.trim() ?? '';
+    const yearVal = $('meta-input-year')?.value?.trim() ?? '';
+
+    const confirmedTracks = (sj.tracks || []).map((t, idx) => {
+      let trkTitle = String(t.title || t.ytTitle || `Track ${idx + 1}`).trim();
+      if (sj.tracks.length === 1 && titleVal) {
+        trkTitle = titleVal;
+      }
+      return {
+        index: idx + 1,
+        trackNumber: Number(t.trackNumber) || idx + 1,
+        id: t.id || '',
+        url: t.url || '',
+        title: trkTitle,
+        artist: artistVal || t.artist || '',
+        album: albumVal || t.album || '',
+      };
+    });
+
+    const stagedMetadata = {
+      title: titleVal || confirmedTracks[0]?.title || '',
+      artist: artistVal,
+      album: albumVal,
+      year: yearVal,
+      coverUrl: metaEditorState.selectedCoverUrl || '',
+      isPlaylist: Boolean(sj.isPlaylist || confirmedTracks.length > 1),
+      tracks: confirmedTracks,
+    };
+
+    const formData = new FormData();
+    formData.append('url', sj.url);
+    formData.append('format', sj.format || 'opus');
+    formData.append('destMode', sj.destMode || 'auto');
+    formData.append('targetDir', sj.targetDir || '');
+    formData.append('stagedMetadata', JSON.stringify(stagedMetadata));
+
+    if (client && client.username && typeof client.buildUrl === 'function') {
+      try {
+        formData.append('navidromeScanUrl', client.buildUrl('startScan'));
+      } catch (_) {}
+    }
+
+    if (metaEditorState.selectedCoverFile) {
+      formData.append('image', metaEditorState.selectedCoverFile);
+    }
+
+    metaEditorState.busy = true;
+    const saveBtn = $('meta-save-all-btn');
+    if (saveBtn) saveBtn.disabled = true;
+    setMetaEditorStatus('Starting YTM download with staged metadata & cover art...');
+
+    try {
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/download`, {
+        method: 'POST',
+        headers: getFileBridgeHeaders(),
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+
+      const urlInput = $('ytm-url-input');
+      if (urlInput) urlInput.value = '';
+
+      closeMetadataEditor();
+      setYtmPanelExpanded(true);
+      ensureYtmSseConnected();
+      showToast(
+        `Started YTM download (${confirmedTracks.length} track${confirmedTracks.length === 1 ? '' : 's'}) with staged tags`
+      );
+      await refreshYtmStatus();
+    } catch (err) {
+      setMetaEditorStatus(`Download start failed: ${err.message}`, true);
+      showToast(`Download start failed: ${err.message}`, 'error');
+    } finally {
+      metaEditorState.busy = false;
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
+  /**
    * 2. Full Metadata & Cover Writer Flow -> POST /api/metadata/apply
    * Sends finalized metadata object (Title, Artist, Album, Year) + Cover Art (file or URL)
    * to be injected into the physical audio file(s).
    */
   async function submitApplyFullMetadata() {
     if (metaEditorState.busy) return;
+    if (metaEditorState.isYtmStaging) {
+      return await submitStagedYtmDownload();
+    }
 
     const base = getFileBridgeBase();
     const formData = new FormData();
@@ -5054,6 +5439,15 @@
     }
 
     on('meta-override-album-titles', 'change', () => updateMetaScopeUI());
+    on('meta-staged-sync-online-titles-btn', 'click', () => applyOnlineAlbumTracksToStaged());
+    on('meta-staged-reset-yt-titles-btn', 'click', () => resetStagedTracksToYoutubeTitles());
+
+    on('meta-input-title', 'input', (e) => {
+      if (metaEditorState.isYtmStaging && metaEditorState.ytmStagedJob?.tracks?.length === 1) {
+        metaEditorState.ytmStagedJob.tracks[0].title = e.target.value;
+        renderStagedTracksList();
+      }
+    });
 
     // Existing DB Artist Mode & Picker controls
     on('meta-artist-mode-db-btn', 'click', () => setMetaArtistMode('db'));
@@ -5303,6 +5697,9 @@
     ytDlpVersion: null,
     cookies: null,
     jobs: [],
+    liveLogs: [],
+    eventSource: null,
+    sseConnected: false,
     defaultMusicRelPath: 'Music',
     destMode: ['current', 'choose', 'auto'].includes(localStorage.getItem('century.ytm_dest_mode'))
       ? localStorage.getItem('century.ytm_dest_mode')
@@ -5422,8 +5819,8 @@
     if (subEl) {
       subEl.textContent =
         fmt === 'm4a'
-          ? 'Format 141 / bestaudio[ext=m4a] · Embedded tags & cover'
-          : 'Format 251 / bestaudio[acodec=opus] · Embedded tags & cover';
+          ? 'Format 141 · Safeguard ≤ 135kbps · Staged tags & cover'
+          : 'Format 251 · Safeguard ≤ 70kbps · Staged tags & cover';
     }
   }
 
@@ -5444,6 +5841,185 @@
     return new Date(ms).toLocaleDateString();
   }
 
+  function updateYtmSseBadge() {
+    const badge = $('ytm-sse-status-badge');
+    if (!badge) return;
+    if (ytmState.sseConnected) {
+      badge.textContent = 'SSE: LIVE';
+      badge.className =
+        'px-1.5 py-0.2 text-[9.5px] font-mono border border-emerald-500/40 bg-emerald-950/30 text-emerald-300';
+    } else {
+      badge.textContent = 'SSE: STANDBY';
+      badge.className =
+        'px-1.5 py-0.2 text-[9.5px] font-mono border border-zinc-700 bg-zinc-900 text-zinc-400';
+    }
+  }
+
+  function renderYtmLiveLogs() {
+    const outEl = $('ytm-live-log-output');
+    if (!outEl) return;
+
+    if (!ytmState.liveLogs || ytmState.liveLogs.length === 0) {
+      outEl.innerHTML = `<div class="text-zinc-500">Waiting for download stream logs...</div>`;
+      return;
+    }
+
+    outEl.innerHTML = ytmState.liveLogs
+      .map((item) => {
+        const timeStr = item.ts ? new Date(item.ts).toLocaleTimeString() : '';
+        const cls =
+          item.level === 'error'
+            ? 'text-[#f0605a]'
+            : item.level === 'warn'
+              ? 'text-amber-300'
+              : item.text?.startsWith('[AudioTagger]') || item.text?.startsWith('[Saved]') || item.text?.startsWith('[Completed]')
+                ? 'text-emerald-300'
+                : 'text-zinc-300';
+        return `<div class="${cls} break-all"><span class="text-zinc-500">[${escapeHtml(timeStr)}]</span> ${escapeHtml(item.text || '')}</div>`;
+      })
+      .join('');
+    outEl.scrollTop = outEl.scrollHeight;
+  }
+
+  function appendYtmLiveLog(entry) {
+    if (!entry || !entry.text) return;
+    const last = ytmState.liveLogs[ytmState.liveLogs.length - 1];
+    // Update in-place if consecutive [download] % progress line
+    if (
+      last &&
+      last.text?.startsWith('[download]') &&
+      entry.text?.startsWith('[download]') &&
+      entry.text.includes('%')
+    ) {
+      ytmState.liveLogs[ytmState.liveLogs.length - 1] = entry;
+    } else {
+      ytmState.liveLogs.push(entry);
+      if (ytmState.liveLogs.length > 150) {
+        ytmState.liveLogs.splice(0, ytmState.liveLogs.length - 150);
+      }
+    }
+    renderYtmLiveLogs();
+  }
+
+  function syncNavidromeAfterYtmJob(job) {
+    if (!job || !job.id) return;
+    if (ytmState.completedSyncedJobIds.has(job.id)) return;
+    ytmState.completedSyncedJobIds.add(job.id);
+
+    client.request('startScan').catch(() => {});
+    if (typeof client.bustCoverCache === 'function') {
+      client.bustCoverCache();
+    }
+    state.artists = null;
+    state.songs = null;
+    state.songsPromise = null;
+    state.albumsByType = {};
+
+    if (state.route === 'files') {
+      loadFilesView();
+    }
+    showToast(
+      `YTM download finished: ${job.completedTracks} track(s) saved to /${job.destRelPath} · Navidrome rescan triggered`
+    );
+  }
+
+  function closeYtmSse() {
+    if (ytmState.eventSource) {
+      try {
+        ytmState.eventSource.close();
+      } catch (_) {}
+      ytmState.eventSource = null;
+    }
+    ytmState.sseConnected = false;
+    updateYtmSseBadge();
+  }
+
+  function ensureYtmSseConnected() {
+    const apiKey = getFileBridgeApiKey();
+    if (!filesState.isOnline || !apiKey || typeof EventSource === 'undefined') return;
+    if (ytmState.eventSource && ytmState.eventSource.readyState !== EventSource.CLOSED) {
+      return;
+    }
+
+    closeYtmSse();
+    const sseUrl = `${getFileBridgeBase()}/api/ytm/events?apiKey=${encodeURIComponent(apiKey)}`;
+    try {
+      const es = new EventSource(sseUrl);
+      ytmState.eventSource = es;
+
+      es.onopen = () => {
+        ytmState.sseConnected = true;
+        updateYtmSseBadge();
+      };
+
+      es.onerror = () => {
+        ytmState.sseConnected = false;
+        updateYtmSseBadge();
+      };
+
+      es.addEventListener('init', (ev) => {
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          if (Array.isArray(data.jobs)) {
+            ytmState.jobs = data.jobs;
+            if (ytmState.liveLogs.length === 0 && data.jobs[0]?.logs?.length) {
+              ytmState.liveLogs = [...data.jobs[0].logs];
+              renderYtmLiveLogs();
+            }
+            renderYtmJobs();
+          }
+        } catch (_) {}
+      });
+
+      es.addEventListener('job', (ev) => {
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          const updatedJob = data.job;
+          if (!updatedJob || !updatedJob.id) return;
+          const idx = ytmState.jobs.findIndex((j) => j.id === updatedJob.id);
+          if (idx >= 0) {
+            ytmState.jobs[idx] = updatedJob;
+          } else {
+            ytmState.jobs.unshift(updatedJob);
+          }
+          renderYtmJobs();
+        } catch (_) {}
+      });
+
+      es.addEventListener('log', (ev) => {
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          if (data.log) {
+            appendYtmLiveLog(data.log);
+          }
+          if (data.jobId && typeof data.currentTrackPercent === 'number') {
+            const targetJob = ytmState.jobs.find((j) => j.id === data.jobId);
+            if (targetJob) {
+              targetJob.currentTrackPercent = data.currentTrackPercent;
+              if (data.currentProgressLine) {
+                targetJob.currentProgressLine = data.currentProgressLine;
+              }
+              renderYtmJobs();
+            }
+          }
+        } catch (_) {}
+      });
+
+      es.addEventListener('completed', (ev) => {
+        try {
+          const data = JSON.parse(ev.data || '{}');
+          if (data.job) {
+            const idx = ytmState.jobs.findIndex((j) => j.id === data.job.id);
+            if (idx >= 0) ytmState.jobs[idx] = data.job;
+            else ytmState.jobs.unshift(data.job);
+            renderYtmJobs();
+            syncNavidromeAfterYtmJob(data.job);
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+
   function updateYtmAuthVisibility(online) {
     const section = $('ytm-downloader-section');
     if (!section) return;
@@ -5451,9 +6027,11 @@
       section.classList.remove('hidden');
       initYtmDownloaderEvents();
       syncYtmPanelCollapsedUI();
+      ensureYtmSseConnected();
       refreshYtmStatus();
     } else {
       section.classList.add('hidden');
+      closeYtmSse();
       if (ytmState.pollTimer) {
         clearTimeout(ytmState.pollTimer);
         ytmState.pollTimer = null;
@@ -5531,6 +6109,7 @@
 
   function renderYtmSafeguardBanner() {
     const banner = $('ytm-safeguard-banner');
+    const titleEl = $('ytm-safeguard-title');
     const details = $('ytm-safeguard-details');
     const cancelBtn = $('ytm-safeguard-cancel-btn');
     const continueBtn = $('ytm-safeguard-continue-btn');
@@ -5551,14 +6130,20 @@
     }
 
     const alert = pausedJob.lowBitrateAlert;
+    const isM4a = pausedJob.format === 'm4a';
+    const thresh = alert.thresholdKbps || pausedJob.bitrateThresholdKbps || (isM4a ? 135 : 70);
+    if (titleEl) {
+      titleEl.textContent = `Low-Bitrate Safeguard Triggered (≤ ${thresh} kbps .${pausedJob.format}) — Queue Paused`;
+    }
+
     const cookieHint = alert.cookiesWereUsed
-      ? 'Your server cookies.txt appears expired or lacked YouTube Music Premium auth, causing a free-tier 128kbps fallback.'
-      : 'No active cookies.txt was present, so YouTube served free-tier 128kbps quality.';
+      ? `Your server cookies.txt appears expired or lacked YouTube Music Premium auth, causing a low-bitrate fallback (≤ ${thresh} kbps for .${pausedJob.format}).`
+      : `No active cookies.txt was present, so YouTube served a low-bitrate stream (≤ ${thresh} kbps for .${pausedJob.format}).`;
 
     details.innerHTML = `
       First track <strong class="text-zinc-100">${escapeHtml(alert.trackTitle)}</strong> streamed at
       <span class="px-1.5 py-0.5 font-mono bg-amber-950 border border-amber-500/40 text-amber-300 font-semibold">${escapeHtml(String(alert.bitrateKbps))} kbps</span>
-      (≤ ${escapeHtml(String(alert.thresholdKbps || 135))} kbps). ${escapeHtml(cookieHint)}
+      (≤ ${escapeHtml(String(thresh))} kbps threshold for .${escapeHtml(pausedJob.format)}). ${escapeHtml(cookieHint)}
       Remaining tracks are paused before committing <code class="text-zinc-300">${escapeHtml(alert.plannedFileName)}</code>.
     `;
 
@@ -5566,7 +6151,7 @@
 
     if (!ytmState.pausedAlertedJobIds.has(pausedJob.id)) {
       ytmState.pausedAlertedJobIds.add(pausedJob.id);
-      showToast(`128kbps Safeguard: Paused "${alert.trackTitle}" (${alert.bitrateKbps} kbps)`, 'error');
+      showToast(`Bitrate Safeguard: Paused "${alert.trackTitle}" (${alert.bitrateKbps} kbps)`, 'error');
     }
 
     if (cancelBtn) {
@@ -5591,7 +6176,7 @@
 
     if (queueBadge) {
       if (pausedJob) {
-        queueBadge.textContent = 'PAUSED: 128KBPS SAFEGUARD';
+        queueBadge.textContent = 'PAUSED: BITRATE SAFEGUARD';
         queueBadge.className = 'px-2 py-0.5 text-[10px] font-mono font-semibold border border-amber-500/50 bg-amber-950/40 text-amber-300';
         queueBadge.classList.remove('hidden');
       } else if (activeJobs.length > 0) {
@@ -5621,9 +6206,13 @@
       const card = document.createElement('div');
       card.className = 'p-3 bg-zinc-950 border border-zinc-800 space-y-2';
 
+      const trackFraction =
+        job.status === 'downloading' && typeof job.currentTrackPercent === 'number'
+          ? Math.min(0.99, Math.max(0, job.currentTrackPercent / 100))
+          : 0;
       const pct =
         job.totalTracks > 0
-          ? Math.round((job.completedTracks / job.totalTracks) * 100)
+          ? Math.min(100, Math.round(((job.completedTracks + trackFraction) / job.totalTracks) * 100))
           : job.status === 'completed'
             ? 100
             : 0;
@@ -5633,26 +6222,42 @@
       if (job.status === 'downloading' || job.status === 'inspecting' || job.status === 'queued') {
         statusCls = 'border-emerald-500/40 text-emerald-300 bg-emerald-950/30';
         if (job.status === 'inspecting') statusLabel = 'INSPECTING BITRATE...';
-        else if (job.status === 'downloading') statusLabel = `DOWNLOADING ${job.currentTrackIndex || 0}/${job.totalTracks || '?'}`;
+        else if (job.status === 'downloading') {
+          const trkPctStr =
+            typeof job.currentTrackPercent === 'number' && job.currentTrackPercent > 0
+              ? ` (${Math.round(job.currentTrackPercent)}%)`
+              : '';
+          statusLabel = `DOWNLOADING ${job.currentTrackIndex || 0}/${job.totalTracks || '?'}${trkPctStr}`;
+        }
       } else if (job.status === 'paused_low_bitrate') {
         statusCls = 'border-amber-500/50 text-amber-300 bg-amber-950/40';
-        statusLabel = 'PAUSED (128KBPS SAFEGUARD)';
+        statusLabel = 'PAUSED (BITRATE SAFEGUARD)';
       } else if (job.status === 'completed') {
         statusCls = 'border-emerald-500/40 text-emerald-400 bg-emerald-950/20';
       } else if (job.status === 'failed' || job.status === 'cancelled') {
         statusCls = 'border-[#f0605a]/40 text-[#f0605a] bg-[#f0605a]/10';
       }
 
+      const brThresh = job.bitrateThresholdKbps || (job.format === 'm4a' ? 135 : 70);
       const brBadge =
         job.detectedBitrateKbps > 0
           ? `<span class="px-1.5 py-0.5 text-[10px] font-mono border ${
-              job.detectedBitrateKbps <= 135
+              job.detectedBitrateKbps <= brThresh
                 ? 'border-amber-500/40 bg-amber-950/30 text-amber-300'
                 : 'border-emerald-500/40 bg-emerald-950/20 text-emerald-300'
             }">${escapeHtml(String(job.detectedBitrateKbps))} kbps</span>`
           : '';
 
-      const titleText = job.collectionTitle || job.currentTrackTitle || job.url;
+      const stagedBadge =
+        job.stagedMetadata && (job.stagedMetadata.artist || job.stagedMetadata.album || job.stagedMetadata.hasCover)
+          ? `<span class="px-1.5 py-0.5 text-[10px] font-mono border border-emerald-500/30 bg-emerald-950/20 text-emerald-300">STAGED TAGS${job.stagedMetadata.hasCover ? ' + COVER' : ''}</span>`
+          : '';
+
+      const titleText =
+        job.stagedMetadata?.album ||
+        job.collectionTitle ||
+        job.currentTrackTitle ||
+        job.url;
       const canCancel =
         job.status === 'queued' ||
         job.status === 'inspecting' ||
@@ -5665,6 +6270,7 @@
             <div class="flex items-center gap-1.5 flex-wrap">
               <span class="px-1.5 py-0.5 text-[10px] font-mono border ${statusCls}">${escapeHtml(statusLabel)}</span>
               ${brBadge}
+              ${stagedBadge}
               <span class="px-1.5 py-0.5 text-[10px] font-mono border border-zinc-800 bg-zinc-900 text-zinc-400">.${escapeHtml(job.format)}</span>
               <span class="text-[11px] font-mono text-zinc-400 truncate">→ /${escapeHtml(job.destRelPath || 'Music')}</span>
             </div>
@@ -5704,14 +6310,10 @@
         job.completedTracks > 0 &&
         !ytmState.completedSyncedJobIds.has(job.id)
       ) {
-        ytmState.completedSyncedJobIds.add(job.id);
-        client.request('startScan').catch(() => {});
-        if (state.route === 'files') {
-          loadFilesView();
-        }
-        showToast(`YTM download finished: ${job.completedTracks} track(s) saved to /${job.destRelPath}`);
+        syncNavidromeAfterYtmJob(job);
       }
     }
+    renderYtmLiveLogs();
     refreshIcons();
   }
 
@@ -5737,6 +6339,10 @@
       ytmState.ytDlpVersion = data.ytDlp?.version || null;
       ytmState.defaultMusicRelPath = data.defaultMusicRelPath || 'Music';
       ytmState.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      if (ytmState.liveLogs.length === 0 && ytmState.jobs[0]?.logs?.length) {
+        ytmState.liveLogs = [...ytmState.jobs[0].logs];
+      }
+      ensureYtmSseConnected();
       syncYtmDestinationUI();
 
       const engineBadge = $('ytm-engine-badge');
@@ -5985,31 +6591,35 @@
       targetDir = ytmState.chosenMusicSubPath || '';
     }
 
+    const format = ytmState.format === 'm4a' ? 'm4a' : 'opus';
     const submitBtn = $('ytm-submit-btn');
+    const submitLabel = $('ytm-submit-label');
     if (submitBtn) submitBtn.disabled = true;
+    if (submitLabel) submitLabel.textContent = 'FETCHING METADATA...';
 
     try {
-      const res = await fetch(`${getFileBridgeBase()}/api/ytm/download`, {
+      showToast('Fetching YouTube Music link metadata for staging...');
+      const res = await fetch(`${getFileBridgeBase()}/api/ytm/prepare`, {
         method: 'POST',
         headers: getFileBridgeHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          url,
-          destMode,
-          targetDir,
-          format: ytmState.format === 'm4a' ? 'm4a' : 'opus',
-        }),
+        body: JSON.stringify({ url }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
-      if (urlInput) urlInput.value = '';
-      showToast('Queued YTM download (checking Track 1 bitrate)...');
-      await refreshYtmStatus();
+
+      await openMetadataEditorForYtmStaging(data.staged, {
+        url,
+        destMode,
+        targetDir,
+        format,
+      });
     } catch (err) {
-      showToast(`Download failed: ${err.message}`, 'error');
+      showToast(`Metadata staging failed: ${err.message}`, 'error');
     } finally {
       if (submitBtn) submitBtn.disabled = false;
+      if (submitLabel) submitLabel.textContent = 'STAGE & DOWNLOAD';
     }
   }
 
@@ -6098,6 +6708,10 @@
     // Format toggle selector
     on('ytm-format-btn-opus', 'click', () => setYtmFormat('opus'));
     on('ytm-format-btn-m4a', 'click', () => setYtmFormat('m4a'));
+    on('ytm-clear-logs-btn', 'click', () => {
+      ytmState.liveLogs = [];
+      renderYtmLiveLogs();
+    });
 
     // Choose Folder modal events
     on('ytm-fp-close-btn', 'click', closeYtmFolderPicker);

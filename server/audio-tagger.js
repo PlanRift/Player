@@ -341,6 +341,9 @@ function buildMp3WithUpdatedId3v2(fileBuf, updates) {
     replacedFrameIds.add('TYER');
     replacedFrameIds.add('TDRC');
   }
+  if (updates.trackNumber !== undefined) {
+    replacedFrameIds.add('TRCK');
+  }
   if (updates.coverBuffer) {
     replacedFrameIds.add('APIC');
   }
@@ -373,6 +376,16 @@ function buildMp3WithUpdatedId3v2(fileBuf, updates) {
     if (yr) {
       pushTextFrame('TYER', yr);
       pushTextFrame('TDRC', yr);
+    }
+  }
+  if (updates.trackNumber !== undefined) {
+    const trk = String(updates.trackNumber ?? '').trim();
+    if (trk) {
+      const trkVal =
+        updates.totalTracks && !trk.includes('/')
+          ? `${trk}/${String(updates.totalTracks).trim()}`
+          : trk;
+      pushTextFrame('TRCK', trkVal);
     }
   }
   if (updates.coverBuffer) {
@@ -612,7 +625,8 @@ function buildFlacWithUpdatedTags(fileBuf, updates) {
     updates.title !== undefined ||
     updates.artist !== undefined ||
     updates.album !== undefined ||
-    updates.year !== undefined;
+    updates.year !== undefined ||
+    updates.trackNumber !== undefined;
 
   let vorbisUpdated = false;
   const outputBlocks = [];
@@ -637,6 +651,11 @@ function buildFlacWithUpdatedTags(fileBuf, updates) {
           keysToReplace.add('DATE');
           keysToReplace.add('YEAR');
         }
+        if (updates.trackNumber !== undefined) {
+          keysToReplace.add('TRACKNUMBER');
+          keysToReplace.add('TRACKTOTAL');
+          keysToReplace.add('TOTALTRACKS');
+        }
 
         const filtered = vc.comments.filter((c) => !keysToReplace.has(c.key));
         const pushTag = (key, val) => {
@@ -653,6 +672,13 @@ function buildFlacWithUpdatedTags(fileBuf, updates) {
         if (updates.year !== undefined) {
           pushTag('DATE', updates.year);
           pushTag('YEAR', updates.year);
+        }
+        if (updates.trackNumber !== undefined) {
+          pushTag('TRACKNUMBER', updates.trackNumber);
+          if (updates.totalTracks) {
+            pushTag('TRACKTOTAL', updates.totalTracks);
+            pushTag('TOTALTRACKS', updates.totalTracks);
+          }
         }
 
         outputBlocks.push({
@@ -688,6 +714,13 @@ function buildFlacWithUpdatedTags(fileBuf, updates) {
     if (updates.year !== undefined) {
       pushTag('DATE', updates.year);
       pushTag('YEAR', updates.year);
+    }
+    if (updates.trackNumber !== undefined) {
+      pushTag('TRACKNUMBER', updates.trackNumber);
+      if (updates.totalTracks) {
+        pushTag('TRACKTOTAL', updates.totalTracks);
+        pushTag('TOTALTRACKS', updates.totalTracks);
+      }
     }
     outputBlocks.push({
       blockType: 4,
@@ -851,6 +884,11 @@ async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
         keysToReplace.add('DATE');
         keysToReplace.add('YEAR');
       }
+      if (updates.trackNumber !== undefined) {
+        keysToReplace.add('TRACKNUMBER');
+        keysToReplace.add('TRACKTOTAL');
+        keysToReplace.add('TOTALTRACKS');
+      }
 
       const mergedComments = existingComments.filter((c) => !keysToReplace.has(c.key));
 
@@ -867,6 +905,13 @@ async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
       if (updates.album !== undefined) pushTag('ALBUM', updates.album);
       if (updates.year !== undefined) {
         pushTag('DATE', updates.year);
+      }
+      if (updates.trackNumber !== undefined) {
+        pushTag('TRACKNUMBER', updates.trackNumber);
+        if (updates.totalTracks) {
+          pushTag('TRACKTOTAL', updates.totalTracks);
+          pushTag('TOTALTRACKS', updates.totalTracks);
+        }
       }
 
       if (updates.coverBuffer) {
@@ -922,6 +967,14 @@ async function writeTagsWithFfmpeg(filePath, updates, tmpDir) {
       }
       if (updates.year !== undefined && String(updates.year).trim()) {
         args.push('-metadata', `date=${String(updates.year).trim()}`);
+      }
+      if (updates.trackNumber !== undefined && String(updates.trackNumber).trim()) {
+        const trk = String(updates.trackNumber).trim();
+        const trkVal =
+          updates.totalTracks && !trk.includes('/')
+            ? `${trk}/${String(updates.totalTracks).trim()}`
+            : trk;
+        args.push('-metadata', `track=${trkVal}`);
       }
     }
 
@@ -1610,4 +1663,137 @@ export async function fetchRemoteCoverBuffer(coverUrl) {
   }
 
   throw lastErr || new Error('Failed to download remote cover image');
+}
+
+/**
+ * Fetch the ordered tracklist of an online album result (iTunes JP, Deezer, MusicBrainz, Spotify JP).
+ */
+export async function fetchAlbumTracklistOnline(sourceId, options = {}) {
+  const rawId = String(sourceId || '').trim();
+  if (!rawId) return [];
+
+  // 1. iTunes JP Album (itunes_album_<id> or itunes-album-<id>)
+  const itunesMatch = rawId.match(/^itunes[_-]album[_-](\d+)$/i);
+  if (itunesMatch) {
+    const collectionId = itunesMatch[1];
+    const url = new URL('https://itunes.apple.com/lookup');
+    url.searchParams.set('id', collectionId);
+    url.searchParams.set('entity', 'song');
+    url.searchParams.set('country', 'jp');
+    url.searchParams.set('lang', 'ja_jp');
+    url.searchParams.set('limit', '200');
+    const res = await fetch(url.toString(), {
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`iTunes JP lookup HTTP ${res.status}`);
+    const data = await res.json();
+    const tracks = (data.results || [])
+      .filter((r) => r.wrapperType === 'track' || r.kind === 'song')
+      .sort(
+        (a, b) =>
+          (Number(a.discNumber) || 1) - (Number(b.discNumber) || 1) ||
+          (Number(a.trackNumber) || 0) - (Number(b.trackNumber) || 0)
+      );
+    return tracks.map((t, idx) => ({
+      index: idx + 1,
+      trackNumber: Number(t.trackNumber) || idx + 1,
+      title: t.trackName || '',
+      artist: t.artistName || '',
+      duration: t.trackTimeMillis ? Math.round(t.trackTimeMillis / 1000) : 0,
+    }));
+  }
+
+  // 2. Deezer Album (deezer_album_<id>)
+  const deezerMatch = rawId.match(/^deezer[_-]album[_-](\d+)$/i);
+  if (deezerMatch) {
+    const albumId = deezerMatch[1];
+    const res = await fetch(`https://api.deezer.com/album/${encodeURIComponent(albumId)}/tracks?limit=200`, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`Deezer tracks HTTP ${res.status}`);
+    const data = await res.json();
+    const items = data.data || [];
+    return items.map((t, idx) => ({
+      index: idx + 1,
+      trackNumber: Number(t.track_position) || idx + 1,
+      title: t.title || '',
+      artist: t.artist?.name || '',
+      duration: Number(t.duration) || 0,
+    }));
+  }
+
+  // 3. MusicBrainz Release (mb_release_<uuid> or mb-rel-<uuid>)
+  const mbMatch = rawId.match(/^mb[_-](?:release|rel)[_-]([a-f0-9-]+)$/i);
+  if (mbMatch) {
+    const releaseId = mbMatch[1];
+    const res = await fetch(
+      `https://musicbrainz.org/ws/2/release/${encodeURIComponent(releaseId)}?inc=recordings+artist-credits&fmt=json`,
+      {
+        headers: {
+          'User-Agent': USER_AGENT,
+          Accept: 'application/json',
+          'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
+        },
+        signal: AbortSignal.timeout(9000),
+      }
+    );
+    if (!res.ok) throw new Error(`MusicBrainz release HTTP ${res.status}`);
+    const data = await res.json();
+    const list = [];
+    for (const medium of data.media || []) {
+      for (const trk of medium.tracks || []) {
+        const artist = (trk['artist-credit'] || trk.recording?.['artist-credit'] || [])
+          .map((ac) => ac.name || ac.artist?.name || '')
+          .filter(Boolean)
+          .join(', ');
+        list.push({
+          index: list.length + 1,
+          trackNumber: list.length + 1,
+          title: trk.title || trk.recording?.title || '',
+          artist,
+          duration: trk.length ? Math.round(trk.length / 1000) : 0,
+        });
+      }
+    }
+    return list;
+  }
+
+  // 4. Spotify JP Album (spotify_album_<id>)
+  const spotifyMatch = rawId.match(/^spotify[_-]album[_-]([a-zA-Z0-9]+)$/i);
+  if (spotifyMatch) {
+    const albumId = spotifyMatch[1];
+    const token = await getSpotifyAccessToken(options.spotifyClientId, options.spotifyClientSecret);
+    if (!token) return [];
+    const res = await fetch(
+      `https://api.spotify.com/v1/albums/${encodeURIComponent(albumId)}/tracks?market=JP&limit=50`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
+          'User-Agent': USER_AGENT,
+        },
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    if (!res.ok) throw new Error(`Spotify album tracks HTTP ${res.status}`);
+    const data = await res.json();
+    const items = data.items || [];
+    return items.map((t, idx) => ({
+      index: idx + 1,
+      trackNumber: Number(t.track_number) || idx + 1,
+      title: t.name || '',
+      artist: (t.artists || []).map((a) => a.name).join(', '),
+      duration: t.duration_ms ? Math.round(t.duration_ms / 1000) : 0,
+    }));
+  }
+
+  return [];
 }

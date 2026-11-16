@@ -13,6 +13,7 @@ import {
   readAudioMetadata,
   writeAudioMetadata,
   searchMetadataOnline,
+  fetchAlbumTracklistOnline,
   fetchRemoteCoverBuffer,
 } from './audio-tagger.js';
 import { registerYtmRoutes } from './ytm-downloader.js';
@@ -393,16 +394,17 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return next();
 
-  const isDownload = req.path === '/api/files/download';
+  const allowsQueryKey =
+    req.path === '/api/files/download' || req.path === '/api/ytm/events';
   const apiKey =
     req.headers['x-api-key'] ||
     req.headers['X-API-Key'] ||
-    (isDownload ? req.query.apiKey || req.query.key || req.query['x-api-key'] : undefined);
+    (allowsQueryKey ? req.query.apiKey || req.query.key || req.query['x-api-key'] : undefined);
 
   if (!apiKey || apiKey !== NAS_API_KEY) {
     return res.status(401).json({
       error: 'Unauthorized: Invalid or missing API key (provide x-api-key header' +
-        (isDownload ? ' or ?apiKey= parameter' : '') + ')',
+        (allowsQueryKey ? ' or ?apiKey= parameter' : '') + ')',
     });
   }
   next();
@@ -1397,6 +1399,24 @@ app.get(['/api/metadata/search', '/api/files/metadata/search'], async (req, res)
   }
 });
 
+// 6c-2. GET /api/metadata/album-tracks - Fetch tracklist of an online album result (iTunes JP, Deezer, MusicBrainz, Spotify JP)
+app.get(['/api/metadata/album-tracks', '/api/files/metadata/album-tracks'], async (req, res) => {
+  try {
+    const sourceId = String(req.query.sourceId || req.query.id || '').trim();
+    if (!sourceId) {
+      return res.status(400).json({ error: 'Missing sourceId query parameter' });
+    }
+    const spotifyClientId =
+      req.headers['x-spotify-client-id'] || req.query.spotifyClientId || process.env.SPOTIFY_CLIENT_ID || '';
+    const spotifyClientSecret =
+      req.headers['x-spotify-client-secret'] || req.query.spotifyClientSecret || process.env.SPOTIFY_CLIENT_SECRET || '';
+    const tracks = await fetchAlbumTracklistOnline(sourceId, { spotifyClientId, spotifyClientSecret });
+    res.json({ sourceId, tracks });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // 6d. POST /api/metadata/apply - Apply finalized metadata & cover art to single track or album folder
 app.post(['/api/metadata/apply', '/api/files/metadata/apply'], stagingUpload.any(), async (req, res) => {
   const stagedFiles = Array.isArray(req.files) ? req.files : [];
@@ -1487,7 +1507,11 @@ registerYtmRoutes(app, {
   sanitizePathSegment,
   assertSafeFileWriteTarget,
   verifyFilesAccess: (req) => {
-    const apiKey = req.headers['x-api-key'] || req.headers['X-API-Key'];
+    const isSse = req.path === '/events' || String(req.originalUrl || '').startsWith('/api/ytm/events');
+    const apiKey =
+      req.headers['x-api-key'] ||
+      req.headers['X-API-Key'] ||
+      (isSse ? req.query.apiKey || req.query.key || req.query['x-api-key'] : undefined);
     return Boolean(apiKey && apiKey === NAS_API_KEY);
   },
 });

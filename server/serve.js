@@ -74,6 +74,8 @@ const server = http.createServer((req, res) => {
       },
       (proxyRes) => {
         res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        res.flushHeaders?.();
+        req.socket?.setNoDelay?.(true);
         proxyRes.pipe(res);
       }
     );
@@ -103,6 +105,8 @@ const server = http.createServer((req, res) => {
       },
       (proxyRes) => {
         res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        res.flushHeaders?.();
+        req.socket?.setNoDelay?.(true);
         proxyRes.pipe(res);
       }
     );

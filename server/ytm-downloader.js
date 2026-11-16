@@ -7,7 +7,12 @@ import crypto from 'crypto';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { getFfmpegBinaryPath } from './audio-tagger.js';
+import {
+  getFfmpegBinaryPath,
+  writeAudioMetadata,
+  fetchRemoteCoverBuffer,
+  detectImageInfo,
+} from './audio-tagger.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +22,18 @@ const PROJECT_DIR = path.resolve(__dirname, '..');
 export const COOKIES_CONFIG_DIR = path.resolve(__dirname, 'config');
 export const COOKIES_FILE_PATH = path.resolve(COOKIES_CONFIG_DIR, 'cookies.txt');
 
-export const LOW_BITRATE_THRESHOLD_KBPS = 135;
+// Format-aware bitrate safeguard thresholds:
+// - 256kbps AAC (.m4a): pause if stream bitrate <= 135kbps (free-tier 128kbps AAC fallback)
+// - High-Quality Opus (.opus): pause only if stream bitrate <= 70kbps (format 251 Opus naturally streams at ~128-160kbps)
+export const LOW_BITRATE_THRESHOLD_M4A_KBPS = 135;
+export const LOW_BITRATE_THRESHOLD_OPUS_KBPS = 70;
+export const LOW_BITRATE_THRESHOLD_KBPS = LOW_BITRATE_THRESHOLD_M4A_KBPS;
+
+export function getBitrateThresholdForFormat(format) {
+  return String(format || '').toLowerCase() === 'm4a'
+    ? LOW_BITRATE_THRESHOLD_M4A_KBPS
+    : LOW_BITRATE_THRESHOLD_OPUS_KBPS;
+}
 const ALLOWED_FORMATS = new Set(['opus', 'm4a']);
 const ALLOWED_DEST_MODES = new Set(['current', 'choose', 'auto']);
 const YT_HOST_RE = /^(?:(?:www|music|m)\.)?(?:youtube\.com|youtu\.be)$/i;
@@ -491,7 +507,21 @@ async function fetchUrlPlaylistInfo(ytDlp, url, cookiesActivePath) {
   const { stdout } = await spawnYtDlpCollect(ytDlp, args, { timeoutMs: 45000 });
   const data = JSON.parse(stdout);
 
+  const rawTopYear =
+    data.release_year ||
+    (data.release_date ? String(data.release_date).slice(0, 4) : '') ||
+    (data.upload_date ? String(data.upload_date).slice(0, 4) : '') ||
+    '';
+  const topYear = /^\d{4}$/.test(String(rawTopYear)) ? String(rawTopYear) : '';
+
   if (Array.isArray(data.entries) && data.entries.length > 0) {
+    const rawCollectionTitle = String(data.album || data.title || data.playlist_title || '')
+      .replace(/^Album\s*-\s*/i, '')
+      .trim();
+    const topArtist =
+      extractCleanArtist(data) ||
+      extractCleanArtist(data.entries.find(Boolean));
+
     const tracks = data.entries
       .filter(Boolean)
       .map((entry, idx) => {
@@ -499,34 +529,60 @@ async function fetchUrlPlaylistInfo(ytDlp, url, cookiesActivePath) {
           entry.webpage_url ||
           entry.url ||
           (entry.id ? `https://music.youtube.com/watch?v=${entry.id}` : '');
+        const entryAlbum = String(entry.album || rawCollectionTitle || '')
+          .replace(/^Album\s*-\s*/i, '')
+          .trim();
         return {
           index: idx + 1,
+          trackNumber: idx + 1,
           id: entry.id || '',
           title: entry.track || entry.title || `Track ${idx + 1}`,
-          artist: extractCleanArtist(entry) || extractCleanArtist(data),
-          album: entry.album || data.album || data.title || data.playlist_title || '',
+          artist: extractCleanArtist(entry) || topArtist,
+          album: entryAlbum,
+          duration: Number(entry.duration) || 0,
           url: entryUrl.startsWith('http') ? entryUrl : `https://music.youtube.com/watch?v=${entry.id}`,
         };
       })
       .filter((t) => Boolean(t.url));
 
+    const isPlaylist = tracks.length > 1 || data._type === 'playlist';
     return {
-      isPlaylist: tracks.length > 1 || data._type === 'playlist',
-      collectionTitle: data.title || data.playlist_title || '',
+      isPlaylist,
+      scope: isPlaylist ? 'album' : 'single',
+      trackCount: tracks.length,
+      collectionTitle: rawCollectionTitle,
+      title: isPlaylist ? rawCollectionTitle : (tracks[0]?.title || ''),
+      artist: topArtist || tracks[0]?.artist || '',
+      album: rawCollectionTitle || tracks[0]?.album || '',
+      year: topYear,
       tracks,
     };
   }
 
+  const singleTitle = data.track || data.title || 'YouTube Music Track';
+  const singleArtist = extractCleanArtist(data);
+  const singleAlbum = String(data.album || '')
+    .replace(/^Album\s*-\s*/i, '')
+    .trim();
+
   return {
     isPlaylist: false,
-    collectionTitle: data.album || '',
+    scope: 'single',
+    trackCount: 1,
+    collectionTitle: singleAlbum,
+    title: singleTitle,
+    artist: singleArtist,
+    album: singleAlbum,
+    year: topYear,
     tracks: [
       {
         index: 1,
+        trackNumber: 1,
         id: data.id || '',
-        title: data.track || data.title || 'YouTube Music Track',
-        artist: extractCleanArtist(data),
-        album: data.album || '',
+        title: singleTitle,
+        artist: singleArtist,
+        album: singleAlbum,
+        duration: Number(data.duration) || 0,
         url: data.webpage_url || url,
       },
     ],
@@ -705,6 +761,68 @@ export function registerYtmRoutes(app, deps) {
     return assertInsideMusicRoot(candidate);
   }
 
+  const sseClients = new Set();
+
+  function broadcastSse(event, payload) {
+    if (sseClients.size === 0) return;
+    const msg = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+    for (const res of sseClients) {
+      try {
+        res.write(msg);
+      } catch (_) {
+        sseClients.delete(res);
+      }
+    }
+  }
+
+  function appendJobLog(job, text, level = 'info') {
+    if (!job || !text) return;
+    const clean = String(text).trim();
+    if (!clean) return;
+    if (!Array.isArray(job.logs)) job.logs = [];
+    const entry = {
+      ts: Date.now(),
+      text: clean,
+      level,
+    };
+    job.logs.push(entry);
+    if (job.logs.length > 120) {
+      job.logs.splice(0, job.logs.length - 120);
+    }
+    broadcastSse('log', {
+      jobId: job.id,
+      log: entry,
+      currentTrackPercent: job.currentTrackPercent || 0,
+      currentProgressLine: job.currentProgressLine || '',
+      status: job.status,
+    });
+  }
+
+  function emitJobUpdate(job) {
+    if (!job) return;
+    broadcastSse('job', { job: serializeJob(job) });
+  }
+
+  async function triggerBackendNavidromeScan(job) {
+    if (!job) return;
+    const scanUrl = String(job.navidromeScanUrl || '').trim();
+    if (scanUrl && (scanUrl.startsWith('http://') || scanUrl.startsWith('https://'))) {
+      try {
+        await fetch(scanUrl, { signal: AbortSignal.timeout(6000) });
+        appendJobLog(job, '[Navidrome] Triggered library rescan via Subsonic API');
+      } catch (err) {
+        appendJobLog(job, `[Navidrome] Server rescan ping note: ${err.message}`, 'warn');
+      }
+    } else {
+      appendJobLog(job, '[Navidrome] Queue complete — notifying client to rescan library');
+    }
+    broadcastSse('completed', {
+      jobId: job.id,
+      job: serializeJob(job),
+      triggerNavidromeRescan: true,
+    });
+  }
+
   function pruneOldJobs() {
     if (jobs.size <= MAX_HISTORY_JOBS) return;
     const list = [...jobs.values()].sort((a, b) => a.createdAt - b.createdAt);
@@ -718,6 +836,7 @@ export function registerYtmRoutes(app, deps) {
 
   function serializeJob(job) {
     if (!job) return null;
+    const thresholdKbps = job.bitrateThreshold || getBitrateThresholdForFormat(job.format);
     return {
       id: job.id,
       url: job.url,
@@ -731,8 +850,20 @@ export function registerYtmRoutes(app, deps) {
       completedTracks: job.completedTracks,
       currentTrackIndex: job.currentTrackIndex,
       currentTrackTitle: job.currentTrackTitle,
+      currentTrackPercent: job.currentTrackPercent || 0,
+      currentProgressLine: job.currentProgressLine || '',
       detectedBitrateKbps: job.detectedBitrateKbps,
+      bitrateThresholdKbps: thresholdKbps,
       allowLowBitrate: job.allowLowBitrate,
+      stagedMetadata: job.stagedMetadata
+        ? {
+            title: job.stagedMetadata.title || '',
+            artist: job.stagedMetadata.artist || '',
+            album: job.stagedMetadata.album || '',
+            year: job.stagedMetadata.year || '',
+            hasCover: Boolean(job.stagedMetadata.coverBuffer || job.stagedMetadata.coverUrl),
+          }
+        : null,
       lowBitrateAlert: job.lowBitrateAlert
         ? {
             trackTitle: job.lowBitrateAlert.trackTitle,
@@ -741,11 +872,12 @@ export function registerYtmRoutes(app, deps) {
             acodec: job.lowBitrateAlert.acodec,
             plannedFileName: job.lowBitrateAlert.plannedFileName,
             cookiesWereUsed: job.lowBitrateAlert.cookiesWereUsed,
-            thresholdKbps: LOW_BITRATE_THRESHOLD_KBPS,
+            thresholdKbps: job.lowBitrateAlert.thresholdKbps || thresholdKbps,
           }
         : null,
       downloadedFiles: job.downloadedFiles,
       failedTracks: job.failedTracks,
+      logs: Array.isArray(job.logs) ? job.logs.slice(-60) : [],
       error: job.error,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
@@ -788,6 +920,7 @@ export function registerYtmRoutes(app, deps) {
 
   /**
    * Download a single track into staging using explicit format selectors & JS runtime.
+   * Skips YouTube's native thumbnails (--no-embed-thumbnail) so clean staged art can be injected.
    */
   async function downloadTrackIntoStaging(job, ytDlp, track, cookiesActivePath) {
     await fs.mkdir(job.stagingDir, { recursive: true });
@@ -824,7 +957,7 @@ export function registerYtmRoutes(app, deps) {
       '--audio-quality',
       '0',
       '--add-metadata',
-      '--embed-thumbnail',
+      '--no-embed-thumbnail',
       '--write-info-json',
     ];
 
@@ -833,14 +966,45 @@ export function registerYtmRoutes(app, deps) {
     }
     args.push('-o', outTemplate, '--', track.url);
 
+    job.currentTrackPercent = 0;
+    job.currentProgressLine = '';
+
     await new Promise((resolve, reject) => {
       let stderrTail = '';
+      let lastProgressEmit = 0;
       const child = spawn(ytDlp.command, args, { windowsHide: true });
       job.activeChild = child;
 
-      child.stderr.on('data', (chunk) => {
-        stderrTail = (stderrTail + chunk.toString()).slice(-1500);
-      });
+      const handleOutputChunk = (chunk, isErr = false) => {
+        const text = chunk.toString('utf8');
+        if (isErr) {
+          stderrTail = (stderrTail + text).slice(-1500);
+        }
+        const lines = text.split(/\r?\n|\r/).map((l) => l.trim()).filter(Boolean);
+        for (const line of lines) {
+          const dlMatch = line.match(/\[download\]\s+(\d+(?:\.\d+)?)%/i);
+          if (dlMatch) {
+            const pct = Math.min(100, Math.max(0, parseFloat(dlMatch[1]) || 0));
+            job.currentTrackPercent = pct;
+            job.currentProgressLine = line;
+            const now = Date.now();
+            if (pct >= 100 || now - lastProgressEmit >= 250) {
+              lastProgressEmit = now;
+              appendJobLog(job, line);
+            }
+          } else if (
+            line.startsWith('[download]') ||
+            line.startsWith('[ExtractAudio]') ||
+            line.startsWith('[Metadata]') ||
+            line.startsWith('ERROR:')
+          ) {
+            appendJobLog(job, line, line.startsWith('ERROR:') ? 'error' : 'info');
+          }
+        }
+      };
+
+      child.stdout.on('data', (chunk) => handleOutputChunk(chunk, false));
+      child.stderr.on('data', (chunk) => handleOutputChunk(chunk, true));
 
       child.on('error', (err) => {
         job.activeChild = null;
@@ -855,6 +1019,7 @@ export function registerYtmRoutes(app, deps) {
         if (code !== 0) {
           return reject(new Error(stderrTail.trim() || `yt-dlp exited with code ${code}`));
         }
+        job.currentTrackPercent = 100;
         resolve();
       });
     });
@@ -889,7 +1054,63 @@ export function registerYtmRoutes(app, deps) {
   }
 
   /**
-   * Sequential queue worker with Track #1 128kbps safeguard.
+   * Inject staged cover art, artist, album, year, individual track title, and track number
+   * into a ripped audio file inside stagingDir.
+   */
+  async function injectStagedMetadataIntoAudioFile(job, stagedFilePath, track, trackIndex) {
+    const sm = job.stagedMetadata || {};
+
+    // Fetch remote staged coverUrl once per job if not already buffered
+    if (!sm.coverBuffer && sm.coverUrl && !sm.coverFetchAttempted) {
+      sm.coverFetchAttempted = true;
+      try {
+        appendJobLog(job, `[AudioTagger] Downloading staged cover art from ${sm.coverUrl.slice(0, 60)}...`);
+        sm.coverBuffer = await fetchRemoteCoverBuffer(sm.coverUrl);
+      } catch (covErr) {
+        appendJobLog(job, `[AudioTagger] Cover fetch warning: ${covErr.message}`, 'warn');
+      }
+    }
+
+    const finalTitle = String(
+      track.stagedTitle ||
+      (job.totalTracks === 1 && sm.title ? sm.title : '') ||
+      track.title ||
+      `Track ${trackIndex}`
+    ).trim();
+    const finalArtist = String(sm.artist || track.artist || '').trim();
+    const finalAlbum = String(sm.album || track.album || job.collectionTitle || '').trim();
+    const finalYear = String(sm.year || track.year || '').trim();
+    const trackNumber = Number(track.trackNumber) || trackIndex;
+
+    track.title = finalTitle;
+    if (finalArtist) track.artist = finalArtist;
+    if (finalAlbum) track.album = finalAlbum;
+    if (finalYear) track.year = finalYear;
+
+    const updates = {
+      title: finalTitle,
+      artist: finalArtist || undefined,
+      album: finalAlbum || undefined,
+      year: finalYear || undefined,
+      trackNumber,
+      totalTracks: job.totalTracks || 1,
+      coverBuffer: sm.coverBuffer || undefined,
+    };
+
+    try {
+      await writeAudioMetadata(stagedFilePath, updates, job.stagingDir);
+      appendJobLog(
+        job,
+        `[AudioTagger] Embedded tags${sm.coverBuffer ? ' + cover art' : ''} → #${String(trackNumber).padStart(2, '0')} "${finalTitle}"`
+      );
+    } catch (tagErr) {
+      appendJobLog(job, `[AudioTagger] Tag injection warning on "${finalTitle}": ${tagErr.message}`, 'warn');
+    }
+  }
+
+  /**
+   * Sequential queue worker with format-aware bitrate safeguard (.m4a <= 135kbps, .opus <= 70kbps)
+   * and post-rip staged metadata + cover art injection.
    */
   async function runDownloadJob(job, startIndex = 0) {
     try {
@@ -906,49 +1127,68 @@ export function registerYtmRoutes(app, deps) {
       if (job.tracks.length === 0) {
         job.status = 'inspecting';
         job.updatedAt = Date.now();
+        appendJobLog(job, `[Queue] Inspecting URL metadata via yt-dlp...`);
+        emitJobUpdate(job);
+
         const playlistInfo = await fetchUrlPlaylistInfo(ytDlp, job.url, cookiesPathForCmd);
         job.tracks = playlistInfo.tracks;
         job.totalTracks = playlistInfo.tracks.length;
-        job.collectionTitle = playlistInfo.collectionTitle;
+        job.collectionTitle = job.stagedMetadata?.album || playlistInfo.collectionTitle;
         job.isPlaylist = Boolean(playlistInfo.isPlaylist);
+        appendJobLog(job, `[Queue] Found ${job.totalTracks} track(s) (${job.format.toUpperCase()})`);
+        emitJobUpdate(job);
       }
 
       if (job.cancelRequested) {
         job.status = 'cancelled';
+        emitJobUpdate(job);
         return;
       }
 
       for (let i = startIndex; i < job.tracks.length; i++) {
         if (job.cancelRequested) {
           job.status = 'cancelled';
+          emitJobUpdate(job);
           return;
         }
 
         const track = job.tracks[i];
         job.currentTrackIndex = i + 1;
-        job.currentTrackTitle = track.title || `Track ${i + 1}`;
+        job.currentTrackTitle = track.stagedTitle || track.title || `Track ${i + 1}`;
+        job.currentTrackPercent = 0;
         job.status = i === 0 && !job.allowLowBitrate ? 'inspecting' : 'downloading';
         job.updatedAt = Date.now();
+        appendJobLog(
+          job,
+          `[Track ${i + 1}/${job.totalTracks}] Starting "${job.currentTrackTitle}"...`
+        );
+        emitJobUpdate(job);
 
         try {
           let streamInfo = null;
           if (i === 0 && !job.allowLowBitrate) {
+            appendJobLog(
+              job,
+              `[Safeguard] Inspecting Track #1 stream bitrate (threshold: ≤ ${job.bitrateThreshold} kbps for .${job.format})...`
+            );
             streamInfo = await inspectTrackStreamInfo(ytDlp, track.url, cookiesPathForCmd, job.format);
-            if (streamInfo.title) {
+            if (streamInfo.title && !track.stagedTitle) {
               track.title = streamInfo.title;
               job.currentTrackTitle = streamInfo.title;
             }
-            if (streamInfo.artist) track.artist = streamInfo.artist;
-            if (streamInfo.album) track.album = streamInfo.album;
+            if (streamInfo.artist && !job.stagedMetadata?.artist) track.artist = streamInfo.artist;
+            if (streamInfo.album && !job.stagedMetadata?.album) track.album = streamInfo.album;
           }
 
           if (job.cancelRequested) {
             job.status = 'cancelled';
+            emitJobUpdate(job);
             return;
           }
 
           job.status = 'downloading';
           job.updatedAt = Date.now();
+          emitJobUpdate(job);
 
           const { stagedFilePath, fileBitrateKbps, trackInfoJson } = await downloadTrackIntoStaging(
             job,
@@ -957,27 +1197,33 @@ export function registerYtmRoutes(app, deps) {
             cookiesPathForCmd
           );
 
-          // Enrich track metadata from downloaded .info.json (crucial for Auto-Sort tracks 2..N)
+          // Enrich fallback track metadata from downloaded .info.json when not explicitly overridden in staging
           if (trackInfoJson) {
             const jsonTitle = trackInfoJson.track || trackInfoJson.title;
             const jsonArtist = extractCleanArtist(trackInfoJson);
-            const jsonAlbum = trackInfoJson.album || trackInfoJson.playlist_title || '';
-            if (jsonTitle) {
+            const jsonAlbum = String(trackInfoJson.album || trackInfoJson.playlist_title || '')
+              .replace(/^Album\s*-\s*/i, '')
+              .trim();
+            if (jsonTitle && !track.stagedTitle) {
               track.title = jsonTitle;
               job.currentTrackTitle = jsonTitle;
             }
-            if (jsonArtist) track.artist = jsonArtist;
-            if (jsonAlbum) track.album = jsonAlbum;
+            if (jsonArtist && !job.stagedMetadata?.artist) track.artist = jsonArtist;
+            if (jsonAlbum && !job.stagedMetadata?.album) track.album = jsonAlbum;
           }
+
+          // Inject staged cover art, artist, album, year, individual track title, and track number
+          await injectStagedMetadataIntoAudioFile(job, stagedFilePath, track, i + 1);
+          job.currentTrackTitle = track.title || job.currentTrackTitle;
 
           // Determine track destination directory
           let trackDestDir = job.destDir;
           if (job.destMode === 'auto') {
             trackDestDir = resolveAutoSortTrackDir({
-              artist: track.artist,
-              album: track.album,
+              artist: job.stagedMetadata?.artist || track.artist,
+              album: job.stagedMetadata?.album || track.album,
               trackTitle: track.title,
-              collectionTitle: job.collectionTitle,
+              collectionTitle: job.stagedMetadata?.album || job.collectionTitle,
               isPlaylist: job.isPlaylist || job.totalTracks > 1,
             });
             job.destDir = trackDestDir;
@@ -994,10 +1240,16 @@ export function registerYtmRoutes(app, deps) {
 
           if (i === 0 && detectedKbps > 0) {
             job.detectedBitrateKbps = detectedKbps;
+            appendJobLog(
+              job,
+              `[Safeguard] Track #1 stream bitrate: ${detectedKbps} kbps (format .${job.format}, threshold ≤ ${job.bitrateThreshold} kbps)`
+            );
           }
 
           // =================================================================
-          // THE 128KBPS EXPIRATION SAFEGUARD (First track check: <= 135 kbps)
+          // FORMAT-AWARE BITRATE SAFEGUARD:
+          // - .m4a (256kbps AAC): pause if <= 135kbps
+          // - .opus (High-Quality Opus): pause only if <= 70kbps
           // =================================================================
           if (
             i === 0 &&
@@ -1008,10 +1260,11 @@ export function registerYtmRoutes(app, deps) {
             const stagedExt = path.extname(stagedFilePath);
             const cleanTitle = sanitizePathSegment(track.title || path.basename(stagedFilePath, stagedExt)) || 'track_1';
             job.status = 'paused_low_bitrate';
-            job.pausedReason = 'low_bitrate_128kbps';
+            job.pausedReason = 'low_bitrate_safeguard';
             job.lowBitrateAlert = {
               trackTitle: track.title || cleanTitle,
               bitrateKbps: detectedKbps,
+              thresholdKbps: job.bitrateThreshold,
               formatId: streamInfo?.formatId || '',
               acodec: streamInfo?.acodec || '',
               stagedFilePath,
@@ -1020,29 +1273,42 @@ export function registerYtmRoutes(app, deps) {
               cookiesWereUsed: Boolean(cookiesPathForCmd),
             };
             job.updatedAt = Date.now();
+            appendJobLog(
+              job,
+              `[Safeguard] PAUSED: Track #1 bitrate (${detectedKbps} kbps) is ≤ ${job.bitrateThreshold} kbps threshold for .${job.format}. Waiting for user confirmation.`,
+              'warn'
+            );
+            emitJobUpdate(job);
             return; // Pause queue immediately until user chooses Cancel & Update Cookies or Continue Anyway
           }
 
           const committed = await commitStagedTrackToDest(
             stagedFilePath,
             trackDestDir,
-            i + 1,
+            Number(track.trackNumber) || i + 1,
             job.totalTracks,
             track.title
           );
           job.downloadedFiles.push(committed);
           job.completedTracks = job.downloadedFiles.length;
+          job.currentTrackPercent = 100;
           job.updatedAt = Date.now();
+          appendJobLog(job, `[Saved] /${committed.relPath}`);
+          emitJobUpdate(job);
         } catch (trackErr) {
           if (job.cancelRequested) {
             job.status = 'cancelled';
+            appendJobLog(job, `[Aborted] Download cancelled by user`, 'warn');
+            emitJobUpdate(job);
             return;
           }
+          appendJobLog(job, `[Error] Track ${i + 1} failed: ${trackErr.message}`, 'error');
           job.failedTracks.push({
             index: i + 1,
             title: track.title || `Track ${i + 1}`,
             error: trackErr.message,
           });
+          emitJobUpdate(job);
           if (i === 0 && job.totalTracks === 1) {
             throw trackErr;
           }
@@ -1052,20 +1318,33 @@ export function registerYtmRoutes(app, deps) {
       if (job.downloadedFiles.length === 0 && job.failedTracks.length > 0) {
         job.status = 'failed';
         job.error = job.failedTracks[0]?.error || 'All tracks failed to download';
+        appendJobLog(job, `[Failed] ${job.error}`, 'error');
       } else {
         job.status = 'completed';
+        appendJobLog(
+          job,
+          `[Completed] Finished ${job.downloadedFiles.length}/${job.totalTracks} track(s) → /${job.destRelPath}`
+        );
       }
       job.updatedAt = Date.now();
       await fs.rm(job.stagingDir, { recursive: true, force: true }).catch(() => {});
+      emitJobUpdate(job);
+
+      if (job.status === 'completed' && job.downloadedFiles.length > 0) {
+        await triggerBackendNavidromeScan(job);
+      }
     } catch (err) {
       if (job.cancelRequested) {
         job.status = 'cancelled';
+        appendJobLog(job, `[Aborted] Download cancelled by user`, 'warn');
       } else {
         job.status = 'failed';
         job.error = err.message;
+        appendJobLog(job, `[Failed] ${err.message}`, 'error');
       }
       job.updatedAt = Date.now();
       await fs.rm(job.stagingDir, { recursive: true, force: true }).catch(() => {});
+      emitJobUpdate(job);
     }
   }
 
@@ -1102,10 +1381,84 @@ export function registerYtmRoutes(app, deps) {
         defaultMusicRelPath: defaultMusicRel,
         musicRootDisplay: resolvedMusicRoot,
         bitrateThresholdKbps: LOW_BITRATE_THRESHOLD_KBPS,
+        bitrateThresholds: {
+          opus: LOW_BITRATE_THRESHOLD_OPUS_KBPS,
+          m4a: LOW_BITRATE_THRESHOLD_M4A_KBPS,
+        },
         jobs: jobList,
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/ytm/events - Server-Sent Events (SSE) stream for real-time download progress & logs
+  app.get('/api/ytm/events', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+    req.socket?.setNoDelay?.(true);
+
+    sseClients.add(res);
+
+    const jobList = [...jobs.values()]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(serializeJob);
+    try {
+      res.write(`event: init\ndata: ${JSON.stringify({ jobs: jobList })}\n\n`);
+    } catch (_) {}
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': heartbeat\n\n');
+      } catch (_) {
+        clearInterval(heartbeat);
+        sseClients.delete(res);
+      }
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    });
+  });
+
+  // POST /api/ytm/prepare - Pre-Download Metadata Staging (yt-dlp --dump-single-json --flat-playlist)
+  app.post(['/api/ytm/prepare', '/api/ytm/inspect', '/api/ytm/stage'], async (req, res) => {
+    try {
+      const url = validateYtmUrl(req.body?.url);
+      const ytDlp = await resolveYtDlpBinary();
+      if (!ytDlp.available) {
+        return res.status(400).json({
+          error:
+            'yt-dlp binary is not installed on the server. Install yt-dlp (e.g. winget install yt-dlp or pip install yt-dlp) and restart the bridge.',
+        });
+      }
+
+      const cookiesExist = fsSync.existsSync(COOKIES_FILE_PATH);
+      const cookiesPathForCmd = cookiesExist ? COOKIES_FILE_PATH : null;
+
+      const info = await fetchUrlPlaylistInfo(ytDlp, url, cookiesPathForCmd);
+      res.json({
+        success: true,
+        staged: {
+          url,
+          isPlaylist: Boolean(info.isPlaylist),
+          scope: info.scope || (info.isPlaylist ? 'album' : 'single'),
+          trackCount: info.tracks.length,
+          title: info.title || '',
+          artist: info.artist || '',
+          album: info.album || info.collectionTitle || '',
+          year: info.year || '',
+          tracks: info.tracks,
+        },
+      });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -1232,12 +1585,14 @@ export function registerYtmRoutes(app, deps) {
     }
   });
 
-  // POST /api/ytm/download - Queue a YouTube Music URL download
-  app.post('/api/ytm/download', async (req, res) => {
+  // POST /api/ytm/download - Queue a YouTube Music URL download (with optional staged metadata & cover art)
+  app.post('/api/ytm/download', stagingUpload.any(), async (req, res) => {
+    const uploadedFiles = Array.isArray(req.files) ? req.files : [];
     try {
       const url = validateYtmUrl(req.body?.url);
       const requestedFormat = String(req.body?.format || 'opus').toLowerCase();
       const format = ALLOWED_FORMATS.has(requestedFormat) ? requestedFormat : 'opus';
+      const bitrateThreshold = getBitrateThresholdForFormat(format);
 
       const requestedMode = String(req.body?.destMode || 'auto').toLowerCase();
       const destMode = ALLOWED_DEST_MODES.has(requestedMode) ? requestedMode : 'auto';
@@ -1269,8 +1624,80 @@ export function registerYtmRoutes(app, deps) {
         baseDestDir = resolvedMusicRoot;
       }
 
+      // Parse optional staged metadata & uploaded cover file
+      let rawMeta = {};
+      if (req.body?.stagedMetadata) {
+        try {
+          rawMeta =
+            typeof req.body.stagedMetadata === 'string'
+              ? JSON.parse(req.body.stagedMetadata)
+              : req.body.stagedMetadata;
+        } catch (_) {
+          rawMeta = {};
+        }
+      }
+
+      let stagedCoverBuffer = null;
+      if (uploadedFiles.length > 0 && uploadedFiles[0]?.path) {
+        const rawBuf = await fs.readFile(uploadedFiles[0].path);
+        detectImageInfo(rawBuf);
+        stagedCoverBuffer = rawBuf;
+      }
+
+      const stagedMetadata = {
+        title: String(rawMeta?.title ?? req.body?.title ?? '').normalize('NFC').trim(),
+        artist: String(rawMeta?.artist ?? req.body?.artist ?? '').normalize('NFC').trim(),
+        album: String(rawMeta?.album ?? req.body?.album ?? '').normalize('NFC').trim(),
+        year: String(rawMeta?.year ?? req.body?.year ?? '').normalize('NFC').trim(),
+        coverUrl: String(rawMeta?.coverUrl ?? req.body?.coverUrl ?? '').trim(),
+        coverBuffer: stagedCoverBuffer,
+        coverFetchAttempted: false,
+      };
+
+      // Parse optional pre-staged tracks array
+      let rawTracks = rawMeta?.tracks ?? req.body?.tracks ?? null;
+      if (typeof rawTracks === 'string') {
+        try {
+          rawTracks = JSON.parse(rawTracks);
+        } catch (_) {
+          rawTracks = null;
+        }
+      }
+
+      const preStagedTracks = [];
+      if (Array.isArray(rawTracks) && rawTracks.length > 0) {
+        for (let i = 0; i < rawTracks.length; i++) {
+          const item = rawTracks[i];
+          if (!item) continue;
+          const rawTrackUrl =
+            item.url || (item.id ? `https://music.youtube.com/watch?v=${item.id}` : '');
+          if (!rawTrackUrl) continue;
+          const validTrackUrl = validateYtmUrl(rawTrackUrl);
+          const confirmedTitle = String(item.title || item.stagedTitle || `Track ${i + 1}`)
+            .normalize('NFC')
+            .trim();
+          preStagedTracks.push({
+            index: i + 1,
+            trackNumber: Number(item.trackNumber) || i + 1,
+            id: String(item.id || ''),
+            title: confirmedTitle,
+            stagedTitle: confirmedTitle,
+            artist: String(stagedMetadata.artist || item.artist || '').normalize('NFC').trim(),
+            album: String(stagedMetadata.album || item.album || '').normalize('NFC').trim(),
+            year: stagedMetadata.year,
+            url: validTrackUrl,
+          });
+        }
+      }
+
       const id = `ytm_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
       const stagingDir = path.join(TMP_CHUNKS_DIR, id);
+      const isPlaylist = preStagedTracks.length > 1 || Boolean(rawMeta?.isPlaylist);
+      const collectionTitle =
+        stagedMetadata.album ||
+        (isPlaylist ? '' : stagedMetadata.title) ||
+        '';
+
       const job = {
         id,
         url,
@@ -1281,22 +1708,28 @@ export function registerYtmRoutes(app, deps) {
         destRelPath: path.relative(resolvedStorageRoot, baseDestDir).replace(/\\/g, '/'),
         explicitSubfolder: destMode !== 'auto',
         createdDestFolder: false,
-        isPlaylist: false,
+        isPlaylist,
         stagingDir,
-        collectionTitle: '',
-        tracks: [],
-        totalTracks: 0,
+        collectionTitle,
+        stagedMetadata,
+        navidromeScanUrl: String(req.body?.navidromeScanUrl || '').trim(),
+        tracks: preStagedTracks,
+        totalTracks: preStagedTracks.length,
         completedTracks: 0,
         currentTrackIndex: 0,
-        currentTrackTitle: '',
+        currentTrackTitle: preStagedTracks[0]?.title || stagedMetadata.title || '',
+        currentTrackPercent: 0,
+        currentProgressLine: '',
         detectedBitrateKbps: 0,
-        bitrateThreshold: LOW_BITRATE_THRESHOLD_KBPS,
-        allowLowBitrate: Boolean(req.body?.allowLowBitrate),
+        bitrateThreshold,
+        allowLowBitrate:
+          req.body?.allowLowBitrate === true || req.body?.allowLowBitrate === 'true',
         status: 'queued',
         pausedReason: null,
         lowBitrateAlert: null,
         downloadedFiles: [],
         failedTracks: [],
+        logs: [],
         error: null,
         cancelRequested: false,
         activeChild: null,
@@ -1306,6 +1739,13 @@ export function registerYtmRoutes(app, deps) {
 
       jobs.set(id, job);
       pruneOldJobs();
+      appendJobLog(
+        job,
+        `[Queue] Queued YTM download (${format.toUpperCase()}, safeguard ≤ ${bitrateThreshold} kbps)${
+          preStagedTracks.length > 0 ? ` · ${preStagedTracks.length} staged track(s)` : ''
+        }`
+      );
+      emitJobUpdate(job);
 
       // Start asynchronous download worker (Track 1 bitrate check runs first)
       setImmediate(() => {
@@ -1315,6 +1755,12 @@ export function registerYtmRoutes(app, deps) {
       res.json({ success: true, job: serializeJob(job) });
     } catch (err) {
       res.status(400).json({ error: err.message });
+    } finally {
+      for (const f of uploadedFiles) {
+        if (f?.path && fsSync.existsSync(f.path)) {
+          await fs.unlink(f.path).catch(() => {});
+        }
+      }
     }
   });
 
@@ -1327,7 +1773,7 @@ export function registerYtmRoutes(app, deps) {
     res.json({ job: serializeJob(job) });
   });
 
-  // POST /api/ytm/jobs/:id/resume - Continue Anyway after 128kbps pause
+  // POST /api/ytm/jobs/:id/resume - Continue Anyway after low-bitrate safeguard pause
   app.post('/api/ytm/jobs/:id/resume', async (req, res) => {
     const job = jobs.get(req.params.id);
     if (!job) {
@@ -1340,6 +1786,7 @@ export function registerYtmRoutes(app, deps) {
     try {
       job.allowLowBitrate = true;
       job.pausedReason = null;
+      appendJobLog(job, '[Safeguard] User chose Continue Anyway — resuming queue...');
 
       // Commit staged Track #1 to final destination inside MUSIC_DIR
       const alert = job.lowBitrateAlert;
@@ -1349,12 +1796,13 @@ export function registerYtmRoutes(app, deps) {
         const committed = await commitStagedTrackToDest(
           alert.stagedFilePath,
           destForTrack1,
-          1,
+          Number(track1?.trackNumber) || 1,
           job.totalTracks,
           track1?.title || alert.trackTitle
         );
         job.downloadedFiles.push(committed);
         job.completedTracks = job.downloadedFiles.length;
+        appendJobLog(job, `[Saved] /${committed.relPath}`);
       }
 
       job.lowBitrateAlert = null;
@@ -1363,9 +1811,14 @@ export function registerYtmRoutes(app, deps) {
         job.status = 'completed';
         job.updatedAt = Date.now();
         await fs.rm(job.stagingDir, { recursive: true, force: true }).catch(() => {});
+        emitJobUpdate(job);
+        if (job.downloadedFiles.length > 0) {
+          await triggerBackendNavidromeScan(job);
+        }
       } else {
         job.status = 'downloading';
         job.updatedAt = Date.now();
+        emitJobUpdate(job);
         setImmediate(() => {
           runDownloadJob(job, 1);
         });
@@ -1375,6 +1828,7 @@ export function registerYtmRoutes(app, deps) {
     } catch (err) {
       job.status = 'failed';
       job.error = err.message;
+      emitJobUpdate(job);
       res.status(500).json({ error: err.message });
     }
   });
@@ -1428,6 +1882,8 @@ export function registerYtmRoutes(app, deps) {
     job.pausedReason = null;
     job.lowBitrateAlert = null;
     job.updatedAt = Date.now();
+    appendJobLog(job, '[Cancelled] Download job aborted by user', 'warn');
+    emitJobUpdate(job);
 
     res.json({ success: true, deletedFiles, job: serializeJob(job) });
   });
