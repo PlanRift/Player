@@ -195,44 +195,394 @@
     btn.classList.toggle('text-zinc-400', !pressed);
   }
 
-  // Cover art with stream-header fallback
-  function attachCoverImage(imgEl, fallbackEl, coverId, fallbackSongId, size = 300) {
+  // Cache of verified album cover URLs loaded on the Artist Discography / Album views (keyed by album.id)
+  const artistAlbumCoverCache = new Map();
+
+  // Reference 16x16 pixel fingerprint for Navidrome's default blue vinyl placeholder image
+  const navidromePlaceholderState = {
+    probing: null,
+    pixels: null,
+  };
+
+  function isPlaceholderCoverValue(val) {
+    if (!val || typeof val !== 'string') return true;
+    const clean = val.trim();
+    if (!clean) return true;
+    if (clean.includes(PLACEHOLDER_IMAGE_HASH)) return true;
+    if (/placeholder|default[-_]?album|no[-_]?album|no[-_]?cover|default[-_]?cover/i.test(clean)) {
+      return true;
+    }
+    // Navidrome emits "al-<albumId>_0" when an album has no indexed coverArt (zero timestamp)
+    if (/^al-[^_]+_0(?:$|\?|&)/i.test(clean) || /[?&]id=al-[^&_]+_0(?:$|&)/i.test(clean)) {
+      return true;
+    }
+    return false;
+  }
+
+  function sampleImagePixels16(url) {
+    return new Promise((resolve) => {
+      if (!url || typeof document === 'undefined') return resolve(null);
+      const probeImg = new Image();
+      probeImg.crossOrigin = 'anonymous';
+      probeImg.onload = () => {
+        try {
+          if (probeImg.naturalWidth <= 2 || probeImg.naturalHeight <= 2) {
+            return resolve(null);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = 16;
+          canvas.height = 16;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(null);
+          ctx.drawImage(probeImg, 0, 0, 16, 16);
+          const data = ctx.getImageData(0, 0, 16, 16).data;
+          resolve(data);
+        } catch {
+          resolve(null);
+        }
+      };
+      probeImg.onerror = () => resolve(null);
+      probeImg.src = url;
+    });
+  }
+
+  function getNavidromePlaceholderFingerprint() {
+    if (navidromePlaceholderState.pixels) {
+      return Promise.resolve(navidromePlaceholderState.pixels);
+    }
+    if (navidromePlaceholderState.probing) {
+      return navidromePlaceholderState.probing;
+    }
+    const probeUrl = client.getCoverArtUrl('al-__navidrome_placeholder_probe___0', 64);
+    navidromePlaceholderState.probing = sampleImagePixels16(probeUrl)
+      .then((px) => {
+        navidromePlaceholderState.pixels = px;
+        return px;
+      })
+      .catch(() => null);
+    return navidromePlaceholderState.probing;
+  }
+
+  function matchesBlueVinylPlaceholderGeometry(px) {
+    if (!px || px.length < 16 * 16 * 4) return false;
+    const getRgb = (x, y) => {
+      const idx = (y * 16 + x) * 4;
+      return [px[idx], px[idx + 1], px[idx + 2]];
+    };
+    const colorDiff = (a, b) =>
+      Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+
+    // 1. All 4 outer background corners must be uniform solid dark/neutral gray
+    const c1 = getRgb(1, 1);
+    const c2 = getRgb(14, 1);
+    const c3 = getRgb(1, 14);
+    const c4 = getRgb(14, 14);
+    if (colorDiff(c1, c2) > 8 || colorDiff(c1, c3) > 8 || colorDiff(c1, c4) > 8) {
+      return false;
+    }
+
+    // 2. 4 cardinal points on the vinyl disc ring must be symmetrical and distinctly blue-dominant (B > R + 25)
+    const rTop = getRgb(8, 4);
+    const rBot = getRgb(8, 11);
+    const rLeft = getRgb(4, 8);
+    const rRight = getRgb(11, 8);
+    const isBlueDisc =
+      rTop[2] > rTop[0] + 25 &&
+      rBot[2] > rBot[0] + 25 &&
+      rLeft[2] > rLeft[0] + 25 &&
+      rRight[2] > rRight[0] + 25;
+    if (!isBlueDisc) return false;
+
+    const ringSymmetric =
+      colorDiff(rTop, rBot) < 24 &&
+      colorDiff(rLeft, rRight) < 24 &&
+      colorDiff(rTop, rLeft) < 28;
+    const distinctFromBg = colorDiff(c1, rTop) > 35;
+
+    return ringSymmetric && distinctFromBg;
+  }
+
+  async function isNavidromePlaceholderImageUrl(url) {
+    if (isPlaceholderCoverValue(url)) return true;
+    const px = await sampleImagePixels16(url);
+    if (!px) return false;
+
+    const refPx = await getNavidromePlaceholderFingerprint();
+    if (refPx && refPx.length === px.length) {
+      let totalDiff = 0;
+      const channels = 16 * 16 * 3;
+      for (let i = 0; i < px.length; i += 4) {
+        totalDiff +=
+          Math.abs(px[i] - refPx[i]) +
+          Math.abs(px[i + 1] - refPx[i + 1]) +
+          Math.abs(px[i + 2] - refPx[i + 2]);
+      }
+      if (totalDiff / channels < 4.5) {
+        return true;
+      }
+    }
+
+    return matchesBlueVinylPlaceholderGeometry(px);
+  }
+
+  /**
+   * Build ordered fallback cover URLs from an album's tracks (/rest/getCoverArt?id=<track.coverArt>).
+   */
+  function resolveAlbumTrackFallbackUrls(album, size = 500) {
+    const tracks = Array.isArray(album?.song)
+      ? album.song
+      : Array.isArray(album?._virtualSongs)
+        ? album._virtualSongs
+        : [];
+    const urls = [];
+    const pushCoverId = (cid) => {
+      if (!cid || isPlaceholderCoverValue(cid)) return;
+      const u = client.getCoverArtUrl(cid, size);
+      if (u && !urls.includes(u)) urls.push(u);
+    };
+
+    // 1. Prefer the first track whose valid coverArt ID differs from the album-level coverArt ID
+    const distinctTrack = tracks.find(
+      (t) => t && t.coverArt && !isPlaceholderCoverValue(t.coverArt) && t.coverArt !== album?.coverArt
+    );
+    if (distinctTrack?.coverArt) {
+      pushCoverId(distinctTrack.coverArt);
+    }
+
+    // 2. First track in album.song that has any valid coverArt ID (tracks[0].coverArt)
+    const firstWithCover = tracks.find((t) => t && t.coverArt && !isPlaceholderCoverValue(t.coverArt));
+    if (firstWithCover?.coverArt) {
+      pushCoverId(firstWithCover.coverArt);
+    }
+
+    // 3. Direct Navidrome mediafile coverArt ID (mf-<track.id>) and raw track.id for the first track
+    const firstTrack = firstWithCover || tracks[0];
+    if (firstTrack?.id) {
+      if (!String(firstTrack.id).startsWith('mf-')) {
+        pushCoverId(`mf-${firstTrack.id}`);
+      }
+      pushCoverId(firstTrack.id);
+    }
+
+    return {
+      trackFallbackUrls: urls,
+      firstTrackCoverUrl: urls[0] || '',
+      fallbackSongId: firstTrack?.id || null,
+    };
+  }
+
+  /**
+   * Dedicated Album Detail Page Header Cover Resolver:
+   * 1. Check if a valid coverArt URL was already loaded/cached from the Artist page view for album.id.
+   * 2. Otherwise, use album.coverArt via /rest/getCoverArt.
+   * 3. Automatic Track Fallback: If album.coverArt is missing, null, fails to load (onerror), or resolves
+   *    to Navidrome's placeholder image, automatically fall back to the first track's artwork
+   *    (tracks[0].coverArt or first track in album.song with a valid coverArt ID) via /rest/getCoverArt?id=<track.coverArt>.
+   */
+  function attachAlbumDetailCover(imgEl, fallbackEl, album, size = 500) {
+    if (!imgEl || !album) return;
+    imgEl.classList.add('hidden');
+    if (fallbackEl) fallbackEl.classList.remove('hidden');
+    imgEl.onload = null;
+    imgEl.onerror = null;
+    imgEl.removeAttribute('src');
+    imgEl.dataset.fallbackAttempted = 'false';
+    imgEl.dataset.streamFallbackAttempted = 'false';
+
+    const albumId = album.id || '';
+    const { trackFallbackUrls, firstTrackCoverUrl, fallbackSongId } = resolveAlbumTrackFallbackUrls(album, size);
+
+    // Priority 1: Valid coverArt URL already loaded/cached from the Artist page view for this album.id
+    const artistViewAlbum =
+      (Array.isArray(state.currentArtistAlbums) && albumId
+        ? state.currentArtistAlbums.find((a) => a && a.id === albumId)
+        : null) || null;
+    const cachedUrl =
+      (albumId && artistAlbumCoverCache.get(albumId)) ||
+      album._cachedCoverUrl ||
+      artistViewAlbum?._cachedCoverUrl ||
+      '';
+
+    // Priority 2: album.coverArt via /rest/getCoverArt (or artistViewAlbum.coverArt if present)
+    const rawAlbumCoverId =
+      (!isPlaceholderCoverValue(album.coverArt) ? album.coverArt : '') ||
+      (!isPlaceholderCoverValue(artistViewAlbum?.coverArt) ? artistViewAlbum.coverArt : '');
+    const albumCoverUrl = rawAlbumCoverId ? client.getCoverArtUrl(rawAlbumCoverId, size) : '';
+
+    // Priority 3: Automatic Track Fallback when album.coverArt is missing, null, or a placeholder ID
+    let primaryUrl = '';
+    let usingTrackFallbackInitially = false;
+    if (cachedUrl && !isPlaceholderCoverValue(cachedUrl)) {
+      primaryUrl = cachedUrl;
+    } else if (albumCoverUrl && !isPlaceholderCoverValue(albumCoverUrl)) {
+      primaryUrl = albumCoverUrl;
+    } else if (firstTrackCoverUrl) {
+      primaryUrl = firstTrackCoverUrl;
+      usingTrackFallbackInitially = true;
+      imgEl.dataset.fallbackAttempted = 'true';
+    }
+
+    const remainingFallbacks = trackFallbackUrls.filter((u) => u && u !== primaryUrl);
+
+    const swapToTrackFallback = async () => {
+      // Guarded fallback swap: first swap to the first track's getCoverArt URL, then any remaining candidate
+      if (imgEl.dataset.fallbackAttempted !== 'true' && firstTrackCoverUrl && firstTrackCoverUrl !== imgEl.src) {
+        imgEl.dataset.fallbackAttempted = 'true';
+        const idx = remainingFallbacks.indexOf(firstTrackCoverUrl);
+        if (idx >= 0) remainingFallbacks.splice(idx, 1);
+        imgEl.src = firstTrackCoverUrl;
+        return;
+      }
+
+      if (remainingFallbacks.length > 0) {
+        imgEl.dataset.fallbackAttempted = 'true';
+        const nextUrl = remainingFallbacks.shift();
+        if (nextUrl && nextUrl !== imgEl.src) {
+          imgEl.src = nextUrl;
+          return;
+        }
+      }
+
+      if (fallbackSongId && imgEl.dataset.streamFallbackAttempted !== 'true') {
+        imgEl.dataset.streamFallbackAttempted = 'true';
+        const streamUrl = await client.extractCoverFromStream(fallbackSongId);
+        if (streamUrl) {
+          imgEl.onload = () => {
+            imgEl.classList.remove('hidden');
+            if (fallbackEl) fallbackEl.classList.add('hidden');
+          };
+          imgEl.onerror = null;
+          imgEl.src = streamUrl;
+          return;
+        }
+      }
+
+      imgEl.onload = null;
+      imgEl.onerror = null;
+      imgEl.classList.add('hidden');
+      if (fallbackEl) fallbackEl.classList.remove('hidden');
+    };
+
+    imgEl.onerror = () => {
+      swapToTrackFallback();
+    };
+
+    imgEl.onload = async () => {
+      const loadedSrc = imgEl.currentSrc || imgEl.src || '';
+      if (imgEl.naturalWidth <= 2 || isPlaceholderCoverValue(loadedSrc)) {
+        swapToTrackFallback();
+        return;
+      }
+
+      imgEl.classList.remove('hidden');
+      if (fallbackEl) fallbackEl.classList.add('hidden');
+
+      // If we haven't fallen back to track art yet (or if additional fallbacks exist), verify Navidrome didn't return its blue vinyl placeholder
+      if (
+        (!usingTrackFallbackInitially || remainingFallbacks.length > 0) &&
+        (firstTrackCoverUrl || remainingFallbacks.length > 0 || fallbackSongId)
+      ) {
+        const isPlaceholder = await isNavidromePlaceholderImageUrl(loadedSrc);
+        if (isPlaceholder) {
+          if (albumId && artistAlbumCoverCache.get(albumId) === loadedSrc) {
+            artistAlbumCoverCache.delete(albumId);
+          }
+          swapToTrackFallback();
+          return;
+        }
+      }
+
+      if (albumId && loadedSrc) {
+        artistAlbumCoverCache.set(albumId, loadedSrc);
+        album._cachedCoverUrl = loadedSrc;
+      }
+    };
+
+    if (primaryUrl) {
+      imgEl.src = primaryUrl;
+      if (imgEl.complete && imgEl.naturalWidth > 2) {
+        imgEl.classList.remove('hidden');
+        if (fallbackEl) fallbackEl.classList.add('hidden');
+      }
+    } else {
+      swapToTrackFallback();
+    }
+  }
+
+  // Cover art with optional track coverId & stream-header fallback
+  function attachCoverImage(imgEl, fallbackEl, coverId, fallbackSongId, size = 300, extraOpts = {}) {
     if (!imgEl) return;
     imgEl.classList.add('hidden');
     if (fallbackEl) fallbackEl.classList.remove('hidden');
     imgEl.removeAttribute('src');
+    imgEl.dataset.fallbackAttempted = 'false';
+
+    const fallbackCoverId = extraOpts.fallbackCoverId || null;
+    const cacheAlbumId = extraOpts.cacheAlbumId || null;
+    const fallbackCoverUrl =
+      fallbackCoverId && !isPlaceholderCoverValue(fallbackCoverId)
+        ? client.getCoverArtUrl(fallbackCoverId, size)
+        : '';
+
+    const tryFallback = async () => {
+      if (
+        imgEl.dataset.fallbackAttempted !== 'true' &&
+        fallbackCoverUrl &&
+        imgEl.src !== fallbackCoverUrl
+      ) {
+        imgEl.dataset.fallbackAttempted = 'true';
+        imgEl.src = fallbackCoverUrl;
+        return;
+      }
+      imgEl.onload = null;
+      imgEl.onerror = null;
+      if (fallbackSongId) {
+        const streamUrl = await client.extractCoverFromStream(fallbackSongId);
+        if (streamUrl) {
+          imgEl.src = streamUrl;
+          imgEl.classList.remove('hidden');
+          if (fallbackEl) fallbackEl.classList.add('hidden');
+          if (cacheAlbumId) {
+            artistAlbumCoverCache.set(cacheAlbumId, streamUrl);
+          }
+        }
+      }
+    };
 
     const showImg = (url) => {
       if (!url) return;
-      imgEl.onload = () => {
+      imgEl.onload = async () => {
+        const loadedSrc = imgEl.currentSrc || imgEl.src || url;
         imgEl.classList.remove('hidden');
         if (fallbackEl) fallbackEl.classList.add('hidden');
-      };
-      imgEl.onerror = async () => {
-        imgEl.onload = null;
-        imgEl.onerror = null;
-        if (fallbackSongId) {
-          const streamUrl = await client.extractCoverFromStream(fallbackSongId);
-          if (streamUrl) {
-            imgEl.src = streamUrl;
-            imgEl.classList.remove('hidden');
-            if (fallbackEl) fallbackEl.classList.add('hidden');
+
+        if (cacheAlbumId) {
+          const isPlaceholder = await isNavidromePlaceholderImageUrl(loadedSrc);
+          if (isPlaceholder) {
+            tryFallback();
+            return;
+          }
+          artistAlbumCoverCache.set(cacheAlbumId, loadedSrc);
+          if (extraOpts.albumRef) {
+            extraOpts.albumRef._cachedCoverUrl = loadedSrc;
           }
         }
       };
+      imgEl.onerror = () => {
+        tryFallback();
+      };
       imgEl.src = url;
-      // Cached image: the load event may already have fired (or never
-      // fire again for the same URL), leaving the fallback disc visible
-      // BESIDE the loaded cover in the flex container. Hide it at once
-      // when the image is already complete.
       if (imgEl.complete && imgEl.naturalWidth > 0) {
         imgEl.classList.remove('hidden');
         if (fallbackEl) fallbackEl.classList.add('hidden');
       }
     };
 
-    if (coverId) {
-      showImg(client.getCoverArtUrl(coverId, size));
+    const validPrimaryId = coverId && !isPlaceholderCoverValue(coverId) ? coverId : fallbackCoverId;
+    if (extraOpts.cachedCoverUrl && !isPlaceholderCoverValue(extraOpts.cachedCoverUrl)) {
+      showImg(extraOpts.cachedCoverUrl);
+    } else if (validPrimaryId && !isPlaceholderCoverValue(validPrimaryId)) {
+      showImg(client.getCoverArtUrl(validPrimaryId, size));
     } else if (fallbackSongId) {
       client.extractCoverFromStream(fallbackSongId).then((u) => u && showImg(u));
     }
@@ -838,7 +1188,14 @@
         fb.classList.add('hidden');
       };
       img.src = opts.coverUrl;
-    } else attachCoverImage(img, fb, opts.coverId, opts.fallbackSongId, 300);
+    } else {
+      attachCoverImage(img, fb, opts.coverId, opts.fallbackSongId, 300, {
+        fallbackCoverId: opts.fallbackCoverId,
+        cacheAlbumId: opts.cacheAlbumId,
+        cachedCoverUrl: opts.cachedCoverUrl,
+        albumRef: opts.albumRef,
+      });
+    }
 
     if (typeof opts.onPlay === 'function') {
       const playBtn = document.createElement('button');
@@ -895,9 +1252,21 @@
   }
 
   function createAlbumCard(album, backRoute = 'albums', withPlay = true) {
+    const tracks = album?.song || album?._virtualSongs || [];
+    const firstTrackWithCover =
+      tracks.find((t) => t && t.coverArt && !isPlaceholderCoverValue(t.coverArt)) || tracks[0];
+    const cachedUrl =
+      (album?.id && artistAlbumCoverCache.get(album.id)) || album?._cachedCoverUrl || '';
+
     return createMediaCard({
-      coverId: album.coverArt || (String(album.id).startsWith('singles-') ? null : album.id),
-      fallbackSongId: album._virtualSongs?.[0]?.id,
+      coverId: !isPlaceholderCoverValue(album?.coverArt)
+        ? album.coverArt
+        : firstTrackWithCover?.coverArt || (String(album?.id).startsWith('singles-') ? null : album?.id),
+      fallbackCoverId: firstTrackWithCover?.coverArt || null,
+      fallbackSongId: firstTrackWithCover?.id || album?._virtualSongs?.[0]?.id,
+      cacheAlbumId: album?.id || null,
+      cachedCoverUrl: cachedUrl,
+      albumRef: album,
       fallbackIcon: String(album.id).startsWith('singles-') ? 'music-2' : 'disc',
       titleHtml: titleHtml(album.name || 'Untitled Album', album.artist),
       subtitle: album.artist || 'Unknown Artist',
@@ -1968,11 +2337,10 @@
     meta.push(`${songs.length} tracks`, formatTotalDuration(totalSec));
     $('album-detail-meta').textContent = `· ${meta.join(' · ')}`;
 
-    attachCoverImage(
+    attachAlbumDetailCover(
       $('album-detail-cover'),
       $('album-detail-cover-fallback'),
-      album.coverArt || (!virtual ? album.id : null),
-      songs[0]?.id || null,
+      album,
       500
     );
 
@@ -4378,8 +4746,15 @@
       ? firstFilePath.split('/').slice(0, -1).join('/')
       : '';
     const virtual = isVirtualAlbum(detail);
-    const coverId = detail.coverArt || (!virtual ? detail.id : null) || songs[0]?.id;
-    const coverUrl = coverId ? client.getCoverArtUrl(coverId, 500) : '';
+    const trackCoverId = songs.find((s) => s && s.coverArt && !isPlaceholderCoverValue(s.coverArt))?.coverArt;
+    const coverId =
+      (!isPlaceholderCoverValue(detail.coverArt) ? detail.coverArt : null) ||
+      trackCoverId ||
+      (!virtual ? detail.id : null) ||
+      songs[0]?.id;
+    const coverUrl =
+      (detail.id && artistAlbumCoverCache.get(detail.id)) ||
+      (coverId ? client.getCoverArtUrl(coverId, 500) : '');
 
     await openMetadataEditor(
       {
@@ -5060,6 +5435,7 @@
     if (typeof client.bustCoverCache === 'function') {
       client.bustCoverCache();
     }
+    artistAlbumCoverCache.clear();
 
     // Immediately show the newly selected cover in Album Detail if currently viewing an album
     if (instantCoverUrl && state.route === 'album-detail') {
@@ -5910,6 +6286,7 @@
     if (typeof client.bustCoverCache === 'function') {
       client.bustCoverCache();
     }
+    artistAlbumCoverCache.clear();
     state.artists = null;
     state.songs = null;
     state.songsPromise = null;

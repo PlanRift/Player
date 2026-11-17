@@ -562,7 +562,16 @@ class SubsonicClient {
       };
     }
 
-    return this.getAlbum(id);
+    const fetched = await this.getAlbum(id);
+    if (typeof albumOrId === 'object' && albumOrId) {
+      if (!fetched.coverArt && albumOrId.coverArt) {
+        fetched.coverArt = albumOrId.coverArt;
+      }
+      if (albumOrId._cachedCoverUrl) {
+        fetched._cachedCoverUrl = albumOrId._cachedCoverUrl;
+      }
+    }
+    return fetched;
   }
 
   // Fallback cover art extractor from raw audio stream header bytes (ID3v2 / FLAC APIC JPEG or PNG)
