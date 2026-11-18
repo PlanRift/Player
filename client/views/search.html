@@ -1,11 +1,11 @@
-<!-- VIEW: SEARCH (Universal Search across Original + Translated/Romaji Titles) -->
+<!-- VIEW: SEARCH (Instant Local BM25 + Frecency + Adaptive History + Top Result Hero) -->
 <section id="view-search" class="hidden p-6 md:p-8 pb-44 md:pb-28 space-y-6">
   <!-- Section Header -->
   <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-4 border-b border-zinc-700">
     <div>
       <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-none">Search</h1>
       <p id="search-summary-label" class="font-mono text-xs text-zinc-400 tracking-wide mt-2">
-        Search artists, albums, or tracks across original and translated titles
+        Instant BM25 + frecency search across original, kana, romaji, and translated titles
       </p>
     </div>
   </div>
@@ -33,15 +33,26 @@
     </div>
   </div>
 
+  <!-- Recent Searches Pills -->
+  <div id="search-recent-wrap" class="hidden space-y-2">
+    <div class="flex items-center justify-between">
+      <span class="text-[10.5px] font-mono uppercase tracking-wider text-zinc-400">Recent Searches</span>
+      <button id="search-recent-clear-btn" type="button" class="text-[10.5px] font-mono text-zinc-500 hover:text-zinc-200">
+        CLEAR
+      </button>
+    </div>
+    <div id="search-recent-list" class="flex flex-wrap gap-1.5"></div>
+  </div>
+
   <!-- Search Results / Empty State Container -->
   <div id="search-results" class="space-y-8">
     <div class="studio-panel p-12 text-center border border-zinc-800 bg-zinc-900/40">
-      <div class="w-10 h-10 mx-auto mb-3 bg-zinc-900 border border-zinc-700 flex items-center justify-center text-zinc-400">
+      <div class="w-10 h-10 mx-auto mb-3 bg-zinc-900 border border-zinc-700 flex items-center justify-center text-zinc-400 radius-inner">
         <i data-lucide="search" class="w-5 h-5"></i>
       </div>
       <h2 class="font-display text-xl text-zinc-100">Search your library</h2>
       <p class="text-xs font-mono text-zinc-400 mt-1">
-        Find artists, albums, or tracks across your library
+        Find artists, albums, or tracks instantly with Japanese kana &amp; romaji folding
       </p>
       <div class="mt-5 flex items-center justify-center gap-2">
         <button type="button" data-search-nav="artists" class="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 transition-colors">

@@ -1,10 +1,10 @@
-<!-- VIEW: ALL PLAYLISTS (Horizontal Row MediaCards with 2x2 Canvas Collages) -->
-<section id="view-playlists" class="hidden p-6 md:p-8 pb-44 md:pb-28 space-y-6">
+<!-- VIEW: ALL PLAYLISTS (Smart Playlists .nsp + Custom Playlists with 2x2 Collages) -->
+<section id="view-playlists" class="hidden p-6 md:p-8 pb-44 md:pb-28 space-y-8">
   <!-- Section Header -->
   <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-4 border-b border-zinc-700">
     <div>
       <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-none">Playlists</h1>
-      <p id="playlists-count-label" class="font-mono text-xs text-zinc-400 tracking-wide mt-2">Custom playlists</p>
+      <p id="playlists-count-label" class="font-mono text-xs text-zinc-400 tracking-wide mt-2">Smart &amp; custom playlists</p>
     </div>
     <div class="flex items-center gap-2 self-start sm:self-auto">
       <button
@@ -18,6 +18,20 @@
     </div>
   </div>
 
-  <!-- Horizontal Row Cards Grid -->
-  <div id="playlists-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  <!-- Smart Playlists (Rule-based Live / Frozen + .nsp Export) -->
+  <div id="smart-playlists-section" class="space-y-3.5">
+    <div class="flex items-end justify-between gap-2">
+      <div>
+        <h2 class="font-display font-normal text-xl tracking-tight text-zinc-100 leading-none">Smart Playlists</h2>
+        <p class="font-mono text-xs text-zinc-400 mt-1">Auto-updating rule playlists · Exportable to Navidrome <code class="text-zinc-300">.nsp</code></p>
+      </div>
+    </div>
+    <div id="smart-playlists-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </div>
+
+  <!-- Custom Playlists Grid -->
+  <div class="space-y-3.5">
+    <h2 class="font-display font-normal text-xl tracking-tight text-zinc-100 leading-none">Your Playlists</h2>
+    <div id="playlists-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </div>
 </section>

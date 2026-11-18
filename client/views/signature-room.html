@@ -1,4 +1,4 @@
-<!-- VIEW: FULLSCREEN SIGNATURE ROOM ("LISTENING ROOM" + SYNCED LYRICS + LYRICS SOURCES MODAL) -->
+<!-- VIEW: FULLSCREEN SIGNATURE ROOM ("LISTENING ROOM" + OKLCH 3-BLOB MESH + SYNCED LYRICS) -->
 <div
   id="signature-modal"
   role="dialog"
@@ -6,37 +6,46 @@
   aria-label="Listening Room and Synced Lyrics"
   class="hidden fixed inset-0 z-50 bg-zinc-950 flex flex-col overflow-hidden"
 >
-  <!-- Blurred Album Cover Ambient Backdrop (Century SignatureView "full":
-       opacity-35 + flat wash bg-zinc-950/45, NOT a gradient) -->
+  <!-- Blurred Album Cover Fallback + Dual-Buffer OKLCH 3-Blob Ambient Mesh -->
   <div
     id="sig-backdrop-art"
-    class="absolute -inset-16 bg-cover bg-center scale-110 blur-[80px] opacity-35 pointer-events-none transition-all duration-700"
+    class="absolute -inset-16 bg-cover bg-center scale-110 blur-[80px] opacity-25 pointer-events-none transition-all duration-700"
   ></div>
+  <div id="sig-ambient-mesh-a" class="ambient-mesh-layer opacity-100">
+    <div class="ambient-blob ambient-blob-1"></div>
+    <div class="ambient-blob ambient-blob-2"></div>
+    <div class="ambient-blob ambient-blob-3"></div>
+  </div>
+  <div id="sig-ambient-mesh-b" class="ambient-mesh-layer opacity-0">
+    <div class="ambient-blob ambient-blob-1"></div>
+    <div class="ambient-blob ambient-blob-2"></div>
+    <div class="ambient-blob ambient-blob-3"></div>
+  </div>
   <div class="absolute inset-0 bg-zinc-950/45 pointer-events-none"></div>
 
   <!-- Top Header (Auto-hides after 4s of mouse inactivity when playing) -->
   <header class="signature-chrome relative z-10 h-14 px-6 border-b border-zinc-800/80 flex items-center justify-between shrink-0">
     <div class="flex items-center gap-3">
-      <span class="w-2 h-2 bg-emerald-400 inline-block"></span>
+      <span class="w-2 h-2 bg-emerald-400 inline-block pill-round"></span>
       <span class="font-display text-base text-zinc-100">Plenrip Audio</span>
       <span class="text-[11px] font-mono uppercase tracking-widest text-zinc-400 border-l border-zinc-700 pl-3">LISTENING ROOM</span>
-      <span id="sig-provider-badge" class="px-2 py-0.5 bg-zinc-900 border border-zinc-700 text-[10px] font-mono text-emerald-400 uppercase">
+      <span id="sig-provider-badge" class="px-2 py-0.5 bg-zinc-900 border border-zinc-700 text-[10px] font-mono text-emerald-400 uppercase radius-inner">
         AUTO
       </span>
     </div>
 
     <div class="flex items-center gap-2">
       <!-- Japanese Language Mode Toggle (原文 / Romaji / EN) -->
-      <div id="sig-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-900">
-          <button type="button" data-lyrics-toggle="romaji"
-            class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
-          <button type="button" data-lyrics-toggle="translated"
-            class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
-        </div>
+      <div id="sig-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-900 radius-inner overflow-hidden">
+        <button type="button" data-lyrics-toggle="romaji"
+          class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
+        <button type="button" data-lyrics-toggle="translated"
+          class="lyrics-mode-btn px-2.5 py-1 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
+      </div>
       <span id="sig-lyrics-preparing" class="hidden text-[10px] font-mono text-emerald-400 animate-pulse">preparing readings...</span>
 
       <!-- Timing Offset Nudge Controls -->
-      <div id="sig-offset-controls" class="hidden sm:flex items-center gap-1 bg-zinc-900 border border-zinc-700 px-2 py-1">
+      <div id="sig-offset-controls" class="hidden sm:flex items-center gap-1 bg-zinc-900 border border-zinc-700 px-2 py-1 radius-inner">
         <span class="text-[10px] font-mono text-zinc-400 mr-1">OFFSET:</span>
         <button
           id="sig-offset-minus"
@@ -86,7 +95,7 @@
   <div class="relative z-10 flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-8 px-6 md:px-10 py-6 max-w-[1800px] w-full mx-auto overflow-hidden">
     <!-- Left Column (5 cols) -->
     <div class="lg:col-span-5 flex flex-col justify-center items-center lg:items-start space-y-5">
-      <div class="relative w-full max-w-[min(460px,44dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl shrink-0">
+      <div class="relative w-full max-w-[min(460px,44dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl shrink-0 radius-card">
         <img id="sig-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
         <i id="sig-cover-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-16 h-16 text-zinc-400 pointer-events-none"></i>
       </div>
@@ -101,13 +110,18 @@
     </div>
 
     <!-- Right Column: Ambient Synced Lyrics Scroll Panel (7 cols) -->
-    <div class="lg:col-span-7 h-full min-h-0 flex flex-col overflow-hidden">
+    <div class="lg:col-span-7 h-full min-h-0 flex flex-col overflow-hidden relative">
       <div id="signature-lyrics-container" class="lyrics-ambient-mask flex-1 overflow-y-auto px-4 md:px-8 py-12 space-y-3">
         <div class="h-full flex flex-col items-center justify-center text-center">
           <p class="font-display text-2xl text-zinc-200">A quiet recording</p>
           <p class="text-xs font-mono text-zinc-400 mt-1">Play a track to load synchronized lyrics</p>
         </div>
       </div>
+      <button id="sig-lyrics-back-pill" type="button"
+        class="hidden pill-round absolute bottom-6 left-1/2 -translate-x-1/2 z-20 px-3.5 py-1.5 bg-emerald-400 text-zinc-950 text-xs font-mono font-semibold shadow-xl items-center gap-1.5">
+        <i data-lucide="locate-fixed" class="w-3.5 h-3.5"></i>
+        <span>Back to current line</span>
+      </button>
     </div>
   </div>
 
@@ -161,7 +175,7 @@
   aria-label="Lyrics Sources"
   class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
 >
-  <div class="w-full max-w-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+  <div class="w-full max-w-lg bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] radius-card">
     <div class="px-5 py-4 border-b border-zinc-700 flex items-center justify-between">
       <div>
         <h2 class="font-display text-lg text-zinc-100">Lyrics Sources</h2>

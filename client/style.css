@@ -1,13 +1,8 @@
 /* ============================================================================
- * Plenrip Audio Tokens: Monochrome + Sage (Variable-Driven Theme)
- * Colors:
- *   - Background: #101010 (near-black)
- *   - Hairline borders: #2a2a2a
- *   - Panels: #161616 / #1e1e1e
- *   - Accent: #8ab8a0 (sage green, calm, NOT neon)
- *   - Destructive: #f0605a (red, destructive only)
- *   - Text: #ebebeb / #939393
- * Radius: 0 everywhere.
+ * Plenrip Audio Design System: Dynamic Palette + Radius Engine (Photon Merge)
+ * Default Palette: Vela Blue (#0C0D10 canvas, #141414 sidebar, #1D1D1D card, #7085FF accent)
+ * Destructive: #f0605a across all palettes.
+ * Untouchable Zones (#view-files, #files-metadata-modal, #ytm-*) strictly 0px radius.
  * ========================================================================== */
 
 @font-face {
@@ -34,9 +29,40 @@
   font-display: swap;
 }
 
-:root {
+:root,
+html[data-palette="vela-blue"] {
   color-scheme: dark;
+  --background: #0C0D10;
+  --sidebar: #141414;
+  --foreground: #EDEDED;
+  --card: #1D1D1D;
+  --card-hover: #262626;
+  --card-foreground: #EDEDED;
+  --popover: #18191D;
+  --popover-foreground: #EDEDED;
+  --primary: #7085FF;
+  --primary-foreground: #0C0D10;
+  --primary-light: #96A6FF;
+  --primary-hover: #5C73F2;
+  --secondary: #262626;
+  --secondary-foreground: #EDEDED;
+  --muted: #222328;
+  --muted-foreground: #8C8E96;
+  --text-muted: #C2C4CC;
+  --text-body: #DCDDE3;
+  --accent: #7085FF;
+  --accent-foreground: #0C0D10;
+  --destructive: #f0605a;
+  --border: #262626;
+  --border-emphasis: #35373E;
+  --border-strong: #4C4F59;
+  --input: #262626;
+  --ring: #7085FF;
+}
+
+html[data-palette="plenrip-classic"] {
   --background: #101010;
+  --sidebar: #131313;
   --foreground: #ebebeb;
   --card: #161616;
   --card-hover: #1e1e1e;
@@ -61,7 +87,96 @@
   --border-strong: #525252;
   --input: #2a2a2a;
   --ring: #8ab8a0;
+}
 
+html[data-palette="crimson-rose"] {
+  --background: #0D0B0C;
+  --sidebar: #131012;
+  --foreground: #F2ECEE;
+  --card: #1A1517;
+  --card-hover: #251E21;
+  --card-foreground: #F2ECEE;
+  --popover: #171214;
+  --popover-foreground: #F2ECEE;
+  --primary: #F43F5E;
+  --primary-foreground: #0D0B0C;
+  --primary-light: #FB7185;
+  --primary-hover: #E11D48;
+  --secondary: #251E21;
+  --secondary-foreground: #F2ECEE;
+  --muted: #211A1D;
+  --muted-foreground: #9A8C91;
+  --text-muted: #CEC2C6;
+  --text-body: #E4DCE0;
+  --accent: #F43F5E;
+  --accent-foreground: #0D0B0C;
+  --destructive: #f0605a;
+  --border: #2B2226;
+  --border-emphasis: #3D3035;
+  --border-strong: #57444C;
+  --input: #2B2226;
+  --ring: #F43F5E;
+}
+
+html[data-palette="amber-gold"] {
+  --background: #0F0E0C;
+  --sidebar: #151310;
+  --foreground: #F2EFE9;
+  --card: #1C1915;
+  --card-hover: #27231D;
+  --card-foreground: #F2EFE9;
+  --popover: #181612;
+  --popover-foreground: #F2EFE9;
+  --primary: #F59E0B;
+  --primary-foreground: #0F0E0C;
+  --primary-light: #FBBF24;
+  --primary-hover: #D97706;
+  --secondary: #27231D;
+  --secondary-foreground: #F2EFE9;
+  --muted: #221E19;
+  --muted-foreground: #9B9386;
+  --text-muted: #CFC8BC;
+  --text-body: #E5DFD5;
+  --accent: #F59E0B;
+  --accent-foreground: #0F0E0C;
+  --destructive: #f0605a;
+  --border: #2C2720;
+  --border-emphasis: #3E372D;
+  --border-strong: #594F41;
+  --input: #2C2720;
+  --ring: #F59E0B;
+}
+
+html[data-palette="emerald-mint"] {
+  --background: #0B0F0E;
+  --sidebar: #101614;
+  --foreground: #EAF2EF;
+  --card: #161E1C;
+  --card-hover: #1F2A27;
+  --card-foreground: #EAF2EF;
+  --popover: #131B19;
+  --popover-foreground: #EAF2EF;
+  --primary: #10B981;
+  --primary-foreground: #0B0F0E;
+  --primary-light: #34D399;
+  --primary-hover: #059669;
+  --secondary: #1F2A27;
+  --secondary-foreground: #EAF2EF;
+  --muted: #1B2522;
+  --muted-foreground: #859992;
+  --text-muted: #BDD0C9;
+  --text-body: #D8E6E1;
+  --accent: #10B981;
+  --accent-foreground: #0B0F0E;
+  --destructive: #f0605a;
+  --border: #22302C;
+  --border-emphasis: #31443F;
+  --border-strong: #46615A;
+  --input: #22302C;
+  --ring: #10B981;
+}
+
+:root {
   /* Aliases for compatibility */
   --bg-primary: var(--background);
   --bg-surface: var(--card);
@@ -70,7 +185,12 @@
   --accent-emerald: var(--primary);
   --accent-ink: var(--primary-foreground);
   --text-primary: var(--foreground);
-  --text-destructive: var(--destructive);
+  --text-destructive: #f0605a;
+
+  /* Dynamic Border Radius & Viewport Scaling */
+  --radius: 12px;
+  --radius-inner: 8px;
+  --scale: 1;
 
   --font-sans: 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -87,10 +207,29 @@
   --shadow-float: 0 8px 30px rgb(0 0 0 / 0.5);
 }
 
+html[data-radius="sharp"] {
+  --radius: 0px;
+  --radius-inner: 0px;
+}
+
+html[data-radius="subtle"] {
+  --radius: 6px;
+  --radius-inner: 4px;
+}
+
+html[data-radius="vela"] {
+  --radius: 12px;
+  --radius-inner: 8px;
+}
+
+html[data-radius="pill"] {
+  --radius: 18px;
+  --radius-inner: 12px;
+}
+
 * {
   box-sizing: border-box;
-  border-radius: 0 !important;
-  scrollbar-color: #3a3a3a transparent;
+  scrollbar-color: var(--border-emphasis) transparent;
   scrollbar-width: thin;
 }
 
@@ -109,6 +248,10 @@ body {
 ::selection {
   background-color: var(--primary);
   color: var(--primary-foreground);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--primary);
 }
 
 .font-sans {
@@ -156,11 +299,80 @@ input:disabled {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3a3a3a;
+  background: var(--border-emphasis);
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #525252;
+  background: var(--border-strong);
+}
+
+/* ============================================================================
+ * Dynamic Border-Radius Surfaces & Controls
+ * ========================================================================== */
+.studio-panel,
+.radius-card,
+.mfy-card,
+.smart-playlist-card,
+#player-bar-panel,
+#multi-select-bar > div,
+#mobile-tab-bar > div,
+#toast-banner,
+#track-context-menu,
+#settings-modal > div,
+#create-playlist-modal > div,
+#save-queue-playlist-modal > div,
+#add-to-playlist-modal > div,
+#playlist-cover-modal > div,
+#shortcuts-modal > div,
+#lyrics-search-modal > div {
+  border-radius: var(--radius);
+}
+
+#player-bar-panel {
+  overflow: hidden;
+}
+
+#queue-drawer,
+#lyrics-drawer {
+  border-top-left-radius: var(--radius);
+  border-bottom-left-radius: var(--radius);
+}
+
+.radius-inner,
+.sidebar-nav-btn,
+.sidebar-playlist-row,
+#sidebar-toggle-btn,
+#player-bar-panel button,
+#player-bitrate-indicator,
+#mobile-mini-track-btn > div:first-child,
+#ld-cover-img,
+.song-row,
+.queue-row,
+button:not(.artist-avatar-round):not(.pill-round):not(.studio-panel):not(.radius-card):not(.mfy-card),
+input:not([type="range"]):not([type="checkbox"]),
+select,
+textarea,
+kbd {
+  border-radius: var(--radius-inner);
+}
+
+.artist-avatar-round,
+.pill-round,
+.lyric-dot {
+  border-radius: 9999px !important;
+}
+
+/* STRICT UNTOUCHABLE ZONE ISOLATION: Always 0px sharp corners */
+#view-files,
+#view-files *,
+#files-metadata-modal,
+#files-metadata-modal *,
+#ytm-downloader-section,
+#ytm-downloader-section *,
+#ytm-folder-picker-modal,
+#ytm-folder-picker-modal * {
+  border-radius: 0px !important;
 }
 
 /* Studio panel motif */
@@ -175,20 +387,25 @@ input:disabled {
   border-color: var(--primary);
 }
 
-/* Multi-select (V-15, Century M7): a selected row gets the sage left
- * border + a subtle sage wash, matching the active-row treatment. */
+/* Multi-select row wash */
 .song-row-selected {
-  background-color: rgba(138, 184, 160, 0.08);
+  background-color: color-mix(in srgb, var(--primary) 12%, transparent);
   border-left: 2px solid var(--primary);
 }
 
-/* Cover fallback: hide whenever the sibling cover image is visible.
- * This is a CSS rule (not a class toggle) because Lucide's createIcons()
- * replaces the fallback <i> with a fresh <svg> on every refreshIcons()
- * run, dropping the `hidden` class that attachCoverImage set — so the
- * disc icon stayed visible on top of the loaded cover. The :has()
- * selector re-hides it declaratively, no matter how often Lucide
- * re-renders the icon. */
+/* Dense Row Mode (Settings > Appearance) */
+body[data-variant="dense"] .song-row {
+  min-height: 36px;
+  padding-top: 0.2rem !important;
+  padding-bottom: 0.2rem !important;
+}
+
+body[data-variant="dense"] .song-row .song-row-cover {
+  width: 28px !important;
+  height: 28px !important;
+}
+
+/* Cover fallback declarative hide */
 :has(> img:not(.hidden)) > [id$="-fallback"] {
   display: none !important;
 }
@@ -213,7 +430,6 @@ input[type="range"].studio-range-thin {
   display: block;
 }
 
-/* WebKit Track: High-contrast zinc track with Sage progress fill */
 input[type="range"].studio-range::-webkit-slider-runnable-track {
   width: 100%;
   height: 5px;
@@ -268,7 +484,6 @@ input[type="range"].studio-range-thin:hover::-webkit-slider-runnable-track,
   transform: scaleY(5);
 }
 
-/* WebKit Thumb */
 input[type="range"].studio-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
@@ -277,7 +492,6 @@ input[type="range"].studio-range::-webkit-slider-thumb {
   margin-top: -4px;
   opacity: 0;
   transition: transform 120ms ease, background-color 120ms ease;
-  
 }
 
 input[type="range"].studio-range:hover::-webkit-slider-thumb {
@@ -295,7 +509,6 @@ input[type="range"].studio-range-thin::-webkit-slider-thumb {
   transition: opacity 120ms ease, transform 120ms ease;
 }
 
-/* Firefox Track & Progress Fill */
 input[type="range"].studio-range::-moz-range-track,
 input[type="range"].studio-range-thin::-moz-range-track {
   width: 100%;
@@ -326,7 +539,6 @@ input[type="range"].studio-range-thin::-moz-range-progress {
   transform-origin: bottom center;
 }
 
-/* Firefox Thumb */
 input[type="range"].studio-range::-moz-range-thumb {
   width: 13px;
   height: 13px;
@@ -346,6 +558,7 @@ input[type="range"].studio-range-thin::-moz-range-thumb {
   border-radius: 0;
 }
 
+/* Bottom Player Bar Hover Timestamps & Volume Mechanic (preserved intact) */
 #time-current,
 #time-total {
   top: 0rem;
@@ -355,26 +568,26 @@ input[type="range"].studio-range-thin::-moz-range-thumb {
 
 .group:hover #time-current,
 .group:hover #time-total {
-top:-1rem;
-opacity: 1;
+  top: -1rem;
+  opacity: 1;
 }
-/* When checkbox is checked, hide the left icons */
+
 .volume-group:has(#volume-toggle:checked) .secondary-icons {
   opacity: 0;
   pointer-events: none;
   transform: translateX(4px);
 }
 
-/* When checkbox is checked, slide in and enable the volume slider */
 .volume-group:has(#volume-toggle:checked) .volume-slider-box {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(-50%) translateX(0);
 }
 
-/* Sidebar width & collapse behavior */
+/* Sidebar width (Photon 240px) & collapse behavior */
 #sidebar {
-  width: 14rem;
+  width: 15rem;
+  background-color: var(--sidebar);
   transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -385,7 +598,10 @@ opacity: 1;
 #sidebar.sidebar-collapsed .sidebar-label,
 #sidebar.sidebar-collapsed .sidebar-section-header,
 #sidebar.sidebar-collapsed .sidebar-shortcut,
+#sidebar.sidebar-collapsed .sidebar-nav-count,
 #sidebar.sidebar-collapsed .sidebar-footer-text,
+#sidebar.sidebar-collapsed #sidebar-continue-section,
+#sidebar.sidebar-collapsed #sidebar-inline-create-form,
 #sidebar.sidebar-collapsed #sidebar-brand-wrap {
   display: none !important;
 }
@@ -412,6 +628,86 @@ opacity: 1;
   color: var(--primary);
 }
 
+.playlist-drop-target {
+  outline: 1.5px dashed var(--primary) !important;
+  background-color: color-mix(in srgb, var(--primary) 14%, transparent) !important;
+}
+
+/* ============================================================================
+ * OKLCH 3-Blob Ambient Mesh Backdrop & Animations
+ * ========================================================================== */
+@keyframes ambient-drift-a {
+  0%, 100% { transform: translate3d(-6%, -4%, 0) scale(1); }
+  50% { transform: translate3d(8%, 7%, 0) scale(1.12); }
+}
+
+@keyframes ambient-drift-b {
+  0%, 100% { transform: translate3d(7%, -6%, 0) scale(1.06); }
+  50% { transform: translate3d(-9%, 8%, 0) scale(0.95); }
+}
+
+@keyframes ambient-drift-c {
+  0%, 100% { transform: translate3d(-4%, 9%, 0) scale(0.98); }
+  50% { transform: translate3d(6%, -7%, 0) scale(1.1); }
+}
+
+.ambient-mesh-layer {
+  position: absolute;
+  inset: -12%;
+  pointer-events: none;
+  overflow: hidden;
+  transition: opacity 900ms ease;
+}
+
+.ambient-blob {
+  position: absolute;
+  border-radius: 9999px !important;
+  filter: blur(88px);
+  opacity: 0.62;
+  will-change: transform, background-color;
+  transition: background-color 1100ms ease;
+}
+
+.ambient-blob-1 {
+  width: 58%;
+  height: 58%;
+  top: -8%;
+  left: -6%;
+  animation: ambient-drift-a 24s ease-in-out infinite;
+}
+
+.ambient-blob-2 {
+  width: 54%;
+  height: 54%;
+  top: 16%;
+  right: -10%;
+  animation: ambient-drift-b 29s ease-in-out infinite;
+}
+
+.ambient-blob-3 {
+  width: 52%;
+  height: 52%;
+  bottom: -12%;
+  left: 20%;
+  animation: ambient-drift-c 26s ease-in-out infinite;
+}
+
+@keyframes shimmer-sweep {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--card) 25%,
+    var(--card-hover) 50%,
+    var(--card) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-sweep 1.8s ease-in-out infinite;
+}
+
 /* Lyrics Canvas & Word-Level Karaoke Sync */
 .lyric-line {
   transition: color 200ms ease, opacity 200ms ease, transform 200ms ease, background-color 200ms ease;
@@ -420,18 +716,10 @@ opacity: 1;
 .lyric-line-active {
   color: var(--foreground);
   font-weight: 600;
-  background-color: rgba(30, 30, 30, 0.65);
+  background-color: color-mix(in srgb, var(--secondary) 70%, transparent);
   border-left: 2px solid var(--primary);
 }
 
-/* Word sweep (Century ActiveLineWordFill): each word is a two-layer span.
- * The base layer is dim; the fill layer is sage and sits exactly on top,
- * revealed left-to-right by clip-path only. There is NO background-clip:
- * text gradient and NO colour transition on the words — the old gradient
- * repainted every animation frame and flashed white <-> sage (the flicker
- * users saw on the active line). Clip-path is the only thing that moves.
- * The fill starts fully clipped (inset 0 100% 0 0) and syncLyrics sets it
- * per frame. */
 .lyric-word-wrap {
   position: relative;
   display: inline-block;
@@ -452,8 +740,6 @@ opacity: 1;
   clip-path: inset(0 100% 0 0);
 }
 
-/* Romaji / Translated sub-lines (Century): stacked under the original,
- * smaller and dimmer. Romaji is a step brighter than Translated. */
 .lyric-subline {
   display: block;
   font-size: 0.72em;
@@ -471,13 +757,9 @@ opacity: 1;
   color: rgba(235, 235, 235, 0.45);
 }
 
-/* Background vocals (Morphe model): a BG line is a small dim line below its
- * parent lead. It never becomes the active line. It expands + fades in
- * (250ms) while its lead is active, and collapses to zero space (200ms)
- * after the lead leaves. Open BG text is dimmer sage, never full sage. */
 .lyric-line-bg {
   font-size: 0.82em;
-  color: rgba(138, 184, 160, 0.7);
+  color: color-mix(in srgb, var(--primary) 72%, transparent);
   max-height: 0;
   opacity: 0;
   padding-top: 0;
@@ -496,29 +778,22 @@ opacity: 1;
   transition-duration: 250ms;
 }
 
-/* Word spans inside a BG line use sage tones, not the lead line's
- * near-white. Without these rules the base colour
- * (rgba(235,235,235,0.45)) wins over the BG div's sage, so a BG line's
- * glyphs look identical to an unsung lead line. */
 .lyric-line-bg .lyric-word-base {
-  color: rgba(138, 184, 160, 0.7);
+  color: color-mix(in srgb, var(--primary) 70%, transparent);
 }
 
 .lyric-line-bg .lyric-word-fill {
-  color: rgba(138, 184, 160, 0.95);
+  color: color-mix(in srgb, var(--primary) 96%, white);
 }
 
-/* BG sub-lines are sage-dim too. */
 .lyric-line-bg .lyric-subline-romaji {
-  color: rgba(138, 184, 160, 0.55);
+  color: color-mix(in srgb, var(--primary) 58%, transparent);
 }
 
 .lyric-line-bg .lyric-subline-translated {
-  color: rgba(138, 184, 160, 0.45);
+  color: color-mix(in srgb, var(--primary) 48%, transparent);
 }
 
-/* Instrumental break dots: three dots that fill as the gap progresses.
- * Filled = zinc-100, unfilled = zinc-600. No pulse. */
 .lyric-dots {
   display: flex;
   align-items: center;
@@ -555,6 +830,13 @@ opacity: 1;
 
 .signature-idle {
   cursor: none !important;
+}
+
+/* Pause Looping Animations setting */
+html[data-motion-paused] *,
+html[data-motion-paused] *::before,
+html[data-motion-paused] *::after {
+  animation-play-state: paused !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

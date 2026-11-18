@@ -1,8 +1,8 @@
-<!-- VIEW: NOW PLAYING (Dedicated /now-playing Desktop 2-Col + Mobile Fullscreen View) -->
+<!-- VIEW: NOW PLAYING (OKLCH 3-Blob Ambient Mesh + Resizable Queue/Lyrics Split Rail) -->
 <section id="view-now-playing" class="hidden h-full w-full overflow-hidden">
   <!-- Empty State -->
   <div id="np-empty-state" class="hidden h-full w-full flex flex-col items-center justify-center p-8 text-center">
-    <div class="w-14 h-14 bg-zinc-900 border border-zinc-700 flex items-center justify-center mb-4 text-zinc-400">
+    <div class="w-14 h-14 bg-zinc-900 border border-zinc-700 flex items-center justify-center mb-4 text-zinc-400 radius-card">
       <i data-lucide="disc" class="w-7 h-7"></i>
     </div>
     <h2 class="font-display text-2xl text-zinc-100">Nothing Playing</h2>
@@ -20,20 +20,29 @@
 
   <!-- Active State -->
   <div id="np-active-state" class="relative h-full w-full overflow-hidden">
-    <!-- Ambient wash: blurred cover, full-view, no halo (Century Now Playing) -->
+    <!-- Fallback blurred cover art + Dual-Buffer OKLCH 3-Blob Ambient Mesh -->
     <div
       id="np-backdrop-art"
-      class="absolute -inset-16 bg-cover bg-center scale-110 blur-[80px] opacity-45 pointer-events-none transition-all duration-700"
+      class="absolute -inset-16 bg-cover bg-center scale-110 blur-[80px] opacity-25 pointer-events-none transition-all duration-700"
     ></div>
+    <div id="np-ambient-mesh-a" class="ambient-mesh-layer opacity-100">
+      <div class="ambient-blob ambient-blob-1"></div>
+      <div class="ambient-blob ambient-blob-2"></div>
+      <div class="ambient-blob ambient-blob-3"></div>
+    </div>
+    <div id="np-ambient-mesh-b" class="ambient-mesh-layer opacity-0">
+      <div class="ambient-blob ambient-blob-1"></div>
+      <div class="ambient-blob ambient-blob-2"></div>
+      <div class="ambient-blob ambient-blob-3"></div>
+    </div>
     <div class="absolute inset-0 bg-zinc-950/35 pointer-events-none"></div>
 
     <!-- Desktop Layout (>= lg) -->
     <div class="hidden lg:flex relative z-10 h-full w-full overflow-hidden pb-24">
       <!-- Left Column: Large Square Cover & Metadata -->
       <div class="flex-1 flex flex-col items-center justify-center p-6 xl:p-10 relative overflow-hidden">
-
         <div class="relative z-10 w-full max-w-[min(520px,calc(100dvh-310px))] flex flex-col">
-          <div class="relative w-full aspect-square bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden flex items-center justify-center">
+          <div class="relative w-full aspect-square bg-zinc-900 border border-zinc-700 shadow-2xl overflow-hidden flex items-center justify-center radius-card">
             <img id="np-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
             <div id="np-cover-fallback" class="absolute inset-0 flex flex-col items-center justify-center text-zinc-400 pointer-events-none">
               <i data-lucide="disc" class="w-16 h-16"></i>
@@ -83,9 +92,13 @@
         </div>
       </div>
 
-      <!-- Right Column: Queue / Lyrics Tabbed Panel -->
-      <div class="w-[300px] xl:w-[340px] 2xl:w-[380px] shrink-0 border-l border-zinc-700 bg-zinc-950 flex flex-col h-full">
-        <div class="h-11 px-3 border-b border-zinc-700 flex items-center justify-between shrink-0">
+      <!-- Right Column: Resizable Queue / Lyrics Tabbed Panel (280px - 720px) -->
+      <div id="np-right-rail" class="relative w-[360px] shrink-0 border-l border-zinc-700/80 bg-zinc-950/85 backdrop-blur-md flex flex-col h-full">
+        <!-- Draggable Resize Handle -->
+        <div id="np-rail-resizer" title="Drag to resize Queue / Lyrics panel"
+          class="absolute inset-y-0 -left-1 w-2 cursor-col-resize z-20 hover:bg-emerald-400/40 transition-colors"></div>
+
+        <div class="h-11 px-3 border-b border-zinc-700/80 flex items-center justify-between shrink-0">
           <div class="flex items-center gap-1">
             <button
               id="np-tab-queue"
@@ -116,20 +129,20 @@
         </div>
 
         <!-- Tab 1: Queue List -->
-        <div id="np-panel-queue" class="flex-1 overflow-y-auto divide-y divide-zinc-800/60"></div>
+        <div id="np-panel-queue" class="flex-1 overflow-y-auto"></div>
 
         <!-- Tab 2: Lyrics Canvas -->
-        <div id="np-panel-lyrics" class="hidden flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div id="np-panel-lyrics" class="hidden flex-1 min-h-0 flex flex-col overflow-hidden relative">
           <!-- Lyrics Toolbar (Mode Toggle + Lyric Search) -->
           <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between gap-2 shrink-0">
-            <div id="np-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-950">
-          <button type="button" data-lyrics-toggle="romaji"
-            class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
-          <button type="button" data-lyrics-toggle="translated"
-            class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
-        </div>
+            <div id="np-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-950 radius-inner overflow-hidden">
+              <button type="button" data-lyrics-toggle="romaji"
+                class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
+              <button type="button" data-lyrics-toggle="translated"
+                class="lyrics-mode-btn px-2 py-0.5 text-[11px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
+            </div>
             <span id="np-lyrics-preparing" class="hidden text-[10px] font-mono text-emerald-400 animate-pulse">preparing readings...</span>
-            <div id="np-offset-controls" class="hidden items-center gap-1 border border-zinc-700 bg-zinc-950 px-1.5 py-0.5">
+            <div id="np-offset-controls" class="hidden items-center gap-1 border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 radius-inner">
               <button id="np-offset-minus" type="button" aria-label="Lyrics earlier" class="w-5 h-5 flex items-center justify-center text-zinc-400 hover:text-zinc-100 text-xs font-mono">−</button>
               <span id="np-offset-value" class="text-[11px] font-mono text-emerald-400 px-1">0.0s</span>
               <button id="np-offset-plus" type="button" aria-label="Lyrics later" class="w-5 h-5 flex items-center justify-center text-zinc-400 hover:text-zinc-100 text-xs font-mono">+</button>
@@ -144,6 +157,11 @@
             </button>
           </div>
           <div id="np-lyrics-scroll" class="flex-1 overflow-y-auto px-4 py-6 space-y-2"></div>
+          <button id="np-lyrics-back-pill" type="button"
+            class="hidden pill-round absolute bottom-4 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 bg-emerald-400 text-zinc-950 text-[11px] font-mono font-semibold shadow-xl items-center gap-1.5">
+            <i data-lucide="locate-fixed" class="w-3.5 h-3.5"></i>
+            <span>Back to current line</span>
+          </button>
         </div>
       </div>
     </div>
@@ -173,7 +191,7 @@
 
       <!-- Center: Cover or Overlay (Queue / Lyrics) -->
       <div id="np-mobile-art-panel" class="flex-1 min-h-0 flex flex-col items-center justify-center py-4">
-        <div class="relative w-full max-w-[min(300px,38dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl">
+        <div class="relative w-full max-w-[min(300px,38dvh)] aspect-square bg-zinc-900 border border-zinc-700 overflow-hidden flex items-center justify-center shadow-2xl radius-card">
           <img id="np-mobile-cover-img" src="" alt="" class="hidden relative w-full h-full object-cover" />
           <i id="np-mobile-cover-fallback" data-lucide="disc" class="absolute inset-0 m-auto w-12 h-12 text-zinc-400 pointer-events-none"></i>
         </div>
@@ -193,16 +211,16 @@
       </div>
 
       <!-- Mobile Overlay Panel (Lyrics or Queue) -->
-      <div id="np-mobile-overlay-panel" class="hidden flex-1 min-h-0 my-3 bg-zinc-900/60 border border-zinc-700 flex flex-col overflow-hidden">
+      <div id="np-mobile-overlay-panel" class="hidden flex-1 min-h-0 my-3 bg-zinc-900/60 border border-zinc-700 flex flex-col overflow-hidden radius-card">
         <div class="h-10 px-3 border-b border-zinc-700 flex items-center justify-between shrink-0">
           <span id="np-mobile-overlay-title" class="text-xs font-mono uppercase tracking-wider text-zinc-200">Synced Lyrics</span>
           <div class="flex items-center gap-1.5">
-            <div id="np-mobile-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-950">
-          <button type="button" data-lyrics-toggle="romaji"
-            class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
-          <button type="button" data-lyrics-toggle="translated"
-            class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
-        </div>
+            <div id="np-mobile-lyrics-mode-group" class="hidden items-center border border-zinc-700 bg-zinc-950 radius-inner overflow-hidden">
+              <button type="button" data-lyrics-toggle="romaji"
+                class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-zinc-100">Romaji</button>
+              <button type="button" data-lyrics-toggle="translated"
+                class="lyrics-mode-btn px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 hover:text-zinc-100">Translated</button>
+            </div>
             <button id="np-mobile-overlay-close" type="button" class="p-1 text-zinc-400 hover:text-zinc-100">
               <i data-lucide="x" class="w-4 h-4"></i>
             </button>
@@ -274,4 +292,3 @@
     </div>
   </div>
 </section>
-

@@ -1,4 +1,4 @@
-<!-- VIEW: ALBUM / SINGLES DETAIL (Layer 3) -->
+<!-- VIEW: ALBUM / SINGLES DETAIL (Unified DetailHeader + Preserved Cover Fallback Chain) -->
 <section id="view-album-detail" class="hidden p-6 md:p-8 pb-44 md:pb-28 space-y-6">
   <div>
     <button
@@ -13,7 +13,7 @@
 
   <!-- Album Header Studio Panel -->
   <div class="studio-panel p-5 sm:p-6 bg-zinc-900/60 flex flex-col md:flex-row gap-6 items-start md:items-end">
-    <div class="w-44 h-44 sm:w-48 sm:h-48 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center relative">
+    <div class="w-44 h-44 sm:w-48 sm:h-48 bg-zinc-950 border border-zinc-700 overflow-hidden shrink-0 flex items-center justify-center relative radius-card shadow-2xl">
       <img id="album-detail-cover" src="" alt="" class="hidden w-full h-full object-cover" />
       <div id="album-detail-cover-fallback" class="flex flex-col items-center justify-center text-zinc-400">
         <i data-lucide="disc" class="w-10 h-10 mb-1"></i>
@@ -23,7 +23,7 @@
 
     <div class="flex-1 min-w-0 space-y-2">
       <div id="album-detail-badge" class="text-[11px] font-mono uppercase tracking-wider text-emerald-400">
-        Layer 3 · Album Release
+        Album Release
       </div>
       <h1 id="album-detail-title" class="text-2xl sm:text-4xl font-display font-normal tracking-tight text-zinc-100 break-words leading-tight"></h1>
       <div class="flex flex-wrap items-center gap-2 text-xs font-mono text-zinc-400">
@@ -31,7 +31,7 @@
         <span id="album-detail-meta"></span>
       </div>
 
-      <!-- Actions: Play, Shuffle, Star, Edit Cover/Tags, and Overflow [...] Menu -->
+      <!-- Actions: Play, Shuffle, Radio, Star, and Overflow [...] Menu -->
       <div class="pt-3 flex flex-wrap items-center gap-2">
         <button
           id="album-play-btn"
@@ -49,6 +49,16 @@
         >
           <i data-lucide="shuffle" class="w-3.5 h-3.5"></i>
           <span>SHUFFLE</span>
+        </button>
+
+        <button
+          id="album-radio-btn"
+          type="button"
+          title="Start Radio from this album"
+          class="h-9 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 hover:text-emerald-400 inline-flex items-center gap-1.5 transition-colors"
+        >
+          <i data-lucide="radio" class="w-3.5 h-3.5"></i>
+          <span>RADIO</span>
         </button>
 
         <button
@@ -75,7 +85,7 @@
 
           <div
             id="album-more-menu"
-            class="hidden absolute left-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono"
+            class="hidden absolute left-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono radius-card"
           >
             <button id="album-menu-shuffle" type="button" class="w-full px-3.5 py-2 text-left hover:bg-zinc-800 flex items-center gap-2.5 text-zinc-200">
               <i data-lucide="shuffle" class="w-3.5 h-3.5 text-zinc-400"></i>

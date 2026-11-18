@@ -1,12 +1,20 @@
-<!-- VIEW: HOME (Honest History Sections + Recently Added Albums) -->
-<section id="view-home" class="p-6 md:p-8 pb-44 md:pb-28 space-y-10">
-  <!-- Main Header -->
-  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-4 border-b border-zinc-700">
+<!-- VIEW: HOME (Photon Algorithmic Shelves + Made For You + Quick Pick 4-Row Pager) -->
+<section id="view-home" class="p-6 md:p-8 pb-44 md:pb-28 space-y-9">
+  <!-- Main Greeting Header -->
+  <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-3 pb-4 border-b border-zinc-800">
     <div>
-      <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-none">Library</h1>
-      <p class="font-mono text-xs text-zinc-400 tracking-wide mt-2">Personal Music Collection</p>
+      <h1 id="home-greeting" class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-none">Good evening</h1>
+      <p id="home-subtitle" class="font-mono text-xs text-zinc-400 tracking-wide mt-2">Personal Music Collection · plenrip.planrift.me</p>
     </div>
     <div class="flex items-center gap-2 self-start sm:self-auto">
+      <button
+        id="home-radio-btn"
+        type="button"
+        class="h-8 px-3.5 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center gap-1.5 transition-colors"
+      >
+        <i data-lucide="radio" class="w-3.5 h-3.5"></i>
+        <span>Personal Radio</span>
+      </button>
       <button
         id="home-refresh-btn"
         type="button"
@@ -18,56 +26,85 @@
     </div>
   </div>
 
-  <!-- 1. Continue Listening (Conditional: only when tracks are in-progress) -->
+  <!-- Remote Now Playing Activity Banner (from Subsonic getNowPlaying) -->
+  <div id="home-remote-banner" class="hidden studio-panel p-3.5 bg-zinc-900/70 flex items-center justify-between gap-3"></div>
+
+  <!-- 1. Made For You (260x61 Compact Algorithmic Mix Cards) -->
+  <div id="home-section-mfy" class="hidden space-y-3.5">
+    <div class="flex items-end justify-between gap-2">
+      <div>
+        <h2 class="font-display font-normal text-xl sm:text-2xl tracking-tight text-zinc-100 leading-none">Made for You</h2>
+        <p class="font-mono text-xs text-zinc-400 tracking-wide mt-1">Dynamic mixes tailored to your 3-window taste profile</p>
+      </div>
+    </div>
+    <div id="home-mfy-grid" class="flex flex-wrap gap-3"></div>
+  </div>
+
+  <!-- 2. Continue Listening (In-progress local positions + Subsonic getBookmarks) -->
   <div id="home-section-continue" class="hidden space-y-4">
-    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-zinc-800">
+    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-2.5 border-b border-zinc-800/80">
       <div>
         <h2 class="font-display font-normal text-xl sm:text-2xl tracking-tight text-zinc-100 leading-none">Continue Listening</h2>
-        <p id="home-continue-meta" class="font-mono text-xs text-zinc-400 tracking-wide mt-1.5">In progress</p>
+        <p id="home-continue-meta" class="font-mono text-xs text-zinc-400 tracking-wide mt-1">Pick up right where you left off</p>
       </div>
     </div>
     <div id="home-continue-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
   </div>
 
-  <!-- 2. Quick Pick (Conditional: deterministic daily seeded mix from history & favourites) -->
+  <!-- 3. Quick Pick (4-Row Horizontal-Paged Track Grid + Play All) -->
   <div id="home-section-quick-pick" class="hidden space-y-4">
-    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-zinc-800">
+    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-2.5 border-b border-zinc-800/80">
       <div>
         <h2 class="font-display font-normal text-xl sm:text-2xl tracking-tight text-zinc-100 leading-none">Quick Pick</h2>
-        <p id="home-quick-pick-meta" class="font-mono text-xs text-zinc-400 tracking-wide mt-1.5">Daily mix</p>
+        <p id="home-quick-pick-meta" class="font-mono text-xs text-zinc-400 tracking-wide mt-1">Instant tracks matched to this time of day</p>
+      </div>
+      <div class="flex items-center gap-1.5 self-start sm:self-auto">
+        <button id="home-quick-pick-play-all" type="button"
+          class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-emerald-400 inline-flex items-center gap-1.5 transition-colors">
+          <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+          <span>PLAY ALL</span>
+        </button>
+        <button id="home-quick-pick-prev" type="button" aria-label="Previous Quick Picks"
+          class="w-8 h-8 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
+          <i data-lucide="chevron-left" class="w-4 h-4"></i>
+        </button>
+        <button id="home-quick-pick-next" type="button" aria-label="Next Quick Picks"
+          class="w-8 h-8 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 flex items-center justify-center text-zinc-300">
+          <i data-lucide="chevron-right" class="w-4 h-4"></i>
+        </button>
       </div>
     </div>
-    <div id="home-quick-pick-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
+    <div id="home-quick-pick-grid" class="flex gap-4 overflow-x-auto pb-1 scroll-smooth"></div>
   </div>
 
-  <!-- 3. Listen Again (Conditional: tracks with 2+ plays rested for 7+ days) -->
+  <!-- 4. Listen Again (Rested high-affinity tracks with MMR diversity) -->
   <div id="home-section-listen-again" class="hidden space-y-4">
-    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-zinc-800">
+    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-2.5 border-b border-zinc-800/80">
       <div>
         <h2 class="font-display font-normal text-xl sm:text-2xl tracking-tight text-zinc-100 leading-none">Listen Again</h2>
-        <p class="font-mono text-xs text-zinc-400 tracking-wide mt-1.5">All-time hits · Rested for a while</p>
+        <p class="font-mono text-xs text-zinc-400 tracking-wide mt-1">All-time favourites · Rested &amp; ready</p>
       </div>
     </div>
     <div id="home-listen-again-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
   </div>
 
-  <!-- 4. Forgotten Favourite? (Conditional: starred tracks unplayed for 30+ days) -->
+  <!-- 5. Forgotten Favourite? (Starred / loved tracks unplayed beyond silence threshold) -->
   <div id="home-section-forgotten" class="hidden space-y-4">
-    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-zinc-800">
+    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-2.5 border-b border-zinc-800/80">
       <div>
         <h2 class="font-display font-normal text-xl sm:text-2xl tracking-tight text-zinc-100 leading-none">Forgotten Favourite?</h2>
-        <p class="font-mono text-xs text-zinc-400 tracking-wide mt-1.5">Starred · Unplayed for 30+ days</p>
+        <p id="home-forgotten-meta" class="font-mono text-xs text-zinc-400 tracking-wide mt-1">Starred &amp; loved · Unplayed for 45+ days</p>
       </div>
     </div>
     <div id="home-forgotten-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>
   </div>
 
-  <!-- 5. Recently Added Albums -->
-  <div class="space-y-4">
-    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-3 border-b border-zinc-800">
+  <!-- 6. Recently Added Albums -->
+  <div id="home-section-recent" class="space-y-4">
+    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-2.5 border-b border-zinc-800/80">
       <div>
         <h2 class="font-display font-normal text-xl sm:text-2xl tracking-tight text-zinc-100 leading-none">Recently Added</h2>
-        <p class="font-mono text-xs text-zinc-400 tracking-wide mt-1.5">Latest album additions to your server</p>
+        <p class="font-mono text-xs text-zinc-400 tracking-wide mt-1">Latest album additions to your server</p>
       </div>
       <div class="flex items-center gap-2 self-start sm:self-auto">
         <button

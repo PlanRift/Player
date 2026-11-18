@@ -1,5 +1,5 @@
-<!-- VIEW: ARTISTS (Layer 1: Artist Index with LibraryToolbar, SortMenu, Starred Filter & Pagination) -->
-<section id="view-artists" class="hidden p-6 md:p-8 pb-44 md:pb-28 space-y-6">
+<!-- VIEW: ARTISTS (Artist Index with Sticky A-Z Jump Bar, SortMenu, Starred Filter & Pagination) -->
+<section id="view-artists" class="hidden p-6 md:p-8 pb-44 md:pb-28 space-y-5">
   <!-- Section Header -->
   <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pb-4 border-b border-zinc-700">
     <div>
@@ -9,13 +9,13 @@
   </div>
 
   <!-- LibraryToolbar -->
-  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-zinc-900/60 border border-zinc-800">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-zinc-900/60 border border-zinc-800 studio-panel">
     <div class="relative w-full sm:w-72 md:w-80">
       <i data-lucide="search" class="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
       <input
         id="artists-filter-input"
         type="text"
-        placeholder="Filter artists (original or translated)..."
+        placeholder="Filter artists (original, romaji, or translated)..."
         aria-label="Filter artists"
         class="w-full h-9 pl-9 pr-8 bg-zinc-900 border border-zinc-700 text-xs text-zinc-100 font-mono placeholder-zinc-400"
       />
@@ -42,7 +42,7 @@
         </button>
         <div
           id="artists-sort-menu"
-          class="hidden absolute right-0 mt-1 w-48 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono"
+          class="hidden absolute right-0 mt-1 w-52 bg-zinc-900 border border-zinc-700 shadow-2xl z-30 py-1 text-xs font-mono radius-card"
         >
           <button type="button" data-sort="name-asc" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-100">
             <span>Name A-Z</span>
@@ -62,6 +62,14 @@
           </button>
           <button type="button" data-sort="album-count" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
             <span>Most albums</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="track-count" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Most tracks</span>
+            <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
+          </button>
+          <button type="button" data-sort="recently-added" class="w-full px-3 py-2 text-left hover:bg-zinc-800 flex items-center justify-between text-zinc-300">
+            <span>Recently added</span>
             <i data-lucide="check" class="sort-check hidden w-3.5 h-3.5 text-emerald-400"></i>
           </button>
         </div>
@@ -93,6 +101,9 @@
       </span>
     </div>
   </div>
+
+  <!-- Sticky A–Z Alphabetical Quick-Jump Strip -->
+  <div id="artists-az-bar" class="sticky top-2 z-20 px-2.5 py-1.5 bg-zinc-900/90 backdrop-blur-md border border-zinc-800 flex items-center gap-0.5 overflow-x-auto text-[10.5px] font-mono studio-panel"></div>
 
   <!-- Artists Grid -->
   <div id="artists-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"></div>

@@ -32,6 +32,17 @@ const STORAGE_KEYS = {
   LYRICS_ROMAJI_PREFIX: 'century.lyrics.romaji.',
   LYRICS_RELAY_URL: 'century.lyrics.relayUrl',
   LYRICS_DISPLAY_PREFIX: 'century.lyrics.display.',
+  THEME_PALETTE: 'century.appearance.palette',
+  THEME_RADIUS: 'century.appearance.radius',
+  DENSE_VARIANT: 'century.appearance.dense',
+  PAUSE_ANIMATIONS: 'century.settings.pauseAnimations',
+  ADVENTUROUSNESS: 'century.discovery.adventurousness',
+  SILENCE_DAYS: 'century.discovery.silenceDays',
+  STARRED_COOLDOWN_DAYS: 'century.discovery.starredCooldownDays',
+  QUICKPICK_EXCLUSION_HOURS: 'century.discovery.quickPickExclusionHours',
+  MAX_PER_ARTIST_SHELF: 'century.discovery.maxPerArtistShelf',
+  RECENT_SEARCHES: 'century.search.recent',
+  NP_PANEL_WIDTH: 'century.nowPlaying.panelWidth',
 };
 
 const DEFAULT_CONFIG = {
@@ -422,6 +433,91 @@ class SubsonicClient {
     await this.request('deletePlaylist', { id });
   }
 
+  async scrobble(id, options = {}) {
+    if (!id) return;
+    const params = { id };
+    if (typeof options === 'boolean') {
+      params.submission = options;
+    } else if (options && typeof options === 'object') {
+      params.submission = options.submission !== undefined ? Boolean(options.submission) : true;
+      if (Number.isFinite(options.time) && options.time > 0) params.time = Math.round(options.time);
+    }
+    try {
+      await this.request('scrobble', params);
+    } catch {
+      // Ignore scrobble failures or unsupported servers
+    }
+  }
+
+  async getBookmarks() {
+    try {
+      const res = await this.request('getBookmarks');
+      return res.bookmarks?.bookmark || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async createBookmark(id, positionMs, comment = '') {
+    if (!id) return;
+    try {
+      await this.request('createBookmark', {
+        id,
+        position: Math.max(0, Math.round(positionMs)),
+        comment: comment || undefined,
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  async deleteBookmark(id) {
+    if (!id) return;
+    try {
+      await this.request('deleteBookmark', { id });
+    } catch {
+      // Ignore
+    }
+  }
+
+  async getNowPlaying() {
+    try {
+      const res = await this.request('getNowPlaying');
+      return res.nowPlaying?.entry || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async getRandomSongs(size = 20) {
+    try {
+      const res = await this.request('getRandomSongs', { size });
+      return res.randomSongs?.song || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async getSimilarSongs2(id, count = 20) {
+    if (!id) return [];
+    try {
+      const res = await this.request('getSimilarSongs2', { id, count });
+      return res.similarSongs2?.song || [];
+    } catch {
+      return [];
+    }
+  }
+
+  async getTopSongs(artistName, count = 20) {
+    if (!artistName) return [];
+    try {
+      const res = await this.request('getTopSongs', { artist: artistName, count });
+      return res.topSongs?.song || [];
+    } catch {
+      return [];
+    }
+  }
+
   getCoverArtUrl(id, size = 300) {
     if (!id) return '';
     const params = { id, size };
@@ -560,6 +656,38 @@ class SubsonicClient {
         duration: 0,
         song: [],
       };
+    }
+
+    const mergedIds =
+      typeof albumOrId === 'object' &&
+      albumOrId &&
+      Array.isArray(albumOrId.mergedAlbumIds) &&
+      albumOrId.mergedAlbumIds.length > 1
+        ? albumOrId.mergedAlbumIds
+        : null;
+
+    if (mergedIds) {
+      const results = await Promise.all(mergedIds.map((mid) => this.getAlbum(mid).catch(() => null)));
+      const valid = results.filter(Boolean);
+      const rep = valid[0] || (await this.getAlbum(id));
+      const groups = valid.map((a) => a.song || []);
+      const mergedSongs = window.PlenripDiscovery?.mergeAlbumSongs
+        ? window.PlenripDiscovery.mergeAlbumSongs(groups)
+        : groups.flat();
+      const distinctArtists = new Set(valid.map((a) => String(a.artist || '').trim()).filter(Boolean));
+      const multiArtist = distinctArtists.size > 1;
+      const combined = {
+        ...rep,
+        artist: multiArtist ? 'Various Artists' : rep.artist,
+        artistId: multiArtist ? undefined : rep.artistId,
+        song: mergedSongs,
+        songCount: mergedSongs.length,
+        duration: mergedSongs.reduce((acc, s) => acc + (s.duration || 0), 0),
+        mergedAlbumIds: mergedIds,
+      };
+      if (!combined.coverArt && albumOrId.coverArt) combined.coverArt = albumOrId.coverArt;
+      if (albumOrId._cachedCoverUrl) combined._cachedCoverUrl = albumOrId._cachedCoverUrl;
+      return combined;
     }
 
     const fetched = await this.getAlbum(id);
@@ -2067,6 +2195,9 @@ class HistoryStore {
     localStorage.removeItem(STORAGE_KEYS.PLAYBACK_POSITIONS);
     localStorage.removeItem(STORAGE_KEYS.QUICKPICK_DATE);
     localStorage.removeItem(STORAGE_KEYS.QUICKPICK_SONGS);
+    if (window.PlenripDiscovery?.clearPlayEventLog) {
+      void window.PlenripDiscovery.clearPlayEventLog();
+    }
   }
 }
 
@@ -2256,13 +2387,31 @@ class GaplessAudioEngine {
     // Playback state
     this.currentSong = null;
     this.queue = [];
+    this.queueMeta = [];
     this.originalQueue = [];
+    this.originalQueueMeta = [];
+    this.contextName = '';
+    this.contextSource = 'other';
+    this._uidCounter = 0;
     this.currentIndex = -1;
     this.isPlaying = false;
     this.currentTime = 0;
     this.duration = 0;
     this.repeatMode = 'off'; // 'off' | 'all' | 'one'
     this.shuffle = false;
+
+    // Discovery & Radio session feedback state
+    this.trackStartedAt = 0;
+    this.trackSource = 'other';
+    this.trackStarredAtStart = false;
+    this.trackSlotAtStart = null;
+    this.nowPlayingScrobbled = false;
+    this.submissionScrobbled = false;
+    this.pauseAbandonTimer = null;
+    this.pendingTransitionReason = null;
+    this.sessionSkipStreak = 0;
+    this.sessionDeepCutStreak = 0;
+    this.explorationSuppressed = false;
 
     const savedVol = parseFloat(localStorage.getItem(STORAGE_KEYS.VOLUME) || '0.85');
     this.volume = Number.isNaN(savedVol) ? 0.85 : Math.max(0, Math.min(1, savedVol));
@@ -2286,8 +2435,149 @@ class GaplessAudioEngine {
     this.bindDeckEvents('B', this.deckB);
     this.setupMediaSession();
 
+    if (typeof window !== 'undefined') {
+      const flushOnUnload = () => {
+        if (this.currentSong) {
+          this.historyStore.savePlaybackPosition(this.currentSong, this.currentTime, this.duration);
+          this.finishActiveTrackSession(this.isPlaying ? 'select' : 'pause-abandon');
+        }
+      };
+      window.addEventListener('beforeunload', flushOnUnload);
+      window.addEventListener('pagehide', flushOnUnload);
+    }
+
+    if (window.PlenripDiscovery?.migrateLegacyHistory) {
+      void window.PlenripDiscovery.migrateLegacyHistory(STORAGE_KEYS.HISTORY);
+    }
+
     if (this.outputDeviceId && this.outputDeviceId !== 'default') {
       this.setOutputDevice(this.outputDeviceId);
+    }
+  }
+
+  makeQueueMeta(song, origin = 'context', extra = {}) {
+    this._uidCounter += 1;
+    const reasonInfo = window.PlenripDiscovery?.getRadioReason?.(song?.id) || null;
+    return {
+      uid: `q-${Date.now()}-${this._uidCounter}`,
+      songId: song?.id || '',
+      origin, // 'user' | 'context' | 'autoplay'
+      why: extra.why || (origin === 'autoplay' ? reasonInfo?.why || '' : ''),
+      slot: extra.slot || (origin === 'autoplay' ? reasonInfo?.slot || 'comfort' : 'comfort'),
+    };
+  }
+
+  syncQueueMetaLength() {
+    while (this.queueMeta.length < this.queue.length) {
+      const idx = this.queueMeta.length;
+      this.queueMeta.push(this.makeQueueMeta(this.queue[idx], 'context'));
+    }
+    if (this.queueMeta.length > this.queue.length) {
+      this.queueMeta.length = this.queue.length;
+    }
+  }
+
+  getQueueSections() {
+    this.syncQueueMetaLength();
+    const curIdx = this.currentIndex;
+    const current =
+      curIdx >= 0 && curIdx < this.queue.length
+        ? { song: this.queue[curIdx], index: curIdx, meta: this.queueMeta[curIdx] }
+        : null;
+    const upNext = [];
+    const continuePlaying = [];
+    const autoplay = [];
+
+    const startAfter = curIdx >= 0 ? curIdx + 1 : 0;
+    for (let i = startAfter; i < this.queue.length; i += 1) {
+      const entry = { song: this.queue[i], index: i, meta: this.queueMeta[i] };
+      if (entry.meta?.origin === 'user') upNext.push(entry);
+      else if (entry.meta?.origin === 'autoplay') autoplay.push(entry);
+      else continuePlaying.push(entry);
+    }
+
+    const previous = [];
+    for (let i = 0; i < Math.max(0, curIdx); i += 1) {
+      previous.push({ song: this.queue[i], index: i, meta: this.queueMeta[i] });
+    }
+
+    return {
+      previous,
+      current,
+      upNext,
+      continuePlaying,
+      autoplay,
+      contextName: this.contextName || '',
+      contextSource: this.contextSource || 'other',
+    };
+  }
+
+  clearPauseAbandonTimer() {
+    if (this.pauseAbandonTimer) {
+      clearTimeout(this.pauseAbandonTimer);
+      this.pauseAbandonTimer = null;
+    }
+  }
+
+  schedulePauseAbandonTimer() {
+    this.clearPauseAbandonTimer();
+    if (!this.currentSong) return;
+    const targetId = this.currentSong.id;
+    this.pauseAbandonTimer = setTimeout(() => {
+      this.pauseAbandonTimer = null;
+      if (!this.isPlaying && this.currentSong?.id === targetId) {
+        this.finishActiveTrackSession('pause-abandon');
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  finishActiveTrackSession(reason = 'select') {
+    this.clearPauseAbandonTimer();
+    const song = this.currentSong;
+    if (!song || !this.trackStartedAt) return;
+    const listenedSec = Math.max(0, this.listenedMs / 1000);
+    const durSec = Math.max(0, this.duration || song.duration || 0);
+    const startedAt = this.trackStartedAt;
+    const source = this.trackSource || 'other';
+    const slot = this.trackSlotAtStart;
+
+    // Reset start stamp so duplicate finish calls are no-ops
+    this.trackStartedAt = 0;
+
+    if (listenedSec < 0.5 && reason !== 'error') return;
+
+    const D = window.PlenripDiscovery;
+    if (D?.appendPlayEvent) {
+      const eventObj = {
+        id: `${song.id}:${startedAt}`,
+        songId: song.id,
+        artistId: song.artistId || undefined,
+        albumId: song.albumId || undefined,
+        startedAt,
+        listenedSeconds: Math.round(listenedSec * 10) / 10,
+        endPosition: Math.round((this.currentTime || 0) * 10) / 10,
+        endReason: reason,
+        source,
+        starredAtStart: Boolean(this.trackStarredAtStart),
+        duration: Math.round(durSec),
+      };
+
+      // Update live session radio feedback counters
+      if (D.isCompletedPlay(eventObj)) {
+        this.sessionSkipStreak = 0;
+        if (slot === 'deep-cut') this.sessionDeepCutStreak += 1;
+        else this.sessionDeepCutStreak = 0;
+      } else if (D.isSkip(eventObj) && (reason === 'next' || reason === 'select')) {
+        this.sessionSkipStreak += 1;
+        this.sessionDeepCutStreak = 0;
+        if (this.sessionSkipStreak >= 2) {
+          this.explorationSuppressed = true;
+        }
+      }
+
+      void D.appendPlayEvent(eventObj).then(() => {
+        D.notePlayEventForCooccurrence();
+      });
     }
   }
 
@@ -2446,6 +2736,7 @@ class GaplessAudioEngine {
       // The active deck failed to load/decode its stream. Try the raw
       // stream once before reporting the failure.
       if (this.retryRawStream(audio)) return;
+      this.finishActiveTrackSession('error');
       this.lastPlaybackError = audio.error;
       this.isPlaying = false;
       this.notify();
@@ -2483,9 +2774,27 @@ class GaplessAudioEngine {
           songId: this.currentSong.id,
           artistId: this.currentSong.artistId || '',
           albumId: this.currentSong.albumId || '',
-          playedAt: Date.now(),
+          playedAt: this.trackStartedAt || Date.now(),
           playDurationMs: Math.round(this.listenedMs),
         });
+      }
+
+      // Last.fm / Subsonic threshold scrobble: min(50% duration, 240s) for tracks > 30s
+      if (this.currentSong && !this.submissionScrobbled && window.PlenripDiscovery) {
+        const thresholdMs = window.PlenripDiscovery.getScrobbleThresholdMs(dur);
+        if (thresholdMs !== null && this.listenedMs >= thresholdMs) {
+          const startedAt = this.trackStartedAt || Date.now();
+          const key = window.PlenripDiscovery.makeScrobbleKey(this.currentSong.id, startedAt);
+          this.submissionScrobbled = true;
+          if (!window.PlenripDiscovery.hasScrobbledKeySync(key)) {
+            void window.PlenripDiscovery.markScrobbledKey(key);
+            const targetSongId = this.currentSong.id;
+            this.client
+              .scrobble(targetSongId, { submission: true, time: startedAt })
+              .then(() => window.PlenripDiscovery.flushScrobbleQueue(this.client))
+              .catch(() => window.PlenripDiscovery.enqueueFailedScrobble({ songId: targetSongId, startedAt }));
+          }
+        }
       }
 
       // Trigger equal-power crossfade when entering crossfade window (suppressed on consecutive same-album tracks)
@@ -2533,18 +2842,21 @@ class GaplessAudioEngine {
           songId: this.currentSong.id,
           artistId: this.currentSong.artistId || '',
           albumId: this.currentSong.albumId || '',
-          playedAt: Date.now(),
+          playedAt: this.trackStartedAt || Date.now(),
           playDurationMs: Math.round(this.listenedMs || (this.duration || 15) * 1000),
         });
       }
 
+      this.finishActiveTrackSession('completed');
+
       if (this.repeatMode === 'one') {
         audio.currentTime = 0;
-        this.listenedMs = 0;
-        this.recordedHistoryForTrack = null;
+        this.onNewTrackStarted(this.currentSong);
         audio.play().catch((err) => this.handlePlayRejection(err, audio));
         return;
       }
+
+      this.pendingTransitionReason = 'completed';
 
       const nextIdx = this.getNextQueueIndex();
       if (nextIdx !== -1) {
@@ -2597,10 +2909,25 @@ class GaplessAudioEngine {
   }
 
   onNewTrackStarted(song) {
+    this.clearPauseAbandonTimer();
     this.recordedHistoryForTrack = null;
     this.listenedMs = 0;
     this.lastTimeUpdatePerfMs = performance.now();
     this.lastSavedPositionSec = 0;
+
+    this.syncQueueMetaLength();
+    const meta = this.currentIndex >= 0 ? this.queueMeta[this.currentIndex] : null;
+    this.trackStartedAt = Date.now();
+    this.submissionScrobbled = false;
+    this.nowPlayingScrobbled = true;
+    this.trackStarredAtStart = Boolean(song?.starred);
+    this.trackSource = meta?.origin === 'autoplay' ? 'radio' : (this.contextSource || 'other');
+    this.trackSlotAtStart = meta?.slot || null;
+
+    if (song?.id && typeof this.client?.scrobble === 'function') {
+      this.client.scrobble(song.id, { submission: false }).catch(() => {});
+    }
+
     this.updateMediaSession(song);
     this.preloadNextInIdleDeck();
   }
@@ -2608,6 +2935,12 @@ class GaplessAudioEngine {
   transitionToNextTrack(nextIdx) {
     const nextSong = this.queue[nextIdx];
     if (!nextSong) return;
+
+    const reason = this.pendingTransitionReason || 'select';
+    this.pendingTransitionReason = null;
+    if (this.currentSong) {
+      this.finishActiveTrackSession(reason);
+    }
 
     this.clearFadeTimer();
     this.ensureWebAudioGraph();
@@ -2640,6 +2973,11 @@ class GaplessAudioEngine {
   startCrossfadeTransition(nextIdx) {
     const nextSong = this.queue[nextIdx];
     if (!nextSong) return;
+
+    this.pendingTransitionReason = null;
+    if (this.currentSong) {
+      this.finishActiveTrackSession('completed');
+    }
 
     this.ensureWebAudioGraph();
     this.isCrossfading = true;
@@ -2694,6 +3032,12 @@ class GaplessAudioEngine {
   }
 
   loadAndPlayOnActiveDeck(song, index, startTimeSeconds = 0) {
+    const reason = this.pendingTransitionReason || 'select';
+    this.pendingTransitionReason = null;
+    if (this.currentSong) {
+      this.finishActiveTrackSession(reason);
+    }
+
     this.clearFadeTimer();
     this.ensureWebAudioGraph();
 
@@ -2728,49 +3072,96 @@ class GaplessAudioEngine {
 
   playQueue(songs, startIndex = 0, options = {}) {
     if (!Array.isArray(songs) || songs.length === 0) return;
-    const original = [...songs];
-    let targetQueue = [...songs];
-    let resolvedIdx = Math.max(0, Math.min(startIndex, targetQueue.length - 1));
-    let targetSong = targetQueue[resolvedIdx];
+    const defaultOrigin = options.origin || (options.source === 'radio' ? 'autoplay' : 'context');
+    const metaLookup = options.radioMeta instanceof Map ? options.radioMeta : null;
+    const buildMetaFor = (s, idx) => {
+      const custom = metaLookup?.get(s?.id) || null;
+      const itemOrigin = idx === 0 && options.seedFirstTrack ? 'context' : defaultOrigin;
+      return this.makeQueueMeta(s, itemOrigin, custom || {});
+    };
+
+    const originalPairs = songs.map((s, idx) => ({ song: s, meta: buildMetaFor(s, idx) }));
+    let targetPairs = [...originalPairs];
+    let resolvedIdx = Math.max(0, Math.min(startIndex, targetPairs.length - 1));
+    let targetPair = targetPairs[resolvedIdx];
 
     if (options.shuffle !== undefined) {
       this.shuffle = Boolean(options.shuffle);
     }
 
-    if (this.shuffle && targetQueue.length > 1) {
+    if (options.contextName !== undefined) {
+      this.contextName = String(options.contextName || '');
+    } else if (!options.preserveContext) {
+      this.contextName = '';
+    }
+    if (options.source) {
+      this.contextSource = options.source;
+    } else if (!options.preserveContext) {
+      this.contextSource = 'other';
+    }
+
+    // Starting a new intentional queue resets skip suppression
+    this.sessionSkipStreak = 0;
+    this.explorationSuppressed = false;
+
+    if (this.shuffle && targetPairs.length > 1) {
       if (options.shuffle && startIndex === 0 && !options.keepFirstTrack) {
-        targetQueue = shuffleSongs(targetQueue);
-        targetSong = targetQueue[0];
+        const shuffledSongs = shuffleSongs(targetPairs.map((p) => p.song));
+        const byId = new Map(targetPairs.map((p) => [p.song.id, p]));
+        targetPairs = shuffledSongs.map((s) => byId.get(s.id) || { song: s, meta: buildMetaFor(s, 0) });
+        targetPair = targetPairs[0];
         resolvedIdx = 0;
       } else {
-        const rest = targetQueue.filter((s) => s.id !== targetSong.id);
-        targetQueue = [targetSong, ...shuffleSongs(rest)];
+        const restSongs = targetPairs.filter((p) => p.song.id !== targetPair.song.id).map((p) => p.song);
+        const shuffledRest = shuffleSongs(restSongs);
+        const byId = new Map(targetPairs.map((p) => [p.song.id, p]));
+        targetPairs = [
+          targetPair,
+          ...shuffledRest.map((s) => byId.get(s.id) || { song: s, meta: buildMetaFor(s, 1) }),
+        ];
         resolvedIdx = 0;
       }
     }
 
-    this.queue = targetQueue;
-    this.originalQueue = original;
-    this.loadAndPlayOnActiveDeck(targetSong, resolvedIdx, options.startTime || 0);
+    this.queue = targetPairs.map((p) => p.song);
+    this.queueMeta = targetPairs.map((p) => p.meta);
+    this.originalQueue = originalPairs.map((p) => p.song);
+    this.originalQueueMeta = originalPairs.map((p) => p.meta);
+    this.pendingTransitionReason = 'select';
+    this.loadAndPlayOnActiveDeck(targetPair.song, resolvedIdx, options.startTime || 0);
   }
 
   playSong(song, newQueue = null, options = {}) {
     if (!song) return;
-    let targetQueue = newQueue ? [...newQueue] : [...this.queue];
-    if (targetQueue.length === 0) targetQueue = [song];
-    const original = [...targetQueue];
-
-    if (this.shuffle && newQueue && newQueue.length > 1) {
-      const rest = targetQueue.filter((s) => s.id !== song.id);
-      targetQueue = [song, ...shuffleSongs(rest)];
+    if (newQueue && Array.isArray(newQueue) && newQueue.length > 0) {
+      const idx = newQueue.findIndex((s) => s.id === song.id);
+      this.playQueue(newQueue, idx >= 0 ? idx : 0, {
+        ...options,
+        keepFirstTrack: true,
+      });
+      return;
     }
 
-    const idx = targetQueue.findIndex((s) => s.id === song.id);
-    const resolvedIdx = idx >= 0 ? idx : 0;
+    this.syncQueueMetaLength();
+    if (this.queue.length === 0) {
+      this.playQueue([song], 0, options);
+      return;
+    }
 
-    this.queue = targetQueue;
-    this.originalQueue = original;
-    this.loadAndPlayOnActiveDeck(song, resolvedIdx, options.startTime || 0);
+    let idx = this.queue.findIndex((s) => s.id === song.id);
+    if (idx < 0) {
+      const insertAt = Math.max(0, this.currentIndex + 1);
+      this.queue.splice(insertAt, 0, song);
+      this.queueMeta.splice(insertAt, 0, this.makeQueueMeta(song, 'context'));
+      this.originalQueue.push(song);
+      this.originalQueueMeta.push(this.makeQueueMeta(song, 'context'));
+      idx = insertAt;
+    }
+
+    if (options.contextName !== undefined) this.contextName = String(options.contextName || '');
+    if (options.source) this.contextSource = options.source;
+    this.pendingTransitionReason = 'select';
+    this.loadAndPlayOnActiveDeck(this.queue[idx], idx, options.startTime || 0);
   }
 
   togglePlayPause() {
@@ -2786,7 +3177,9 @@ class GaplessAudioEngine {
       active.pause();
       this.isPlaying = false;
       this.historyStore.savePlaybackPosition(this.currentSong, this.currentTime, this.duration);
+      this.schedulePauseAbandonTimer();
     } else {
+      this.clearPauseAbandonTimer();
       this.lastTimeUpdatePerfMs = performance.now();
       active.play().catch((err) => this.handlePlayRejection(err, active));
       this.isPlaying = true;
@@ -2804,7 +3197,11 @@ class GaplessAudioEngine {
     }
     const nextIdx = this.getNextQueueIndex();
     if (nextIdx !== -1) {
+      this.pendingTransitionReason = 'next';
       this.transitionToNextTrack(nextIdx);
+    } else if (this.autoplay && this.repeatMode === 'off' && this.currentSong) {
+      this.pendingTransitionReason = 'next';
+      void this.maybeAutoplay(this.currentSong);
     }
   }
 
@@ -2823,6 +3220,7 @@ class GaplessAudioEngine {
     }
     const prevSong = this.queue[prevIdx];
     if (prevSong) {
+      this.pendingTransitionReason = 'prev';
       this.loadAndPlayOnActiveDeck(prevSong, prevIdx);
     }
   }
@@ -2883,6 +3281,20 @@ class GaplessAudioEngine {
     this.notify();
   }
 
+  getBalancedShuffleEnabled() {
+    return getBalancedShuffle();
+  }
+
+  setBalancedShuffleEnabled(value) {
+    const enabled = Boolean(value);
+    try {
+      localStorage.setItem(STORAGE_KEYS.BALANCED_SHUFFLE, enabled ? 'true' : 'false');
+    } catch {
+      // Ignore storage errors
+    }
+    this.notify();
+  }
+
   // Ask the app for radio tracks when the queue runs out. Returns true if
   // tracks were appended and playback continues.
   async maybeAutoplay(lastSong) {
@@ -2893,10 +3305,14 @@ class GaplessAudioEngine {
     try {
       const tracks = await this.onAutoplayNeeded(lastSong);
       if (!Array.isArray(tracks) || tracks.length === 0) return false;
+      this.syncQueueMetaLength();
       // Append after the current position and move to the first radio track.
       const insertAt = this.currentIndex + 1;
+      const newMetas = tracks.map((t) => this.makeQueueMeta(t, 'autoplay'));
       this.queue.splice(insertAt, 0, ...tracks);
+      this.queueMeta.splice(insertAt, 0, ...newMetas);
       this.originalQueue = [...this.queue];
+      this.originalQueueMeta = [...this.queueMeta];
       this.transitionToNextTrack(insertAt);
       return true;
     } catch {
@@ -2906,6 +3322,30 @@ class GaplessAudioEngine {
     }
   }
 
+  appendAutoplayTracks(tracks) {
+    if (!Array.isArray(tracks) || tracks.length === 0) return;
+    this.syncQueueMetaLength();
+    // Replace any unplayed autoplay tail after currentIndex while preserving user/context tracks
+    const keepCount = Math.max(0, this.currentIndex + 1);
+    const headSongs = this.queue.slice(0, keepCount);
+    const headMetas = this.queueMeta.slice(0, keepCount);
+    const preservedSongs = [];
+    const preservedMetas = [];
+    for (let i = keepCount; i < this.queue.length; i += 1) {
+      if (this.queueMeta[i]?.origin !== 'autoplay') {
+        preservedSongs.push(this.queue[i]);
+        preservedMetas.push(this.queueMeta[i]);
+      }
+    }
+    const newMetas = tracks.map((t) => this.makeQueueMeta(t, 'autoplay'));
+    this.queue = [...headSongs, ...preservedSongs, ...tracks];
+    this.queueMeta = [...headMetas, ...preservedMetas, ...newMetas];
+    this.originalQueue = [...this.queue];
+    this.originalQueueMeta = [...this.queueMeta];
+    this.preloadedNextSongId = null;
+    this.preloadNextInIdleDeck();
+    this.notify();
+  }
 
   setNormalization(mode) {
     this.normalization = mode || 'auto';
@@ -2956,6 +3396,7 @@ class GaplessAudioEngine {
   }
 
   toggleShuffle() {
+    this.syncQueueMetaLength();
     if (this.queue.length <= 1) {
       this.shuffle = !this.shuffle;
       this.notify();
@@ -2964,18 +3405,40 @@ class GaplessAudioEngine {
 
     if (!this.shuffle) {
       const current = this.currentSong;
-      const remaining = this.queue.filter((_, idx) => idx !== this.currentIndex);
-      const shuffledRemaining = shuffleSongs(remaining);
-      const newQueue = current ? [current, ...shuffledRemaining] : shuffledRemaining;
+      const currentMeta = this.currentIndex >= 0 ? this.queueMeta[this.currentIndex] : null;
+      const userPairs = [];
+      const contextPairs = [];
+      const autoplayPairs = [];
+      for (let idx = 0; idx < this.queue.length; idx += 1) {
+        if (idx === this.currentIndex) continue;
+        const pair = { song: this.queue[idx], meta: this.queueMeta[idx] };
+        if (pair.meta?.origin === 'user') userPairs.push(pair);
+        else if (pair.meta?.origin === 'autoplay') autoplayPairs.push(pair);
+        else contextPairs.push(pair);
+      }
+      const byId = new Map(contextPairs.map((p) => [p.song.id, p]));
+      const shuffledContextSongs = shuffleSongs(contextPairs.map((p) => p.song));
+      const shuffledContextPairs = shuffledContextSongs.map(
+        (s) => byId.get(s.id) || { song: s, meta: this.makeQueueMeta(s, 'context') }
+      );
+      const combined = current
+        ? [{ song: current, meta: currentMeta || this.makeQueueMeta(current, 'context') }, ...userPairs, ...shuffledContextPairs, ...autoplayPairs]
+        : [...userPairs, ...shuffledContextPairs, ...autoplayPairs];
       this.shuffle = true;
-      this.queue = newQueue;
+      this.queue = combined.map((p) => p.song);
+      this.queueMeta = combined.map((p) => p.meta);
       this.currentIndex = current ? 0 : -1;
     } else {
       const current = this.currentSong;
-      const restored = this.originalQueue.length > 0 ? [...this.originalQueue] : [...this.queue];
-      const idx = current ? restored.findIndex((s) => s.id === current.id) : -1;
+      const restoredSongs = this.originalQueue.length > 0 ? [...this.originalQueue] : [...this.queue];
+      const restoredMetas =
+        this.originalQueueMeta.length === restoredSongs.length
+          ? [...this.originalQueueMeta]
+          : restoredSongs.map((s) => this.makeQueueMeta(s, 'context'));
+      const idx = current ? restoredSongs.findIndex((s) => s.id === current.id) : -1;
       this.shuffle = false;
-      this.queue = restored;
+      this.queue = restoredSongs;
+      this.queueMeta = restoredMetas;
       this.currentIndex = idx;
     }
 
@@ -2985,25 +3448,62 @@ class GaplessAudioEngine {
   }
 
   playNextInQueue(song) {
+    if (!song) return;
     if (!this.currentSong || this.queue.length === 0) {
-      this.playSong(song, [song]);
+      this.playSong(song, [song], { origin: 'user' });
       return;
     }
+    this.syncQueueMetaLength();
     const insertIdx = this.currentIndex + 1;
+    const meta = this.makeQueueMeta(song, 'user');
     this.queue.splice(insertIdx, 0, song);
+    this.queueMeta.splice(insertIdx, 0, meta);
     this.originalQueue.push(song);
+    this.originalQueueMeta.push(meta);
     this.preloadedNextSongId = null;
     this.preloadNextInIdleDeck();
     this.notify();
   }
 
   addToQueue(song) {
+    if (!song) return;
     if (!this.currentSong || this.queue.length === 0) {
-      this.playSong(song, [song]);
+      this.playSong(song, [song], { origin: 'user' });
       return;
     }
-    this.queue.push(song);
+    this.syncQueueMetaLength();
+    // Insert at the end of the 'user' Up Next block so explicit queue items play FIFO before context/autoplay
+    let insertIdx = this.currentIndex + 1;
+    while (insertIdx < this.queue.length && this.queueMeta[insertIdx]?.origin === 'user') {
+      insertIdx += 1;
+    }
+    const meta = this.makeQueueMeta(song, 'user');
+    this.queue.splice(insertIdx, 0, song);
+    this.queueMeta.splice(insertIdx, 0, meta);
     this.originalQueue.push(song);
+    this.originalQueueMeta.push(meta);
+    this.preloadedNextSongId = null;
+    this.preloadNextInIdleDeck();
+    this.notify();
+  }
+
+  clearUserQueue() {
+    this.syncQueueMetaLength();
+    const nextSongs = [];
+    const nextMetas = [];
+    let newCurrentIdx = this.currentIndex;
+    for (let i = 0; i < this.queue.length; i += 1) {
+      if (i > this.currentIndex && this.queueMeta[i]?.origin === 'user') {
+        continue;
+      }
+      if (i === this.currentIndex) {
+        newCurrentIdx = nextSongs.length;
+      }
+      nextSongs.push(this.queue[i]);
+      nextMetas.push(this.queueMeta[i]);
+    }
+    this.queue = nextSongs;
+    this.queueMeta = nextMetas;
     this.preloadedNextSongId = null;
     this.preloadNextInIdleDeck();
     this.notify();
@@ -3011,18 +3511,22 @@ class GaplessAudioEngine {
 
   removeFromQueue(index) {
     if (index < 0 || index >= this.queue.length) return;
+    this.syncQueueMetaLength();
     if (index === this.currentIndex) {
       if (this.queue.length === 1) {
         this.clearQueue();
         return;
       }
       this.queue.splice(index, 1);
+      this.queueMeta.splice(index, 1);
       const nextIdx = index >= this.queue.length ? 0 : index;
+      this.pendingTransitionReason = 'select';
       this.loadAndPlayOnActiveDeck(this.queue[nextIdx], nextIdx);
       return;
     }
 
     this.queue.splice(index, 1);
+    this.queueMeta.splice(index, 1);
     if (index < this.currentIndex) {
       this.currentIndex -= 1;
     }
@@ -3041,8 +3545,11 @@ class GaplessAudioEngine {
     ) {
       return;
     }
+    this.syncQueueMetaLength();
     const [moved] = this.queue.splice(fromIndex, 1);
+    const [movedMeta] = this.queueMeta.splice(fromIndex, 1);
     this.queue.splice(toIndex, 0, moved);
+    this.queueMeta.splice(toIndex, 0, movedMeta);
 
     if (this.currentSong) {
       this.currentIndex = this.queue.findIndex((s) => s.id === this.currentSong.id);
@@ -3053,6 +3560,10 @@ class GaplessAudioEngine {
   }
 
   clearQueue() {
+    if (this.currentSong) {
+      this.finishActiveTrackSession('select');
+    }
+    this.clearPauseAbandonTimer();
     this.clearFadeTimer();
     this.deckA.pause();
     this.deckB.pause();
@@ -3060,7 +3571,11 @@ class GaplessAudioEngine {
     this.deckB.src = '';
     this.preloadedNextSongId = null;
     this.queue = [];
+    this.queueMeta = [];
     this.originalQueue = [];
+    this.originalQueueMeta = [];
+    this.contextName = '';
+    this.contextSource = 'other';
     this.currentIndex = -1;
     this.currentSong = null;
     this.isPlaying = false;

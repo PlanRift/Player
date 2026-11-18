@@ -1,4 +1,4 @@
-<!-- MODAL & VIEW: SETTINGS (6-Tab Modal Dialog: Playback, Audio, Lyrics, Library, Navidrome Server, NAS Storage) -->
+<!-- MODAL & VIEW: SETTINGS (8-Tab Modal Dialog: Appearance, Discovery & Radio, Playback, Audio, Lyrics, Library, Navidrome Server, NAS Storage) -->
 <div
   id="settings-modal"
   role="dialog"
@@ -6,12 +6,12 @@
   aria-label="Settings"
   class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
 >
-  <div class="w-[672px] max-w-[calc(100vw-2rem)] h-[560px] max-h-[calc(100vh-2rem)] bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col overflow-hidden">
+  <div class="w-[780px] max-w-[calc(100vw-2rem)] h-[620px] max-h-[calc(100vh-2rem)] bg-zinc-900 border border-zinc-700 shadow-2xl flex flex-col overflow-hidden">
     <!-- Modal Header -->
     <div class="px-5 py-4 border-b border-zinc-700 flex items-center justify-between shrink-0">
       <div>
         <h2 class="font-display text-xl text-zinc-100 leading-none">Settings</h2>
-        <p class="text-xs font-mono text-zinc-400 mt-1">Audio engine, display preferences, and Navidrome server</p>
+        <p class="text-xs font-mono text-zinc-400 mt-1">Appearance, discovery engine, audio pipeline, and server connections</p>
       </div>
       <button
         id="settings-modal-close-btn"
@@ -23,9 +23,23 @@
       </button>
     </div>
 
-    <!-- Vertical tab nav (w-44) + content -->
+    <!-- Vertical tab nav (w-48) + content -->
     <div class="flex flex-1 min-h-0">
-      <nav aria-label="Settings sections" class="w-44 shrink-0 border-r border-zinc-800 bg-zinc-950/60 py-3 px-2 space-y-0.5 overflow-y-auto">
+      <nav aria-label="Settings sections" class="w-48 shrink-0 border-r border-zinc-800 bg-zinc-950/60 py-3 px-2 space-y-0.5 overflow-y-auto">
+        <button
+          id="settings-tab-btn-appearance"
+          type="button"
+          class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          Appearance
+        </button>
+        <button
+          id="settings-tab-btn-discovery"
+          type="button"
+          class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
+        >
+          Discovery &amp; Radio
+        </button>
         <button
           id="settings-tab-btn-playback"
           type="button"
@@ -60,7 +74,7 @@
           class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
         >
           <span>Navidrome Server</span>
-          <span id="settings-tab-server-dot" class="w-2 h-2 bg-emerald-400 inline-block ml-1.5 align-middle"></span>
+          <span id="settings-tab-server-dot" class="w-2 h-2 bg-emerald-400 inline-block ml-1.5 align-middle pill-round"></span>
         </button>
         <button
           id="settings-tab-btn-nas"
@@ -68,393 +82,645 @@
           class="w-full text-left px-3 py-2 text-xs font-mono border-l-2 border-transparent text-zinc-400 hover:text-zinc-100 transition-colors"
         >
           <span>NAS Storage</span>
-          <span id="settings-tab-nas-dot" class="w-2 h-2 bg-zinc-600 inline-block ml-1.5 align-middle"></span>
+          <span id="settings-tab-nas-dot" class="w-2 h-2 bg-zinc-600 inline-block ml-1.5 align-middle pill-round"></span>
         </button>
       </nav>
 
-    <!-- Scrollable Tab Body -->
-    <div class="p-5 overflow-y-auto space-y-6 flex-1">
-      <!-- TAB: PLAYBACK -->
-      <div id="settings-tab-playback" class="space-y-5">
-        <!-- Crossfade -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-3">
-          <div class="flex items-center justify-between">
+      <!-- Scrollable Tab Body -->
+      <div class="p-5 overflow-y-auto space-y-6 flex-1">
+        <!-- TAB: APPEARANCE -->
+        <div id="settings-tab-appearance" class="hidden space-y-5">
+          <!-- Color Palette Templates -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-3 radius-card">
             <div>
-              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Crossfade</h3>
-              <p class="text-[11px] text-zinc-400 mt-0.5">Equal-power transition between tracks (consecutive album tracks never crossfade)</p>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Color Palette Template</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Live theme palette across canvas, sidebar, cards, active states, and player bar</p>
             </div>
-            <span id="settings-crossfade-label" class="px-2 py-0.5 bg-zinc-900 border border-zinc-700 text-xs font-mono text-emerald-400">
-              0s (Gapless cut)
-            </span>
-          </div>
-          <div class="flex items-center gap-3">
-            <span class="text-[11px] font-mono text-zinc-400">0s</span>
-            <input
-              id="settings-crossfade-slider"
-              type="range"
-              min="0"
-              max="12"
-              step="1"
-              value="0"
-              aria-label="Crossfade duration in seconds"
-              class="studio-range flex-1"
-            />
-            <span class="text-[11px] font-mono text-zinc-400">12s</span>
-          </div>
-        </div>
+            <div id="settings-palette-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button type="button" data-palette-option="vela-blue"
+                class="palette-card p-3 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-left flex items-center justify-between gap-3 transition-colors">
+                <div class="min-w-0">
+                  <div class="text-xs font-medium text-zinc-100 flex items-center gap-1.5">
+                    <span>Vela Blue</span>
+                    <span class="text-[9.5px] font-mono px-1.5 py-0.5 bg-zinc-800 text-zinc-400">DEFAULT</span>
+                  </div>
+                  <p class="text-[10.5px] font-mono text-zinc-400 mt-0.5">Deep obsidian + electric periwinkle</p>
+                </div>
+                <div class="flex items-center -space-x-1.5 shrink-0">
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#0C0D10"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#1D1D1D"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#7085FF"></span>
+                </div>
+              </button>
 
-        <!-- Radio / Autoplay (Century M1) -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Radio / Autoplay</h3>
-            <p class="text-[11px] text-zinc-400 mt-0.5">When the queue runs out, keep playing similar tracks (radio) instead of stopping.</p>
-          </div>
-          <label class="inline-flex items-center cursor-pointer shrink-0">
-            <input id="settings-autoplay-toggle" type="checkbox" checked class="w-4 h-4 accent-[#8ab8a0]" />
-          </label>
-        </div>
+              <button type="button" data-palette-option="plenrip-classic"
+                class="palette-card p-3 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-left flex items-center justify-between gap-3 transition-colors">
+                <div class="min-w-0">
+                  <div class="text-xs font-medium text-zinc-100">Plenrip Classic</div>
+                  <p class="text-[10.5px] font-mono text-zinc-400 mt-0.5">Studio monochrome + calm sage</p>
+                </div>
+                <div class="flex items-center -space-x-1.5 shrink-0">
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#101010"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#161616"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#8ab8a0"></span>
+                </div>
+              </button>
 
-        <!-- Balanced Shuffle (Century M5, default OFF) -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Balanced Shuffle</h3>
-            <p class="text-[11px] text-zinc-400 mt-0.5">Spread tracks by the same artist apart when shuffling. Off = plain random shuffle.</p>
-          </div>
-          <label class="inline-flex items-center cursor-pointer shrink-0">
-            <input id="settings-balanced-shuffle-toggle" type="checkbox" class="w-4 h-4 accent-[#8ab8a0]" />
-          </label>
-        </div>
-      </div>
+              <button type="button" data-palette-option="crimson-rose"
+                class="palette-card p-3 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-left flex items-center justify-between gap-3 transition-colors">
+                <div class="min-w-0">
+                  <div class="text-xs font-medium text-zinc-100">Crimson Rose</div>
+                  <p class="text-[10.5px] font-mono text-zinc-400 mt-0.5">Warm velvet + vivid rose accent</p>
+                </div>
+                <div class="flex items-center -space-x-1.5 shrink-0">
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#0D0B0C"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#1A1517"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#F43F5E"></span>
+                </div>
+              </button>
 
-      <!-- TAB: AUDIO -->
-      <div id="settings-tab-audio" class="space-y-5">
-        <!-- Audio Output Device -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-2.5">
-          <div class="flex items-center justify-between">
+              <button type="button" data-palette-option="amber-gold"
+                class="palette-card p-3 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-left flex items-center justify-between gap-3 transition-colors">
+                <div class="min-w-0">
+                  <div class="text-xs font-medium text-zinc-100">Amber Gold</div>
+                  <p class="text-[10.5px] font-mono text-zinc-400 mt-0.5">Warm analog carbon + amber glow</p>
+                </div>
+                <div class="flex items-center -space-x-1.5 shrink-0">
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#0F0E0C"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#1C1915"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#F59E0B"></span>
+                </div>
+              </button>
+
+              <button type="button" data-palette-option="emerald-mint"
+                class="palette-card p-3 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-left flex items-center justify-between gap-3 transition-colors sm:col-span-2">
+                <div class="min-w-0">
+                  <div class="text-xs font-medium text-zinc-100">Emerald Mint</div>
+                  <p class="text-[10.5px] font-mono text-zinc-400 mt-0.5">Forest slate + crisp emerald accent</p>
+                </div>
+                <div class="flex items-center -space-x-1.5 shrink-0">
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#0B0F0E"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#161E1C"></span>
+                  <span class="w-5 h-5 pill-round border border-white/20" style="background:#10B981"></span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Border Radius Selector -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-3 radius-card">
             <div>
-              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Audio Output Device</h3>
-              <p class="text-[11px] text-zinc-400 mt-0.5">Route Web Audio output to a specific hardware sink</p>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Corner Radius Style</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Applies to cards, modals, sidebar items, and player bar (Files &amp; YTM Downloader remain sharp)</p>
+            </div>
+            <div id="settings-radius-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <button type="button" data-radius-option="sharp"
+                class="radius-preset-btn p-2.5 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 flex flex-col items-center gap-2 text-center transition-colors">
+                <span class="w-9 h-6 border-2 border-emerald-400 bg-zinc-950" style="border-radius:0px"></span>
+                <div>
+                  <div class="text-xs font-mono text-zinc-100">Sharp</div>
+                  <div class="text-[10px] font-mono text-zinc-500">0px</div>
+                </div>
+              </button>
+              <button type="button" data-radius-option="subtle"
+                class="radius-preset-btn p-2.5 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 flex flex-col items-center gap-2 text-center transition-colors">
+                <span class="w-9 h-6 border-2 border-emerald-400 bg-zinc-950" style="border-radius:6px"></span>
+                <div>
+                  <div class="text-xs font-mono text-zinc-100">Subtle</div>
+                  <div class="text-[10px] font-mono text-zinc-500">6px / 4px</div>
+                </div>
+              </button>
+              <button type="button" data-radius-option="vela"
+                class="radius-preset-btn p-2.5 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 flex flex-col items-center gap-2 text-center transition-colors">
+                <span class="w-9 h-6 border-2 border-emerald-400 bg-zinc-950" style="border-radius:12px"></span>
+                <div>
+                  <div class="text-xs font-mono text-zinc-100">Vela</div>
+                  <div class="text-[10px] font-mono text-zinc-500">12px / 8px</div>
+                </div>
+              </button>
+              <button type="button" data-radius-option="pill"
+                class="radius-preset-btn p-2.5 bg-zinc-900 border border-zinc-700 hover:border-zinc-500 flex flex-col items-center gap-2 text-center transition-colors">
+                <span class="w-9 h-6 border-2 border-emerald-400 bg-zinc-950" style="border-radius:18px"></span>
+                <div>
+                  <div class="text-xs font-mono text-zinc-100">Rounded</div>
+                  <div class="text-[10px] font-mono text-zinc-500">18px / 12px</div>
+                </div>
+              </button>
             </div>
           </div>
-          <select
-            id="settings-output-device"
-            class="w-full h-9 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100"
-          >
-            <option value="">System Default Output</option>
-          </select>
+
+          <!-- Density & Motion Toggles -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4 radius-card">
+            <label class="flex items-start justify-between gap-4 cursor-pointer">
+              <span>
+                <span class="block text-xs font-mono uppercase tracking-wider text-zinc-200">Dense Track Rows</span>
+                <span class="block text-[11px] text-zinc-400 mt-0.5">Compact 36px track rows in Songs, Album Detail, and Playlists so more tracks fit on screen.</span>
+              </span>
+              <input id="settings-dense-rows-toggle" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0" />
+            </label>
+            <div class="border-t border-zinc-800/80 pt-3">
+              <label class="flex items-start justify-between gap-4 cursor-pointer">
+                <span>
+                  <span class="block text-xs font-mono uppercase tracking-wider text-zinc-200">Pause Looping Animations</span>
+                  <span class="block text-[11px] text-zinc-400 mt-0.5">Freeze ambient OKLCH mesh drift in Now Playing &amp; Signature Room to save GPU power.</span>
+                </span>
+                <input id="settings-pause-animations-toggle" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0" />
+              </label>
+            </div>
+          </div>
         </div>
 
-
-        <!-- Volume Normalization (ReplayGain) & Preamp -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Volume Normalization (ReplayGain)</h3>
-            <p class="text-[11px] text-zinc-400 mt-0.5">Auto uses Album Gain during natural album playback and Track Gain otherwise</p>
+        <!-- TAB: DISCOVERY & RADIO -->
+        <div id="settings-tab-discovery" class="hidden space-y-5">
+          <!-- Radio & Co-occurrence Readiness -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-3 radius-card">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Recommendation Engine</h3>
+                <span id="settings-radio-status-badge" class="px-2 py-0.5 text-[10px] font-mono bg-emerald-400/15 border border-emerald-400/40 text-emerald-300">
+                  READY
+                </span>
+              </div>
+              <p id="settings-radio-status-detail" class="text-[11px] font-mono text-zinc-400 mt-1 truncate">
+                3-window taste vector + ItemKNN co-occurrence + Subsonic similarity
+              </p>
+            </div>
+            <button id="settings-rebuild-cooc-btn" type="button"
+              class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 shrink-0">
+              Rebuild Index
+            </button>
           </div>
-          <div id="settings-norm-group" class="grid grid-cols-4 gap-2">
-            <button type="button" data-norm="auto" class="norm-mode-btn h-8 text-xs font-mono bg-emerald-400 text-zinc-950 font-semibold border border-emerald-400">Auto</button>
-            <button type="button" data-norm="track" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Track</button>
-            <button type="button" data-norm="album" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Album</button>
-            <button type="button" data-norm="off" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Off</button>
+
+          <!-- Adventurousness -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-3 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Radio Adventurousness</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Controls Comfort / Discovery / Deep-Cut balance in Radio and Made For You mixes</p>
+            </div>
+            <div id="settings-adventurousness-group" class="grid grid-cols-3 gap-2">
+              <button type="button" data-adventurousness="calm"
+                class="adv-mode-btn py-2 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-300 hover:bg-zinc-800">
+                <div>Calm</div>
+                <div class="text-[10px] text-zinc-500">70 / 20 / 10</div>
+              </button>
+              <button type="button" data-adventurousness="balanced"
+                class="adv-mode-btn py-2 px-3 bg-emerald-400 text-zinc-950 font-semibold border border-emerald-400 text-xs font-mono">
+                <div>Balanced</div>
+                <div class="text-[10px] opacity-80">50 / 30 / 20</div>
+              </button>
+              <button type="button" data-adventurousness="adventurous"
+                class="adv-mode-btn py-2 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-300 hover:bg-zinc-800">
+                <div>Adventurous</div>
+                <div class="text-[10px] text-zinc-500">30 / 35 / 35</div>
+              </button>
+            </div>
           </div>
 
-          <div class="pt-2 border-t border-zinc-800/80 space-y-2">
+          <!-- Shelf Tuning Controls -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Home Shelf Thresholds</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Fine-tune Home recommendation shelves and artist diversity caps</p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="space-y-1">
+                <div class="flex items-center justify-between text-xs font-mono">
+                  <label for="settings-silence-days" class="text-zinc-300">Forgotten Silence</label>
+                  <span id="settings-silence-days-val" class="text-emerald-400">45d</span>
+                </div>
+                <input id="settings-silence-days" type="range" min="14" max="180" step="1" value="45" class="studio-range w-full" />
+              </div>
+
+              <div class="space-y-1">
+                <div class="flex items-center justify-between text-xs font-mono">
+                  <label for="settings-starred-cooldown" class="text-zinc-300">Starred Cooldown</label>
+                  <span id="settings-starred-cooldown-val" class="text-emerald-400">7d</span>
+                </div>
+                <input id="settings-starred-cooldown" type="range" min="0" max="30" step="1" value="7" class="studio-range w-full" />
+              </div>
+
+              <div class="space-y-1">
+                <div class="flex items-center justify-between text-xs font-mono">
+                  <label for="settings-quickpick-hours" class="text-zinc-300">Quick Pick Cooldown</label>
+                  <span id="settings-quickpick-hours-val" class="text-emerald-400">6h</span>
+                </div>
+                <input id="settings-quickpick-hours" type="range" min="0" max="24" step="1" value="6" class="studio-range w-full" />
+              </div>
+
+              <div class="space-y-1">
+                <div class="flex items-center justify-between text-xs font-mono">
+                  <label for="settings-max-per-artist" class="text-zinc-300">Max / Artist</label>
+                  <span id="settings-max-per-artist-val" class="text-emerald-400">2</span>
+                </div>
+                <input id="settings-max-per-artist" type="range" min="1" max="5" step="1" value="2" class="studio-range w-full" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Session Exclusion Manager -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-3 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Recent Listening Sessions</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Exclude sleep or background sessions so they do not influence your taste profile</p>
+            </div>
+            <div id="settings-sessions-list" class="max-h-44 overflow-y-auto divide-y divide-zinc-800/70 border border-zinc-800 bg-zinc-900/50 text-xs font-mono">
+              <div class="p-3 text-zinc-500 text-center">No sessions recorded yet.</div>
+            </div>
+          </div>
+
+          <!-- Telemetry Export / Import -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Discovery History Backup</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Export or import your local play telemetry JSON across browsers</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="settings-export-history-btn" type="button"
+                class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200">
+                Export JSON
+              </button>
+              <label class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-emerald-400 inline-flex items-center cursor-pointer radius-inner">
+                <span>Import JSON</span>
+                <input id="settings-import-history-input" type="file" accept=".json,application/json" class="hidden" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: PLAYBACK -->
+        <div id="settings-tab-playback" class="space-y-5">
+          <!-- Crossfade -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-3 radius-card">
             <div class="flex items-center justify-between">
-              <span class="text-xs font-mono text-zinc-300">Pre-amp Gain</span>
-              <span id="settings-preamp-label" class="text-xs font-mono text-emerald-400">0 dB</span>
+              <div>
+                <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Crossfade</h3>
+                <p class="text-[11px] text-zinc-400 mt-0.5">Equal-power transition between tracks (consecutive album tracks never crossfade)</p>
+              </div>
+              <span id="settings-crossfade-label" class="px-2 py-0.5 bg-zinc-900 border border-zinc-700 text-xs font-mono text-emerald-400">
+                0s (Gapless cut)
+              </span>
             </div>
             <div class="flex items-center gap-3">
-              <span class="text-[11px] font-mono text-zinc-400">-12dB</span>
+              <span class="text-[11px] font-mono text-zinc-400">0s</span>
               <input
-                id="settings-preamp-slider"
+                id="settings-crossfade-slider"
                 type="range"
-                min="-12"
+                min="0"
                 max="12"
-                step="0.5"
+                step="1"
                 value="0"
-                aria-label="Pre-amp gain in dB"
+                aria-label="Crossfade duration in seconds"
                 class="studio-range flex-1"
               />
-              <span class="text-[11px] font-mono text-zinc-400">+12dB</span>
+              <span class="text-[11px] font-mono text-zinc-400">12s</span>
             </div>
           </div>
-        </div>
 
-        <!-- Stream Quality -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-2.5">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Stream Quality</h3>
-            <p class="text-[11px] text-zinc-400 mt-0.5">Configure Subsonic transcoding format and bitrate</p>
-          </div>
-          <select
-            id="settings-stream-quality"
-            class="w-full h-9 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100"
-          >
-            <option value="auto">Auto (Opus 192 kbps)</option>
-            <option value="original">Original (Uncompressed / Direct)</option>
-            <option value="mp3-320">MP3 320 kbps</option>
-            <option value="opus-192">Opus 192 kbps</option>
-            <option value="opus-96">Opus 96 kbps</option>
-          </select>
-        </div>
-
-
-      </div>
-
-      <!-- TAB 2: NAVIDROME SERVER -->
-      <div id="settings-tab-server" class="hidden space-y-5">
-        <!-- Connection Status Banner -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-3">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <span id="settings-server-status-dot" class="w-2.5 h-2.5 bg-emerald-400 shrink-0"></span>
-            <div class="min-w-0">
-              <p id="settings-ping-badge" class="text-xs font-mono text-zinc-100 truncate">
-                Connected to Navidrome (Subsonic API v1.16.1)
-              </p>
-              <p class="text-[11px] text-zinc-400 truncate">Direct browser authentication via MD5 salt + token</p>
-            </div>
-          </div>
-          <button
-            id="settings-recheck-btn"
-            type="button"
-            class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 shrink-0"
-          >
-            Recheck
-          </button>
-        </div>
-
-        <form id="settings-server-form" class="space-y-4">
-          <div>
-            <label for="settings-server-url" class="block text-xs font-mono text-zinc-400 mb-1">SERVER URL</label>
-            <input
-              id="settings-server-url"
-              type="url"
-              required
-              placeholder="http://127.0.0.1:4533"
-              class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
-            />
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <!-- Radio / Autoplay (Century M1) -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4 radius-card">
             <div>
-              <label for="settings-server-user" class="block text-xs font-mono text-zinc-400 mb-1">USERNAME</label>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Radio / Autoplay</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">When the queue runs out, keep playing similar tracks (radio) instead of stopping.</p>
+            </div>
+            <label class="inline-flex items-center cursor-pointer shrink-0">
+              <input id="settings-autoplay-toggle" type="checkbox" checked class="w-4 h-4" />
+            </label>
+          </div>
+
+          <!-- Balanced Shuffle (Century M5, default OFF) -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Balanced Shuffle</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Spread tracks by the same artist apart when shuffling. Off = plain random shuffle.</p>
+            </div>
+            <label class="inline-flex items-center cursor-pointer shrink-0">
+              <input id="settings-balanced-shuffle-toggle" type="checkbox" class="w-4 h-4" />
+            </label>
+          </div>
+        </div>
+
+        <!-- TAB: AUDIO -->
+        <div id="settings-tab-audio" class="hidden space-y-5">
+          <!-- Audio Output Device -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-2.5 radius-card">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Audio Output Device</h3>
+                <p class="text-[11px] text-zinc-400 mt-0.5">Route Web Audio output to a specific hardware sink</p>
+              </div>
+            </div>
+            <select
+              id="settings-output-device"
+              class="w-full h-9 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100"
+            >
+              <option value="">System Default Output</option>
+            </select>
+          </div>
+
+          <!-- Volume Normalization (ReplayGain) & Preamp -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Volume Normalization (ReplayGain)</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Auto uses Album Gain during natural album playback and Track Gain otherwise</p>
+            </div>
+            <div id="settings-norm-group" class="grid grid-cols-4 gap-2">
+              <button type="button" data-norm="auto" class="norm-mode-btn h-8 text-xs font-mono bg-emerald-400 text-zinc-950 font-semibold border border-emerald-400">Auto</button>
+              <button type="button" data-norm="track" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Track</button>
+              <button type="button" data-norm="album" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Album</button>
+              <button type="button" data-norm="off" class="norm-mode-btn h-8 text-xs font-mono bg-zinc-900 text-zinc-300 border border-zinc-700 hover:bg-zinc-800">Off</button>
+            </div>
+
+            <div class="pt-2 border-t border-zinc-800/80 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-mono text-zinc-300">Pre-amp Gain</span>
+                <span id="settings-preamp-label" class="text-xs font-mono text-emerald-400">0 dB</span>
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="text-[11px] font-mono text-zinc-400">-12dB</span>
+                <input
+                  id="settings-preamp-slider"
+                  type="range"
+                  min="-12"
+                  max="12"
+                  step="0.5"
+                  value="0"
+                  aria-label="Pre-amp gain in dB"
+                  class="studio-range flex-1"
+                />
+                <span class="text-[11px] font-mono text-zinc-400">+12dB</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stream Quality -->
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-2.5 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Stream Quality</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Configure Subsonic transcoding format and bitrate</p>
+            </div>
+            <select
+              id="settings-stream-quality"
+              class="w-full h-9 px-3 bg-zinc-900 border border-zinc-700 text-xs font-mono text-zinc-100"
+            >
+              <option value="auto">Auto (Opus 192 kbps)</option>
+              <option value="original">Original (Uncompressed / Direct)</option>
+              <option value="mp3-320">MP3 320 kbps</option>
+              <option value="opus-192">Opus 192 kbps</option>
+              <option value="opus-96">Opus 96 kbps</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- TAB: NAVIDROME SERVER -->
+        <div id="settings-tab-server" class="hidden space-y-5">
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-3 radius-card">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span id="settings-server-status-dot" class="w-2.5 h-2.5 bg-emerald-400 shrink-0 pill-round"></span>
+              <div class="min-w-0">
+                <p id="settings-ping-badge" class="text-xs font-mono text-zinc-100 truncate">
+                  Connected to Navidrome (Subsonic API v1.16.1)
+                </p>
+                <p class="text-[11px] text-zinc-400 truncate">Direct browser authentication via MD5 salt + token</p>
+              </div>
+            </div>
+            <button
+              id="settings-recheck-btn"
+              type="button"
+              class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 shrink-0"
+            >
+              Recheck
+            </button>
+          </div>
+
+          <form id="settings-server-form" class="space-y-4">
+            <div>
+              <label for="settings-server-url" class="block text-xs font-mono text-zinc-400 mb-1">SERVER URL</label>
               <input
-                id="settings-server-user"
-                type="text"
+                id="settings-server-url"
+                type="url"
                 required
+                placeholder="http://127.0.0.1:4533"
+                class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+              />
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label for="settings-server-user" class="block text-xs font-mono text-zinc-400 mb-1">USERNAME</label>
+                <input
+                  id="settings-server-user"
+                  type="text"
+                  required
+                  class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+                />
+              </div>
+              <div>
+                <label for="settings-server-pass" class="block text-xs font-mono text-zinc-400 mb-1">PASSWORD</label>
+                <div class="relative">
+                  <input
+                    id="settings-server-pass"
+                    type="password"
+                    placeholder="Leave blank to keep existing"
+                    class="w-full h-9 pl-3 pr-9 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
+                  />
+                  <button
+                    id="settings-pass-toggle-btn"
+                    type="button"
+                    title="Show / Hide Password"
+                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+                  >
+                    <i id="settings-pass-eye-icon" data-lucide="eye" class="w-3.5 h-3.5"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="pt-2 flex items-center justify-between gap-2">
+              <button
+                id="settings-reset-server-btn"
+                type="button"
+                class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
+              >
+                Reset to Default
+              </button>
+              <button
+                type="submit"
+                class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"
+              >
+                Save &amp; Connect
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- TAB: NAS STORAGE -->
+        <div id="settings-tab-nas" class="hidden space-y-5">
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-3 radius-card">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <span id="settings-nas-status-dot" class="w-2.5 h-2.5 bg-zinc-600 shrink-0 pill-round"></span>
+              <div class="min-w-0">
+                <p id="settings-nas-ping-badge" class="text-xs font-mono text-zinc-100 truncate">
+                  NAS File Bridge (Port 3001)
+                </p>
+                <p class="text-[11px] text-zinc-400 truncate">Protected file operations requiring x-api-key authentication</p>
+              </div>
+            </div>
+            <button
+              id="settings-nas-recheck-btn"
+              type="button"
+              class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 shrink-0"
+            >
+              Recheck
+            </button>
+          </div>
+
+          <form id="settings-nas-form" class="space-y-4">
+            <div>
+              <label for="settings-nas-url" class="block text-xs font-mono text-zinc-400 mb-1">NAS SERVER URL</label>
+              <input
+                id="settings-nas-url"
+                type="text"
+                placeholder="Leave blank for same-origin (/bridge)"
                 class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
               />
             </div>
             <div>
-              <label for="settings-server-pass" class="block text-xs font-mono text-zinc-400 mb-1">PASSWORD</label>
+              <label for="settings-nas-key" class="block text-xs font-mono text-zinc-400 mb-1">NAS API KEY</label>
               <div class="relative">
                 <input
-                  id="settings-server-pass"
+                  id="settings-nas-key"
                   type="password"
-                  placeholder="Leave blank to keep existing"
+                  placeholder="Enter secret x-api-key"
                   class="w-full h-9 pl-3 pr-9 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
                 />
                 <button
-                  id="settings-pass-toggle-btn"
+                  id="settings-nas-key-toggle-btn"
                   type="button"
-                  title="Show / Hide Password"
+                  title="Show / Hide API Key"
                   class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
                 >
-                  <i id="settings-pass-eye-icon" data-lucide="eye" class="w-3.5 h-3.5"></i>
+                  <i id="settings-nas-key-eye-icon" data-lucide="eye" class="w-3.5 h-3.5"></i>
                 </button>
               </div>
+              <p class="text-[11px] text-zinc-400 mt-1">Sent automatically as the <code class="font-mono text-emerald-400">x-api-key</code> header with file manager requests.</p>
             </div>
-          </div>
-          <div class="pt-2 flex items-center justify-between gap-2">
-            <button
-              id="settings-reset-server-btn"
-              type="button"
-              class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
-            >
-              Reset to Default
-            </button>
-            <button
-              type="submit"
-              class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"
-            >
-              Save &amp; Connect
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <!-- TAB 3: NAS STORAGE -->
-      <div id="settings-tab-nas" class="hidden space-y-5">
-        <!-- Connection Status Banner -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-3">
-          <div class="flex items-center gap-2.5 min-w-0">
-            <span id="settings-nas-status-dot" class="w-2.5 h-2.5 bg-zinc-600 shrink-0"></span>
-            <div class="min-w-0">
-              <p id="settings-nas-ping-badge" class="text-xs font-mono text-zinc-100 truncate">
-                NAS File Bridge (Port 3001)
-              </p>
-              <p class="text-[11px] text-zinc-400 truncate">Protected file operations requiring x-api-key authentication</p>
-            </div>
-          </div>
-          <button
-            id="settings-nas-recheck-btn"
-            type="button"
-            class="h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 shrink-0"
-          >
-            Recheck
-          </button>
-        </div>
-
-        <form id="settings-nas-form" class="space-y-4">
-          <div>
-            <label for="settings-nas-url" class="block text-xs font-mono text-zinc-400 mb-1">NAS SERVER URL</label>
-            <input
-              id="settings-nas-url"
-              type="text"
-              placeholder="Leave blank for same-origin (/bridge)"
-              class="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
-            />
-          </div>
-          <div>
-            <label for="settings-nas-key" class="block text-xs font-mono text-zinc-400 mb-1">NAS API KEY</label>
-            <div class="relative">
-              <input
-                id="settings-nas-key"
-                type="password"
-                placeholder="Enter secret x-api-key"
-                class="w-full h-9 pl-3 pr-9 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono"
-              />
+            <div class="pt-2 flex items-center justify-between gap-2">
               <button
-                id="settings-nas-key-toggle-btn"
+                id="settings-reset-nas-btn"
                 type="button"
-                title="Show / Hide API Key"
-                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-100"
+                class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
               >
-                <i id="settings-nas-key-eye-icon" data-lucide="eye" class="w-3.5 h-3.5"></i>
+                Reset to Default
+              </button>
+              <button
+                type="submit"
+                class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"
+              >
+                Save NAS Settings
               </button>
             </div>
-            <p class="text-[11px] text-zinc-400 mt-1">Sent automatically as the <code class="font-mono text-emerald-400">x-api-key</code> header with file manager requests.</p>
+          </form>
+        </div>
+
+        <!-- TAB: LYRICS -->
+        <div id="settings-tab-lyrics" class="hidden space-y-5">
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4 radius-card">
+            <div>
+              <h3 class="text-xs font-mono font-semibold text-zinc-100">Lyrics display</h3>
+              <p class="text-[11px] text-zinc-400 mt-1">How synced lyrics are shown in Now Playing, the Signature Room, and the lyrics drawer.</p>
+            </div>
+            <label class="flex items-start justify-between gap-4 cursor-pointer">
+              <span>
+                <span class="block text-xs font-mono text-zinc-100">Word-by-word sweep</span>
+                <span class="block text-[11px] text-zinc-400 mt-0.5">Highlight each word as it is sung on the active line. Off shows the line as plain text.</span>
+              </span>
+              <input id="settings-word-sweep-toggle" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0" />
+            </label>
+            <label class="flex items-start justify-between gap-4 cursor-pointer">
+              <span>
+                <span class="block text-xs font-mono text-zinc-100">Split background vocals</span>
+                <span class="block text-[11px] text-zinc-400 mt-0.5">Show background vocal lines small and dim below their lead line, expanding while the lead plays.</span>
+              </span>
+              <input id="settings-split-bg-toggle" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0" />
+            </label>
+            <label class="flex items-start justify-between gap-4 cursor-pointer">
+              <span>
+                <span class="block text-xs font-mono text-zinc-100">Pause auto-scroll while reading</span>
+                <span class="block text-[11px] text-zinc-400 mt-0.5">Scrolling the lyrics by hand pauses auto-centering for 5 seconds so you can read ahead without being yanked back.</span>
+              </span>
+              <input id="settings-manual-scroll-pause-toggle" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0" />
+            </label>
+            <label class="flex items-start justify-between gap-4 cursor-pointer">
+              <span>
+                <span class="block text-xs font-mono text-zinc-100">Hide played lines</span>
+                <span class="block text-[11px] text-zinc-400 mt-0.5">Fade out lines that have already played, keeping only the current line and what comes next.</span>
+              </span>
+              <input id="settings-hide-played-toggle" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0" />
+            </label>
+            <label class="flex items-start justify-between gap-4 cursor-pointer">
+              <span>
+                <span class="block text-xs font-mono text-zinc-100">Hide upcoming lines</span>
+                <span class="block text-[11px] text-zinc-400 mt-0.5">Hide lines that have not played yet, showing only the current line and what already played.</span>
+              </span>
+              <input id="settings-hide-upcoming-toggle" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0" />
+            </label>
           </div>
-          <div class="pt-2 flex items-center justify-between gap-2">
+          <p class="text-[11px] text-zinc-500">Lyrics come from the plenrip-relay (port 3005). Romaji and English readings are derived server-side (kuroshiro / Gemini / Google) when you switch modes.</p>
+        </div>
+
+        <!-- TAB: LIBRARY -->
+        <div id="settings-tab-library" class="hidden space-y-5">
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4 radius-card">
+            <div>
+              <h3 class="text-xs font-mono font-semibold text-zinc-100">Albums view</h3>
+              <p class="text-[11px] text-zinc-400 mt-1">How albums are grouped in the Albums browse view and in artist discographies.</p>
+            </div>
+            <label class="flex items-start justify-between gap-4 cursor-pointer">
+              <span>
+                <span class="block text-xs font-mono text-zinc-100">Split Albums and Singles &amp; EPs</span>
+                <span class="block text-[11px] text-zinc-400 mt-0.5">Show two sections: Albums (7+ tracks) and Singles &amp; EPs (6 or fewer tracks). Off shows one list.</span>
+              </span>
+              <input id="settings-split-albums-toggle" type="checkbox" class="mt-0.5 w-4 h-4 shrink-0" />
+            </label>
+          </div>
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Show Translated Japanese Titles</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">
+                Display official international and romanized titles beside Japanese titles (e.g. 過去を喰らう - Eat The Past)
+              </p>
+            </div>
+            <label class="inline-flex items-center cursor-pointer shrink-0">
+              <input id="settings-translated-titles-toggle" type="checkbox" checked class="w-4 h-4" />
+            </label>
+          </div>
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Local Listening History</h3>
+              <p id="settings-history-count" class="text-[11px] font-mono text-zinc-400 mt-0.5">0 plays recorded locally</p>
+            </div>
             <button
-              id="settings-reset-nas-btn"
+              id="settings-clear-history-btn"
               type="button"
-              class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
+              class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
             >
-              Reset to Default
+              CLEAR HISTORY
             </button>
+          </div>
+          <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4 radius-card">
+            <div>
+              <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Cached Lyrics</h3>
+              <p class="text-[11px] text-zinc-400 mt-0.5">Clear the cached lyrics and derived romaji / English readings. Lyrics are re-fetched from the relay next time.</p>
+            </div>
             <button
-              type="submit"
-              class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"
+              id="settings-clear-lyrics-cache-btn"
+              type="button"
+              class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
             >
-              Save NAS Settings
+              CLEAR LYRICS CACHE
             </button>
           </div>
-        </form>
-      </div>
-
-      <!-- TAB 4: LYRICS -->
-      <div id="settings-tab-lyrics" class="hidden space-y-5">
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4">
-          <div>
-            <h3 class="text-xs font-mono font-semibold text-zinc-100">Lyrics display</h3>
-            <p class="text-[11px] text-zinc-400 mt-1">How synced lyrics are shown in Now Playing, the Signature Room, and the lyrics drawer.</p>
-          </div>
-          <label class="flex items-start justify-between gap-4 cursor-pointer">
-            <span>
-              <span class="block text-xs font-mono text-zinc-100">Word-by-word sweep</span>
-              <span class="block text-[11px] text-zinc-400 mt-0.5">Highlight each word as it is sung on the active line. Off shows the line as plain text.</span>
-            </span>
-            <input id="settings-word-sweep-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
-          </label>
-          <label class="flex items-start justify-between gap-4 cursor-pointer">
-            <span>
-              <span class="block text-xs font-mono text-zinc-100">Split background vocals</span>
-              <span class="block text-[11px] text-zinc-400 mt-0.5">Show background vocal lines small and dim below their lead line, expanding while the lead plays.</span>
-            </span>
-            <input id="settings-split-bg-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
-          </label>
-          <label class="flex items-start justify-between gap-4 cursor-pointer">
-            <span>
-              <span class="block text-xs font-mono text-zinc-100">Pause auto-scroll while reading</span>
-              <span class="block text-[11px] text-zinc-400 mt-0.5">Scrolling the lyrics by hand pauses auto-centering for 5 seconds so you can read ahead without being yanked back.</span>
-            </span>
-            <input id="settings-manual-scroll-pause-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
-          </label>
-          <label class="flex items-start justify-between gap-4 cursor-pointer">
-            <span>
-              <span class="block text-xs font-mono text-zinc-100">Hide played lines</span>
-              <span class="block text-[11px] text-zinc-400 mt-0.5">Fade out lines that have already played, keeping only the current line and what comes next.</span>
-            </span>
-            <input id="settings-hide-played-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
-          </label>
-          <label class="flex items-start justify-between gap-4 cursor-pointer">
-            <span>
-              <span class="block text-xs font-mono text-zinc-100">Hide upcoming lines</span>
-              <span class="block text-[11px] text-zinc-400 mt-0.5">Hide lines that have not played yet, showing only the current line and what already played.</span>
-            </span>
-            <input id="settings-hide-upcoming-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
-          </label>
-        </div>
-        <p class="text-[11px] text-zinc-500">Lyrics come from the plenrip-relay (port 3005). Romaji and English readings are derived server-side (kuroshiro / Gemini / Google) when you switch modes.</p>
-      </div>
-
-      <!-- TAB 5: LIBRARY -->
-      <div id="settings-tab-library" class="hidden space-y-5">
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 space-y-4">
-          <div>
-            <h3 class="text-xs font-mono font-semibold text-zinc-100">Albums view</h3>
-            <p class="text-[11px] text-zinc-400 mt-1">How albums are grouped in the Albums browse view and in artist discographies.</p>
-          </div>
-          <label class="flex items-start justify-between gap-4 cursor-pointer">
-            <span>
-              <span class="block text-xs font-mono text-zinc-100">Split Albums and Singles &amp; EPs</span>
-              <span class="block text-[11px] text-zinc-400 mt-0.5">Show two sections: Albums (7+ tracks) and Singles &amp; EPs (6 or fewer tracks). Off shows one list.</span>
-            </span>
-            <input id="settings-split-albums-toggle" type="checkbox" class="mt-0.5 w-4 h-4 accent-emerald-400 shrink-0" />
-          </label>
-        </div>
-        <!-- Show Translated Japanese Titles Toggle -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Show Translated Japanese Titles</h3>
-            <p class="text-[11px] text-zinc-400 mt-0.5">
-              Display official international and romanized titles beside Japanese titles (e.g. 過去を喰らう - Eat The Past)
-            </p>
-          </div>
-          <label class="inline-flex items-center cursor-pointer shrink-0">
-            <input id="settings-translated-titles-toggle" type="checkbox" checked class="w-4 h-4 accent-[#8ab8a0]" />
-          </label>
-        </div>
-        <!-- Local Listening History -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Local Listening History</h3>
-            <p id="settings-history-count" class="text-[11px] font-mono text-zinc-400 mt-0.5">0 plays recorded locally</p>
-          </div>
-          <button
-            id="settings-clear-history-btn"
-            type="button"
-            class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
-          >
-            CLEAR HISTORY
-          </button>
-        </div>
-        <!-- Cached Lyrics -->
-        <div class="p-4 bg-zinc-950/60 border border-zinc-800 flex items-center justify-between gap-4">
-          <div>
-            <h3 class="text-xs font-mono uppercase tracking-wider text-zinc-200">Cached Lyrics</h3>
-            <p class="text-[11px] text-zinc-400 mt-0.5">Clear the cached lyrics and derived romaji / English readings. Lyrics are re-fetched from the relay next time.</p>
-          </div>
-          <button
-            id="settings-clear-lyrics-cache-btn"
-            type="button"
-            class="h-8 px-3 bg-zinc-900 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a] transition-colors shrink-0"
-          >
-            CLEAR LYRICS CACHE
-          </button>
         </div>
       </div>
     </div>
   </div>
-</div>
 </div>
