@@ -237,10 +237,10 @@ http_bridge_up() {
 
 # Wait up to $2 seconds for $1 (a URL) to answer 200, else fail with $3.
 wait_for_http() {
-    local url="$1" timeout="$2" name="$3" logfile="$4"
+    local url="$1" timeout="$2" name="$3" logfile="$4" pid="${5:-}"
     local attempt
     for ((attempt = 1; attempt <= timeout * 2; attempt++)); do
-        if [[ "$name" == "Lyrics relay" && -n "${RELAY_PID:-}" ]] && ! kill -0 "$RELAY_PID" 2>/dev/null; then
+        if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
             log ""
             log "$name exited during startup:"
             tail -n 40 "$logfile" 2>/dev/null || true
@@ -260,9 +260,15 @@ wait_for_http() {
 
 # Same as wait_for_http, but for the bridge (200 or 401 both mean "up").
 wait_for_bridge() {
-    local url="$1" timeout="$2" name="$3" logfile="$4"
+    local url="$1" timeout="$2" name="$3" logfile="$4" pid="${5:-}"
     local attempt
     for ((attempt = 1; attempt <= timeout * 2; attempt++)); do
+        if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+            log ""
+            log "$name exited during startup:"
+            tail -n 40 "$logfile" 2>/dev/null || true
+            fail "$name exited during startup."
+        fi
         if http_bridge_up "$url"; then
             log "$name is responding."
             return 0
@@ -373,10 +379,20 @@ log "Starting lyrics relay..."
 log "  Log: $RELAY_LOG"
 PORT="$LYRICS_PORT" bun "$PROJECT_DIR/relay/src/index.ts" >"$RELAY_LOG" 2>&1 &
 RELAY_PID=$!
-wait_for_http "$RELAY_URL/api/health" 30 "Lyrics relay" "$RELAY_LOG"
+wait_for_http "$RELAY_URL/api/health" 30 "Lyrics relay" "$RELAY_LOG" "$RELAY_PID"
 
 # --- NAS file bridge (Node, port 3001) ---
 if [[ "$BRIDGE" != "0" ]]; then
+    # server/file-bridge.js imports express/cors/multer (and optionally ffmpeg-static)
+    # from the root node_modules; install once if any required package is missing.
+    if [[ ! -d "$PROJECT_DIR/node_modules/express" || ! -d "$PROJECT_DIR/node_modules/cors" || ! -d "$PROJECT_DIR/node_modules/multer" ]]; then
+        log "Installing server/file-bridge dependencies..."
+        if command -v npm >/dev/null 2>&1; then
+            (cd "$PROJECT_DIR" && npm install --no-audit --no-fund) || fail "npm install failed for root dependencies"
+        else
+            (cd "$PROJECT_DIR" && bun install) || fail "bun install failed for root dependencies"
+        fi
+    fi
     # The bridge requires a real NAS API key (it refuses the placeholder).
     # If none is set, generate one once and persist it, so the key stays
     # stable across runs. Enter it in the app under Settings > NAS Storage.
@@ -397,7 +413,7 @@ if [[ "$BRIDGE" != "0" ]]; then
     log "  (Enter this key in the app under Settings > NAS Storage.)"
     FILE_BRIDGE_PORT="$BRIDGE_PORT" node "$PROJECT_DIR/server/file-bridge.js" >"$BRIDGE_LOG" 2>&1 &
     BRIDGE_PID=$!
-    wait_for_bridge "$BRIDGE_URL/api/files/list?path=" 30 "File bridge" "$BRIDGE_LOG"
+    wait_for_bridge "$BRIDGE_URL/api/files/list?path=" 30 "File bridge" "$BRIDGE_LOG" "$BRIDGE_PID"
 else
     log "File bridge skipped (BRIDGE=0)."
 fi
@@ -407,7 +423,7 @@ log "Starting frontend..."
 log "  Log: $FRONTEND_LOG"
 WEB_PORT="$WEB_PORT" node "$PROJECT_DIR/server/serve.js" >"$FRONTEND_LOG" 2>&1 &
 FRONTEND_PID=$!
-wait_for_http "$WEB_URL/" 30 "Frontend" "$FRONTEND_LOG"
+wait_for_http "$WEB_URL/" 30 "Frontend" "$FRONTEND_LOG" "$FRONTEND_PID"
 
 log ""
 log "All services are up:"

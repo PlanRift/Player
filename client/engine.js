@@ -43,6 +43,8 @@ const STORAGE_KEYS = {
   MAX_PER_ARTIST_SHELF: 'century.discovery.maxPerArtistShelf',
   RECENT_SEARCHES: 'century.search.recent',
   NP_PANEL_WIDTH: 'century.nowPlaying.panelWidth',
+  WALKTHROUGH_STATE: 'century.walkthrough.state',
+  AUTH_SALT_PREFIX: 'century.auth.salt.',
 };
 
 const DEFAULT_CONFIG = {
@@ -219,6 +221,55 @@ async function runPool(items, concurrency, worker) {
 // ============================================================================
 // 1. Subsonic API Client + Virtual Singles Resolver + Binary Cover Art Fallback
 // ============================================================================
+class SubsonicApiError extends Error {
+  constructor(message, code = 0) {
+    super(message || 'Subsonic API error');
+    this.name = 'SubsonicApiError';
+    this.code = Number(code) || 0;
+  }
+}
+
+class SubsonicRequestTimeoutError extends Error {
+  constructor(message = 'Request timed out') {
+    super(message);
+    this.name = 'SubsonicRequestTimeoutError';
+  }
+}
+
+function normalizeServerUrlInput(raw) {
+  const trimmed = String(raw ?? '').trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)) {
+    return `http://${trimmed}`;
+  }
+  return trimmed;
+}
+
+function isValidHttpUrl(raw) {
+  try {
+    const parsed = new URL(String(raw ?? ''));
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isMixedContentRisk(serverUrl) {
+  return (
+    typeof window !== 'undefined' &&
+    window.location?.protocol === 'https:' &&
+    /^http:\/\//i.test(String(serverUrl || ''))
+  );
+}
+
+function formatServerHost(serverUrl) {
+  try {
+    return new URL(String(serverUrl || '')).host || String(serverUrl || '');
+  } catch {
+    return String(serverUrl || '');
+  }
+}
+
 class SubsonicClient {
   constructor() {
     this.loadConfig();
@@ -238,6 +289,17 @@ class SubsonicClient {
     this.password = localStorage.getItem(STORAGE_KEYS.NAVIDROME_PASS) || DEFAULT_CONFIG.password;
   }
 
+  hasSavedCredentials() {
+    try {
+      const url = (localStorage.getItem(STORAGE_KEYS.NAVIDROME_URL) || '').trim();
+      const user = (localStorage.getItem(STORAGE_KEYS.NAVIDROME_USER) || '').trim();
+      const pass = localStorage.getItem(STORAGE_KEYS.NAVIDROME_PASS) || '';
+      return Boolean(url && user && pass.length > 0);
+    } catch {
+      return false;
+    }
+  }
+
   saveConfig(serverUrl, username, password) {
     const cleanUrl = (serverUrl || DEFAULT_CONFIG.serverUrl).trim().replace(/\/+$/, '');
     const cleanUser = (username || DEFAULT_CONFIG.username).trim();
@@ -248,10 +310,41 @@ class SubsonicClient {
     this.loadConfig();
   }
 
+  clearConfig() {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.NAVIDROME_URL);
+      localStorage.removeItem(STORAGE_KEYS.NAVIDROME_USER);
+      localStorage.removeItem(STORAGE_KEYS.NAVIDROME_PASS);
+    } catch {
+      // Ignore storage errors
+    }
+    this.baseUrl = DEFAULT_CONFIG.serverUrl;
+    this.username = '';
+    this.password = '';
+    this.streamCoverCache.clear();
+    this.coverCacheBust = 0;
+  }
+
+  getPersistedSalt(baseUrl, username) {
+    const cleanUrl = String(baseUrl || '').trim();
+    const cleanUser = String(username || '').trim();
+    if (!cleanUrl || !cleanUser) return generateSalt(10);
+    const key = `${STORAGE_KEYS.AUTH_SALT_PREFIX}${cleanUrl}:${cleanUser}`;
+    try {
+      const existing = localStorage.getItem(key);
+      if (existing && /^[a-z0-9]{8,}$/.test(existing)) return existing;
+      const fresh = generateSalt(10);
+      localStorage.setItem(key, fresh);
+      return fresh;
+    } catch {
+      return generateSalt(10);
+    }
+  }
+
   buildUrl(endpoint, extraParams = {}) {
     const cleanEndpoint = endpoint.endsWith('.view') ? endpoint : `${endpoint}.view`;
     const url = new URL(`${this.baseUrl}/rest/${cleanEndpoint}`);
-    const salt = generateSalt(8);
+    const salt = this.getPersistedSalt(this.baseUrl, this.username);
     const token = md5Hex(this.password + salt);
 
     url.searchParams.set('u', this.username);
@@ -274,11 +367,22 @@ class SubsonicClient {
     return url.toString();
   }
 
-  async request(endpoint, extraParams = {}) {
+  async request(endpoint, extraParams = {}, options = {}) {
     const url = this.buildUrl(endpoint, extraParams);
-    const response = await fetch(url);
+    const timeoutMs = Number(options.timeoutMs) || 15000;
+    let response;
+    try {
+      response = await fetchWithTimeout(url, {}, timeoutMs);
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        throw new SubsonicRequestTimeoutError(`Request to ${endpoint} timed out`);
+      }
+      throw err;
+    }
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const err = new Error(`HTTP ${response.status}: ${response.statusText}`);
+      err.httpStatus = response.status;
+      throw err;
     }
     const json = await response.json();
     const root = json['subsonic-response'];
@@ -287,17 +391,28 @@ class SubsonicClient {
     }
     if (root.status === 'failed') {
       const msg = root.error?.message || 'Subsonic API error';
-      throw new Error(msg);
+      throw new SubsonicApiError(msg, root.error?.code);
     }
     return root;
   }
 
-  async ping() {
-    try {
-      const res = await this.request('ping');
+  async ping(options = {}) {
+    const { throwOnError = false, timeoutMs = 15000 } = options || {};
+    const runAttempt = async () => {
+      const res = await this.request('ping', {}, { timeoutMs });
       return res.status === 'ok';
-    } catch {
-      return false;
+    };
+    try {
+      return await runAttempt();
+    } catch (err) {
+      if (!throwOnError) return false;
+      const shouldRetry =
+        !(err instanceof SubsonicApiError) &&
+        !(typeof err?.httpStatus === 'number' && err.httpStatus >= 400 && err.httpStatus < 500);
+      if (shouldRetry) {
+        return await runAttempt();
+      }
+      throw err;
     }
   }
 
@@ -515,6 +630,15 @@ class SubsonicClient {
       return res.topSongs?.song || [];
     } catch {
       return [];
+    }
+  }
+
+  async getScanStatus() {
+    try {
+      const res = await this.request('getScanStatus');
+      return res.scanStatus || { scanning: false, count: 0 };
+    } catch {
+      return { scanning: false, count: 0 };
     }
   }
 
@@ -3622,6 +3746,12 @@ window.PlenripEngine = {
   DEFAULT_LYRICS_PRIORITY,
   PLACEHOLDER_IMAGE_HASH,
   SubsonicClient,
+  SubsonicApiError,
+  SubsonicRequestTimeoutError,
+  normalizeServerUrlInput,
+  isValidHttpUrl,
+  isMixedContentRisk,
+  formatServerHost,
   TitleTranslationStore,
   LyricsManager,
   HistoryStore,

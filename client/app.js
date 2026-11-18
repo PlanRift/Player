@@ -9,6 +9,12 @@
     DEFAULT_LYRICS_PRIORITY,
     PLACEHOLDER_IMAGE_HASH,
     SubsonicClient,
+    SubsonicApiError,
+    SubsonicRequestTimeoutError,
+    normalizeServerUrlInput,
+    isValidHttpUrl,
+    isMixedContentRisk,
+    formatServerHost,
     TitleTranslationStore,
     LyricsManager,
     HistoryStore,
@@ -978,6 +984,7 @@
   // Sidebar, Mobile Chrome & Navigation
   // ============================================================================
   const MAIN_VIEWS = [
+    'welcome',
     'home',
     'now-playing',
     'search',
@@ -992,6 +999,36 @@
     'favourites',
   ];
   const DETAIL_ROUTES = ['artist-detail', 'album-detail', 'playlist-detail'];
+
+  function readWalkthroughState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.WALKTHROUGH_STATE);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return {
+        status: ['in_progress', 'completed', 'skipped'].includes(parsed.status) ? parsed.status : 'in_progress',
+        skippedSteps: Array.isArray(parsed.skippedSteps) ? parsed.skippedSteps.filter((n) => Number.isInteger(n)) : [],
+        completedAt: typeof parsed.completedAt === 'number' ? parsed.completedAt : undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function writeWalkthroughState(next) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.WALKTHROUGH_STATE, JSON.stringify(next));
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  function needsFirstWalkthrough() {
+    if (!client.hasSavedCredentials()) return true;
+    const wt = readWalkthroughState();
+    return wt?.status === 'in_progress';
+  }
 
   function applySidebarState() {
     const sidebar = $('sidebar');
@@ -1016,8 +1053,12 @@
 
   function navigateTo(route, options = {}) {
     if (!MAIN_VIEWS.includes(route)) route = 'home';
-    if (state.route !== route) state.previousRoute = state.route;
+    const wasWelcome = state.route === 'welcome';
+    if (state.route !== route) {
+      state.previousRoute = wasWelcome ? 'home' : state.route;
+    }
     state.route = route;
+    const isWelcome = route === 'welcome';
     setMobileSidebar(false);
     // Multi-select is scoped to one view; leaving it clears the selection
     // so the action bar never acts on songs from a view the user left.
@@ -1025,6 +1066,15 @@
 
     for (const v of MAIN_VIEWS) {
       show($(`view-${v}`), v === route);
+    }
+
+    // Hide app chrome during onboarding walkthrough
+    show($('sidebar'), !isWelcome);
+    show($('bottom-player-bar'), !isWelcome);
+    if (isWelcome) {
+      show($('mobile-top-bar'), false);
+      show($('mobile-sidebar-backdrop'), false);
+      show($('error-banner'), false);
     }
 
     document.querySelectorAll('.sidebar-nav-btn[data-route]').forEach((btn) => {
@@ -1057,14 +1107,17 @@
 
     // Mobile chrome
     const isNp = route === 'now-playing';
-    show($('mobile-top-bar'), !isNp);
-    $('mobile-top-bar')?.classList.toggle('md:hidden', true);
-    const isDetail = DETAIL_ROUTES.includes(route);
-    show($('mobile-back-btn'), isDetail);
-    show($('mobile-menu-btn'), !isDetail);
-    $('bottom-player-bar')?.classList.toggle('max-md:hidden', isNp);
+    if (!isWelcome) {
+      show($('mobile-top-bar'), !isNp);
+      $('mobile-top-bar')?.classList.toggle('md:hidden', true);
+      const isDetail = DETAIL_ROUTES.includes(route);
+      show($('mobile-back-btn'), isDetail);
+      show($('mobile-menu-btn'), !isDetail);
+      $('bottom-player-bar')?.classList.toggle('max-md:hidden', isNp);
+    }
 
-    if (route === 'home') loadHomeView();
+    if (route === 'welcome') initWelcomeView();
+    else if (route === 'home') loadHomeView();
     else if (route === 'search') setTimeout(() => $('search-input')?.focus(), 30);
     else if (route === 'artists') libraryViews.artists.load();
     else if (route === 'albums') libraryViews.albums.load();
@@ -1080,10 +1133,11 @@
 
   function goBack() {
     const r = state.route;
+    if (r === 'welcome') return;
     if (r === 'album-detail') navigateTo(state.albumBackRoute || 'albums', { preserveScroll: true });
     else if (r === 'artist-detail') navigateTo('artists', { preserveScroll: true });
     else if (r === 'playlist-detail') navigateTo('playlists', { preserveScroll: true });
-    else navigateTo(state.previousRoute && state.previousRoute !== 'now-playing' ? state.previousRoute : 'home');
+    else navigateTo(state.previousRoute && state.previousRoute !== 'now-playing' && state.previousRoute !== 'welcome' ? state.previousRoute : 'home');
   }
 
   // ============================================================================
@@ -9702,13 +9756,13 @@
   let lastRowPlayingState = null;
 
   // ============================================================================
-  // Connection banner
+  // Connection banner & Typed Verification
   // ============================================================================
   function setConnectionError(msg) {
     state.connected = !msg;
     const banner = $('error-banner');
     if (banner) {
-      show(banner, Boolean(msg));
+      show(banner, Boolean(msg) && state.route !== 'welcome');
       if (msg) $('error-banner-msg').textContent = `${msg}. Verify server URL and credentials in Settings.`;
     }
     const ok = !msg;
@@ -9722,24 +9776,175 @@
     if (badge) {
       badge.textContent = ok ? 'Connected to Navidrome (Subsonic API v1.16.1)' : `Cannot reach server: ${msg}`;
     }
+    if (ok) {
+      show($('settings-server-error-box'), false);
+    }
+  }
+
+  function classifySubsonicError(err, serverUrl) {
+    if (err instanceof SubsonicApiError && err.code === 40) {
+      return {
+        errorKind: 'auth_failed',
+        title: 'Incorrect Username or Password',
+        message: 'Check your username and password and try again.',
+        focusField: 'pass',
+      };
+    }
+    if (err instanceof SubsonicApiError) {
+      return {
+        errorKind: 'unknown',
+        title: 'Server Error',
+        message: err.message || 'The Navidrome server returned an error.',
+        focusField: null,
+      };
+    }
+    if (err instanceof SubsonicRequestTimeoutError) {
+      return {
+        errorKind: 'timeout',
+        title: 'Navidrome Server Timed Out',
+        message: `No response from ${formatServerHost(serverUrl)} within 15 seconds.`,
+        focusField: 'url',
+      };
+    }
+    if (isMixedContentRisk(serverUrl)) {
+      return {
+        errorKind: 'unreachable',
+        title: 'Blocked by Browser Security',
+        message: 'This page is loaded over HTTPS, which blocks plain HTTP server URLs. Use https:// for your Navidrome server.',
+        focusField: 'url',
+      };
+    }
+    return {
+      errorKind: 'unreachable',
+      title: 'Navidrome Server Unreachable',
+      message: `Could not reach ${formatServerHost(serverUrl)}. Verify the URL and that Navidrome is running.`,
+      focusField: 'url',
+    };
+  }
+
+  function clearLibraryCachesForReconnect() {
+    artistAlbumCoverCache.clear();
+    artistImageCache.clear();
+    state.artists = null;
+    state.songs = null;
+    state.songsPromise = null;
+    state.albumsByType = {};
+    state.mergedAlbums = null;
+    state.searchIndex = null;
+    state.currentArtist = null;
+    state.currentAlbum = null;
+    state.currentPlaylist = null;
+    state.playlists = [];
+    state.favouriteSongs = [];
+    state.starredSongIds.clear();
+    state.starredAlbumIds.clear();
+    state.starredArtistIds.clear();
+    Object.values(libraryViews).forEach((v) => {
+      if (v?.view) v.view.items = null;
+    });
+    updateSidebarCounts();
+  }
+
+  async function verifyAndSaveNavidromeConfig({ serverUrl, username, password }) {
+    const prevUrl = client.baseUrl;
+    const prevUser = client.username;
+    const prevPass = client.password;
+
+    const cleanUrl = normalizeServerUrlInput(serverUrl);
+    const cleanUser = String(username || '').trim();
+    const rawPass = typeof password === 'string' ? password : '';
+
+    if (!cleanUrl || !cleanUser) {
+      return {
+        ok: false,
+        errorKind: 'missing_fields',
+        title: 'Missing Required Fields',
+        message: 'Server URL and Username are required.',
+        focusField: !cleanUrl ? 'url' : 'user',
+      };
+    }
+    if (!isValidHttpUrl(cleanUrl)) {
+      return {
+        ok: false,
+        errorKind: 'invalid_url',
+        title: 'Invalid Server URL',
+        message: 'Server URL must start with http:// or https://.',
+        focusField: 'url',
+      };
+    }
+
+    const serverOrUserChanged = cleanUrl !== prevUrl || cleanUser !== prevUser;
+    const hasNewPass = rawPass.length > 0;
+    if ((serverOrUserChanged || !prevPass) && !hasNewPass) {
+      if (serverOrUserChanged) {
+        try {
+          localStorage.removeItem(STORAGE_KEYS.NAVIDROME_PASS);
+        } catch {
+          // Ignore storage errors
+        }
+        client.password = '';
+      }
+      return {
+        ok: false,
+        errorKind: 'password_required',
+        title: 'Password Required',
+        message: serverOrUserChanged
+          ? 'Enter your password for the updated server or username.'
+          : 'Enter your Navidrome password.',
+        focusField: 'pass',
+      };
+    }
+
+    const effectivePass = hasNewPass ? rawPass : prevPass;
+    client.baseUrl = cleanUrl;
+    client.username = cleanUser;
+    client.password = effectivePass;
+
+    try {
+      const pingOk = await client.ping({ throwOnError: true, timeoutMs: 15000 });
+      if (!pingOk) {
+        throw new Error('Ping returned non-ok status');
+      }
+      client.saveConfig(cleanUrl, cleanUser, effectivePass);
+      if (serverOrUserChanged) {
+        clearLibraryCachesForReconnect();
+      }
+      setConnectionError(null);
+      return { ok: true, serverOrUserChanged };
+    } catch (err) {
+      client.baseUrl = prevUrl;
+      client.username = prevUser;
+      client.password = prevPass;
+      const mapped = classifySubsonicError(err, cleanUrl);
+      return { ok: false, ...mapped };
+    }
   }
 
   async function retryConnection() {
-    const ok = await client.ping();
-    if (ok) {
-      setConnectionError(null);
-      showToast('Connected to Navidrome');
-      await Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]);
-      state.artists = null;
-      state.songs = null;
-      state.songsPromise = null;
-      state.albumsByType = {};
-      Object.values(libraryViews).forEach((v) => (v.view.items = null));
-      navigateTo(state.route);
-    } else {
-      setConnectionError('Ping failed');
-      showToast('Could not connect to server');
+    try {
+      const ok = await client.ping({ throwOnError: true, timeoutMs: 15000 });
+      if (ok) {
+        setConnectionError(null);
+        showToast('Connected to Navidrome');
+        await Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]);
+        state.artists = null;
+        state.songs = null;
+        state.songsPromise = null;
+        state.albumsByType = {};
+        state.mergedAlbums = null;
+        Object.values(libraryViews).forEach((v) => (v.view.items = null));
+        if (state.route !== 'welcome') navigateTo(state.route);
+        return true;
+      }
+    } catch (err) {
+      const mapped = classifySubsonicError(err, client.baseUrl);
+      setConnectionError(mapped.title);
+      showToast(mapped.title);
+      return false;
     }
+    setConnectionError('Ping failed');
+    showToast('Could not connect to server');
+    return false;
   }
 
   // ============================================================================
@@ -9944,6 +10149,8 @@
     $('settings-server-url').value = client.baseUrl;
     $('settings-server-user').value = client.username;
     $('settings-server-pass').value = '';
+    $('settings-server-pass').placeholder = client.password ? 'Leave blank to keep existing' : 'Enter password';
+    show($('settings-server-error-box'), false);
 
     const nasUrlInput = $('settings-nas-url');
     if (nasUrlInput) {
@@ -10884,15 +11091,54 @@
     });
     on('settings-server-form', 'submit', async (e) => {
       e.preventDefault();
-      client.saveConfig($('settings-server-url').value, $('settings-server-user').value, $('settings-server-pass').value);
-      await retryConnection();
+      const errBox = $('settings-server-error-box');
+      show(errBox, false);
+      const res = await verifyAndSaveNavidromeConfig({
+        serverUrl: $('settings-server-url').value,
+        username: $('settings-server-user').value,
+        password: $('settings-server-pass').value,
+      });
+      if (!res.ok) {
+        if ($('settings-server-error-title')) $('settings-server-error-title').textContent = res.title || 'Connection error';
+        if ($('settings-server-error-msg')) $('settings-server-error-msg').textContent = res.message || 'Check server URL and credentials.';
+        show(errBox, true);
+        setConnectionError(res.title || 'Connection failed');
+        if (res.focusField === 'url') $('settings-server-url')?.focus();
+        else if (res.focusField === 'user') $('settings-server-user')?.focus();
+        else if (res.focusField === 'pass') $('settings-server-pass')?.focus();
+        refreshIcons();
+        return;
+      }
       $('settings-server-pass').value = '';
+      $('settings-server-pass').placeholder = 'Leave blank to keep existing';
+      showToast('Connected to Navidrome');
+      await Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]);
+      if (state.route !== 'welcome') navigateTo(state.route);
     });
     on('settings-reset-server-btn', 'click', async () => {
       client.saveConfig(DEFAULT_CONFIG.serverUrl, DEFAULT_CONFIG.username, DEFAULT_CONFIG.password);
       renderSettings();
-      showToast('Restored default Navidrome credentials');
+      showToast('Restored default Navidrome settings');
       await retryConnection();
+    });
+    on('settings-disconnect-server-btn', 'click', () => {
+      client.clearConfig();
+      clearLibraryCachesForReconnect();
+      setConnectionError('Disconnected from Navidrome server');
+      show($('error-banner'), false);
+      const badge = $('settings-ping-badge');
+      if (badge) badge.textContent = 'Disconnected from Navidrome server';
+      renderSettings();
+      showToast('Disconnected from Navidrome');
+    });
+    on('settings-rerun-welcome-btn', 'click', () => {
+      const wt = readWalkthroughState();
+      writeWalkthroughState({
+        status: 'in_progress',
+        skippedSteps: wt?.skippedSteps || [],
+      });
+      closeSettings();
+      navigateTo('welcome');
     });
 
     // NAS Storage Settings
@@ -10956,12 +11202,16 @@
       titleRerenderTimer = setTimeout(rerenderCurrentRoute, 350);
     });
 
+    bindWelcomeEvents();
+
     // Global keyboard shortcuts
     window.addEventListener('keydown', (e) => {
       const tag = (e.target?.tagName || '').toLowerCase();
       const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable;
+      const onWelcome = state.route === 'welcome';
 
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        if (onWelcome) return;
         e.preventDefault();
         closeSignatureView();
         navigateTo('search');
@@ -10985,16 +11235,19 @@
         if (state.signatureOpen) return closeSignatureView();
         if (state.queueOpen) return toggleQueueDrawer(false);
         if (state.lyricsDrawerOpen) return toggleLyricsDrawer(false);
+        if (onWelcome) return;
         return goBack();
       }
       if (typing) return;
       const k = e.key.toLowerCase();
 
       if (e.key === '/') {
+        if (onWelcome) return;
         e.preventDefault();
         closeSignatureView();
         navigateTo('search');
       } else if (e.key === '?') {
+        if (onWelcome) return;
         e.preventDefault();
         const hidden = $('shortcuts-modal').classList.contains('hidden');
         hidden ? openModal('shortcuts-modal') : closeModal('shortcuts-modal');
@@ -11002,9 +11255,11 @@
         e.preventDefault();
         audioEngine.togglePlayPause();
       } else if (e.key === ']' || k === 'n') {
+        if (onWelcome) return;
         e.preventDefault();
         audioEngine.next();
       } else if (e.key === '[' || k === 'p') {
+        if (onWelcome) return;
         e.preventDefault();
         audioEngine.previous();
       } else if (k === 'l' || e.key === 'ArrowRight') {
@@ -11014,16 +11269,20 @@
         e.preventDefault();
         audioEngine.seek(Math.max(0, (audioEngine.currentTime || 0) - 10));
       } else if (k === 's') {
+        if (onWelcome) return;
         e.preventDefault();
         audioEngine.toggleShuffle();
         renderQueueViews(true);
       } else if (k === 'r') {
+        if (onWelcome) return;
         e.preventDefault();
         audioEngine.cycleRepeatMode();
       } else if (k === 'q') {
+        if (onWelcome) return;
         e.preventDefault();
         toggleQueueDrawer();
       } else if (k === 'u') {
+        if (onWelcome) return;
         e.preventDefault();
         state.signatureOpen ? closeSignatureView() : openSignatureView();
       }
@@ -11040,6 +11299,578 @@
         updateSliderFill(e.target);
       }
     });
+  }
+
+  // ============================================================================
+  // Welcome Onboarding Walkthrough (5 Steps)
+  // ============================================================================
+  const welcomeState = {
+    step: 1,
+    skippedSteps: [],
+    busy: false,
+    step2Loading: false,
+    step2LoadedOnce: false,
+    samplePlaying: false,
+    step3BridgeProbed: false,
+    step4SearchOpen: false,
+    step4Timer: null,
+  };
+
+  function addSkippedStep(stepNum) {
+    if (!welcomeState.skippedSteps.includes(stepNum)) {
+      welcomeState.skippedSteps.push(stepNum);
+    }
+  }
+
+  function clearWelcomeStep1Errors() {
+    ['welcome-url-error', 'welcome-user-error', 'welcome-pass-error'].forEach((id) => {
+      const el = $(id);
+      if (el) {
+        el.textContent = '';
+        el.classList.add('hidden');
+      }
+    });
+    ['welcome-server-url', 'welcome-username', 'welcome-password'].forEach((id) => {
+      $(id)?.classList.remove('border-[#f0605a]');
+    });
+    show($('welcome-step1-alert'), false);
+  }
+
+  function setWelcomeFieldError(inputId, errorId, msg) {
+    const input = $(inputId);
+    const errEl = $(errorId);
+    if (input) input.classList.add('border-[#f0605a]');
+    if (errEl) {
+      errEl.innerHTML = `<i data-lucide="alert-circle" class="w-3.5 h-3.5 shrink-0"></i><span>${escapeHtml(msg)}</span>`;
+      errEl.classList.remove('hidden');
+    }
+  }
+
+  function setWelcomeStep(stepNum) {
+    const step = Math.max(1, Math.min(5, Number(stepNum) || 1));
+    welcomeState.step = step;
+
+    const label = $('welcome-step-label');
+    if (label) label.textContent = `Step ${step} of 5`;
+    const fill = $('welcome-progress-fill');
+    if (fill) fill.style.transform = `scaleX(${step / 5})`;
+    const card = $('welcome-card');
+    if (card) card.setAttribute('aria-label', `Walkthrough step ${step} of 5`);
+
+    for (let i = 1; i <= 5; i += 1) {
+      const panel = $(`welcome-step-${i}`);
+      if (!panel) continue;
+      const active = i === step;
+      panel.classList.toggle('hidden', !active);
+      if (active) {
+        panel.classList.remove('welcome-step-enter');
+        void panel.offsetWidth;
+        panel.classList.add('welcome-step-enter');
+      }
+    }
+
+    if (step === 1) {
+      clearWelcomeStep1Errors();
+    } else if (step === 2) {
+      void loadWelcomeStep2(false);
+    } else if (step === 3) {
+      void initWelcomeStep3();
+    } else if (step === 4) {
+      initWelcomeStep4();
+    } else if (step === 5) {
+      updateWelcomeStep5();
+    }
+    refreshIcons();
+  }
+
+  function initWelcomeView() {
+    const wt = readWalkthroughState();
+    welcomeState.skippedSteps = Array.isArray(wt?.skippedSteps) ? [...wt.skippedSteps] : [];
+    welcomeState.step2LoadedOnce = false;
+    welcomeState.step3BridgeProbed = false;
+    welcomeState.samplePlaying = false;
+    welcomeState.step4SearchOpen = false;
+
+    if ($('welcome-server-url')) $('welcome-server-url').value = client.baseUrl || DEFAULT_CONFIG.serverUrl;
+    if ($('welcome-username')) $('welcome-username').value = client.username || '';
+    if ($('welcome-password')) $('welcome-password').value = '';
+
+    const startStep = client.hasSavedCredentials() ? 2 : 1;
+    if (startStep === 1) {
+      state.connected = false;
+    }
+    setWelcomeStep(startStep);
+  }
+
+  async function loadWelcomeStep2(force = false) {
+    if ($('welcome-host-label')) {
+      $('welcome-host-label').textContent = formatServerHost(client.baseUrl);
+    }
+    if (welcomeState.step2Loading) return;
+    if (welcomeState.step2LoadedOnce && !force) return;
+
+    welcomeState.step2Loading = true;
+    show($('welcome-step2-loading'), true);
+    show($('welcome-step2-error'), false);
+    show($('welcome-step2-stats'), false);
+    show($('welcome-step2-empty'), false);
+
+    try {
+      if (force) {
+        state.songs = null;
+        state.songsPromise = null;
+        state.artists = null;
+        state.albumsByType = {};
+        state.mergedAlbums = null;
+      }
+      const [songs, artists, albums] = await Promise.all([
+        loadAllSongs(),
+        loadAllArtists(),
+        loadAllAlbums('newest'),
+      ]);
+
+      welcomeState.step2LoadedOnce = true;
+      show($('welcome-step2-loading'), false);
+
+      const tracksCount = Array.isArray(songs) ? songs.length : 0;
+      const artistsCount = Array.isArray(artists) ? artists.length : 0;
+      const albumsCount = Array.isArray(albums) ? albums.length : 0;
+
+      if (tracksCount === 0) {
+        const scan = await client.getScanStatus();
+        const emptyMsg = $('welcome-step2-empty-msg');
+        if (emptyMsg) {
+          emptyMsg.textContent = scan.scanning
+            ? `Navidrome is scanning your library... (${scan.count || 0} tracks scanned)`
+            : 'No tracks in this library yet.';
+        }
+        show($('welcome-step2-empty'), true);
+        refreshIcons();
+        return;
+      }
+
+      if ($('welcome-stat-tracks')) $('welcome-stat-tracks').textContent = tracksCount.toLocaleString();
+      if ($('welcome-stat-artists')) $('welcome-stat-artists').textContent = artistsCount.toLocaleString();
+      if ($('welcome-stat-albums')) $('welcome-stat-albums').textContent = albumsCount.toLocaleString();
+
+      const coversWrap = $('welcome-recent-covers');
+      if (coversWrap) {
+        coversWrap.innerHTML = '';
+        const sampleAlbums = (albums || []).slice(0, 4);
+        sampleAlbums.forEach((alb) => {
+          const box = document.createElement('div');
+          box.className = 'relative w-14 h-14 bg-zinc-950 border border-zinc-700 overflow-hidden flex items-center justify-center radius-inner shrink-0';
+          box.title = alb.name || 'Album';
+          const img = document.createElement('img');
+          img.alt = '';
+          img.className = 'hidden w-full h-full object-cover';
+          const fb = document.createElement('div');
+          fb.className = 'text-zinc-500 flex items-center justify-center';
+          fb.innerHTML = '<i data-lucide="disc" class="w-5 h-5"></i>';
+          box.appendChild(img);
+          box.appendChild(fb);
+          attachCoverImage(img, fb, alb.coverArt, null, 120);
+          coversWrap.appendChild(box);
+        });
+        show(coversWrap, sampleAlbums.length > 0);
+      }
+
+      show($('welcome-step2-stats'), true);
+      refreshIcons();
+    } catch (err) {
+      show($('welcome-step2-loading'), false);
+      const mapped = classifySubsonicError(err, client.baseUrl);
+      if ($('welcome-step2-error-msg')) {
+        $('welcome-step2-error-msg').textContent = mapped.message || 'Could not load library counts.';
+      }
+      show($('welcome-step2-error'), true);
+      refreshIcons();
+    } finally {
+      welcomeState.step2Loading = false;
+    }
+  }
+
+  function updateWelcomeStep2ContinueStyle() {
+    const nextBtn = $('welcome-step2-next-btn');
+    if (!nextBtn) return;
+    const active = welcomeState.samplePlaying;
+    nextBtn.classList.toggle('bg-emerald-400', active);
+    nextBtn.classList.toggle('hover:bg-emerald-300', active);
+    nextBtn.classList.toggle('text-zinc-950', active);
+    nextBtn.classList.toggle('font-semibold', active);
+    nextBtn.classList.toggle('bg-zinc-800', !active);
+    nextBtn.classList.toggle('hover:bg-zinc-700', !active);
+    nextBtn.classList.toggle('border', !active);
+    nextBtn.classList.toggle('border-zinc-600', !active);
+    nextBtn.classList.toggle('text-zinc-100', !active);
+  }
+
+  function renderWelcomeBridgeStatus(online, message = '') {
+    const dot = $('welcome-bridge-dot');
+    const txt = $('welcome-bridge-status-text');
+    const last = $('welcome-bridge-last-checked');
+    if (dot) {
+      dot.classList.remove('bg-zinc-500', 'bg-[#22c55e]', 'bg-[#f0605a]');
+      if (online === null) dot.classList.add('bg-zinc-500');
+      else if (online) dot.classList.add('bg-[#22c55e]');
+      else dot.classList.add('bg-[#f0605a]');
+    }
+    if (txt) txt.textContent = message;
+    if (last) {
+      last.textContent = online === null ? '' : `Last checked: ${new Date().toLocaleTimeString()}`;
+    }
+  }
+
+  function saveWelcomeBridgeInputs() {
+    const rawUrl = $('welcome-bridge-url')?.value?.trim() || '';
+    const rawKey = $('welcome-bridge-key')?.value?.trim() || '';
+    const cleanUrl = /^http:\/\/(localhost|127\.0\.0\.1):3001$/i.test(rawUrl) ? '' : rawUrl.replace(/\/+$/, '');
+    filesState.bridgeUrl = cleanUrl;
+    filesState.apiKey = rawKey;
+    try {
+      if (cleanUrl) {
+        localStorage.setItem('century.nas_url', cleanUrl);
+        localStorage.setItem('century.file_bridge_url', cleanUrl);
+      } else {
+        localStorage.removeItem('century.nas_url');
+        localStorage.removeItem('century.file_bridge_url');
+      }
+      if (rawKey) localStorage.setItem('century.nas_api_key', rawKey);
+      else localStorage.removeItem('century.nas_api_key');
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  async function testWelcomeBridgeConnection({ initialCheck = false } = {}) {
+    show($('welcome-bridge-error'), false);
+    renderWelcomeBridgeStatus(null, 'Checking file bridge...');
+    const online = await checkFilesBridge();
+    const base = getFileBridgeBase();
+    if (online) {
+      renderWelcomeBridgeStatus(true, `Connected to file bridge on ${base}`);
+      if (initialCheck) {
+        show($('welcome-bridge-fields'), false);
+        show($('welcome-bridge-edit-toggle'), true);
+        if ($('welcome-step3-next-btn')) $('welcome-step3-next-btn').textContent = 'Next';
+      }
+    } else {
+      renderWelcomeBridgeStatus(false, `File bridge not detected on ${base}`);
+      if (initialCheck) {
+        show($('welcome-bridge-fields'), true);
+        show($('welcome-bridge-edit-toggle'), false);
+        if ($('welcome-step3-next-btn')) $('welcome-step3-next-btn').textContent = 'Save & continue';
+      }
+    }
+    return online;
+  }
+
+  async function initWelcomeStep3() {
+    if ($('welcome-bridge-url')) {
+      const savedNas = (localStorage.getItem('century.nas_url') || localStorage.getItem('century.file_bridge_url') || '').trim();
+      $('welcome-bridge-url').value = /^http:\/\/(localhost|127\.0\.0\.1):3001$/i.test(savedNas) ? '' : savedNas;
+    }
+    if ($('welcome-bridge-key')) {
+      $('welcome-bridge-key').value = getFileBridgeApiKey();
+    }
+    show($('welcome-bridge-error'), false);
+    if (!welcomeState.step3BridgeProbed) {
+      welcomeState.step3BridgeProbed = true;
+      await testWelcomeBridgeConnection({ initialCheck: true });
+    }
+  }
+
+  function initWelcomeStep4() {
+    const isApple = /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
+    if ($('welcome-shortcut-kbd')) {
+      $('welcome-shortcut-kbd').textContent = isApple ? 'Cmd+K' : 'Ctrl+K';
+    }
+    if (!state.songs) void ensureLocalSearchIndex();
+  }
+
+  function openWelcomeStep4Search() {
+    welcomeState.step4SearchOpen = true;
+    show($('welcome-quick-search-wrap'), true);
+    const input = $('welcome-quick-search-input');
+    if (input) {
+      input.focus();
+      void runWelcomeStep4Search(input.value);
+    }
+  }
+
+  async function runWelcomeStep4Search(rawQuery) {
+    const q = String(rawQuery || '').trim();
+    const listEl = $('welcome-quick-search-results');
+    const clearBtn = $('welcome-quick-search-clear');
+    show(clearBtn, q.length > 0);
+    if (!listEl) return;
+
+    if (!q) {
+      listEl.innerHTML = '<div class="p-3 text-xs font-mono text-zinc-400">Type a few letters to search your local library.</div>';
+      return;
+    }
+
+    const res = await executeSmartSearch(q);
+    const items = [
+      ...(res.song || []).slice(0, 3).map((s) => ({ kind: 'song', item: s })),
+      ...(res.album || []).slice(0, 1).map((a) => ({ kind: 'album', item: a })),
+      ...(res.artist || []).slice(0, 1).map((a) => ({ kind: 'artist', item: a })),
+    ].slice(0, 5);
+
+    listEl.innerHTML = '';
+    if (items.length === 0) {
+      listEl.innerHTML = `<div class="p-3 text-xs font-mono text-zinc-400">No matches for "${escapeHtml(q)}".</div>`;
+      return;
+    }
+
+    items.forEach(({ kind, item }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'w-full min-h-11 sm:min-h-9 px-3 py-2 text-left hover:bg-zinc-900 flex items-center justify-between gap-3 text-xs transition-colors';
+      const title = kind === 'song' ? item.title : item.name;
+      const sub = kind === 'song' ? (item.artist || 'Song') : kind === 'album' ? (item.artist || 'Album') : 'Artist';
+      btn.innerHTML = `
+        <div class="min-w-0">
+          <div class="text-zinc-100 font-medium truncate">${escapeHtml(title || 'Untitled')}</div>
+          <div class="text-[11px] font-mono text-zinc-400 truncate">${escapeHtml(sub)}</div>
+        </div>
+        <span class="px-1.5 py-0.5 text-[10px] font-mono uppercase border border-zinc-700 bg-zinc-900 text-emerald-400 shrink-0">${escapeHtml(kind)}</span>`;
+      btn.addEventListener('click', async () => {
+        if (kind === 'song') {
+          playOrToggle(item, [item], 0, { contextName: 'Welcome Search', source: 'search' });
+          showToast(`Playing: ${item.title || 'Untitled'}`);
+        } else if (kind === 'album') {
+          const detail = await client.resolveAlbumSongs(item).catch(() => null);
+          if (detail?.song?.length) {
+            playSongs(detail.song, { contextName: detail.name, source: 'album' });
+            showToast(`Playing album: ${detail.name}`);
+          }
+        } else if (kind === 'artist') {
+          const detail = await client.getArtist(item.id).catch(() => null);
+          const firstAlb = detail?.album?.[0];
+          if (firstAlb) {
+            const albDetail = await client.resolveAlbumSongs(firstAlb).catch(() => null);
+            if (albDetail?.song?.length) {
+              playSongs(albDetail.song, { contextName: item.name, source: 'artists' });
+              showToast(`Playing ${item.name}`);
+            }
+          }
+        }
+      });
+      listEl.appendChild(btn);
+    });
+  }
+
+  function updateWelcomeStep5() {
+    const qLen = audioEngine?.queue?.length || 0;
+    const hint = $('welcome-queue-hint');
+    if (hint) {
+      hint.textContent = qLen > 0 ? `(${qLen} queued)` : '';
+      show(hint, qLen > 0);
+    }
+  }
+
+  function completeWelcomeToHome(skipped = false) {
+    if (skipped) {
+      addSkippedStep(3);
+      addSkippedStep(4);
+    }
+    writeWalkthroughState({
+      status: skipped ? 'skipped' : 'completed',
+      skippedSteps: welcomeState.skippedSteps,
+      completedAt: Date.now(),
+    });
+    void Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]).catch(() => {});
+    if (window.PlenripDiscovery?.flushScrobbleQueue) {
+      void window.PlenripDiscovery.flushScrobbleQueue(client);
+    }
+    loadAllArtists().catch(() => {});
+    navigateTo('home');
+  }
+
+  function bindWelcomeEvents() {
+    on('welcome-pass-toggle', 'click', () => {
+      const input = $('welcome-password');
+      if (!input) return;
+      const reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      setIcon($('welcome-pass-eye-icon'), reveal ? 'eye-off' : 'eye');
+    });
+
+    on('welcome-step1-form', 'submit', async (e) => {
+      e.preventDefault();
+      if (welcomeState.busy) return;
+      clearWelcomeStep1Errors();
+
+      const urlVal = $('welcome-server-url')?.value || '';
+      const userVal = $('welcome-username')?.value || '';
+      const passVal = $('welcome-password')?.value || '';
+      const btn = $('welcome-connect-btn');
+
+      welcomeState.busy = true;
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span>Connecting...</span>';
+        refreshIcons();
+      }
+
+      try {
+        const res = await verifyAndSaveNavidromeConfig({
+          serverUrl: urlVal,
+          username: userVal,
+          password: passVal,
+        });
+
+        if (!res.ok) {
+          if (res.errorKind === 'missing_fields') {
+            if (!normalizeServerUrlInput(urlVal)) setWelcomeFieldError('welcome-server-url', 'welcome-url-error', 'Server URL is required.');
+            if (!String(userVal).trim()) setWelcomeFieldError('welcome-username', 'welcome-user-error', 'Username is required.');
+          } else if (res.errorKind === 'invalid_url') {
+            setWelcomeFieldError('welcome-server-url', 'welcome-url-error', res.message);
+          } else if (res.errorKind === 'password_required') {
+            setWelcomeFieldError('welcome-password', 'welcome-pass-error', res.message);
+          }
+
+          if ($('welcome-step1-alert-title')) $('welcome-step1-alert-title').textContent = res.title || 'Connection failed';
+          if ($('welcome-step1-alert-msg')) $('welcome-step1-alert-msg').textContent = res.message || 'Check your details and try again.';
+          show($('welcome-step1-alert'), true);
+
+          if (res.focusField === 'url') $('welcome-server-url')?.focus();
+          else if (res.focusField === 'user') $('welcome-username')?.focus();
+          else if (res.focusField === 'pass') $('welcome-password')?.focus();
+          refreshIcons();
+          return;
+        }
+
+        if ($('welcome-password')) $('welcome-password').value = '';
+        welcomeState.step2LoadedOnce = false;
+        writeWalkthroughState({ status: 'in_progress', skippedSteps: welcomeState.skippedSteps });
+        void Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]).catch(() => {});
+        setWelcomeStep(2);
+      } finally {
+        welcomeState.busy = false;
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>Connect &amp; continue</span>';
+        }
+      }
+    });
+
+    on('welcome-step2-retry-btn', 'click', () => void loadWelcomeStep2(true));
+    on('welcome-refresh-counts-btn', 'click', () => void loadWelcomeStep2(true));
+    on('welcome-play-sample-btn', 'click', async () => {
+      let pool = Array.isArray(state.songs) && state.songs.length > 0 ? state.songs : [];
+      if (pool.length === 0) {
+        pool = await client.getRandomSongs(50).catch(() => []);
+      }
+      if (pool.length === 0) {
+        showToast('No playable tracks found yet.');
+        return;
+      }
+      playSongs(pool, { shuffle: true, contextName: 'Welcome Mix', source: 'home' });
+      const song = audioEngine?.currentSong || pool[0];
+      welcomeState.samplePlaying = true;
+      updateWelcomeStep2ContinueStyle();
+      if (song && $('welcome-now-playing-text')) {
+        $('welcome-now-playing-text').textContent = `Now playing: ${song.title || 'Untitled'} - ${song.artist || 'Unknown Artist'}`;
+        show($('welcome-now-playing-inline'), true);
+      }
+    });
+    on('welcome-step2-back-btn', 'click', () => setWelcomeStep(1));
+    on('welcome-step2-skip-btn', 'click', () => completeWelcomeToHome(true));
+    on('welcome-step2-next-btn', 'click', () => setWelcomeStep(3));
+
+    on('welcome-bridge-key-toggle', 'click', () => {
+      const input = $('welcome-bridge-key');
+      if (!input) return;
+      const reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      setIcon($('welcome-bridge-key-eye'), reveal ? 'eye-off' : 'eye');
+    });
+    on('welcome-bridge-edit-toggle', 'click', () => {
+      const fields = $('welcome-bridge-fields');
+      if (!fields) return;
+      const willOpen = fields.classList.contains('hidden');
+      show(fields, willOpen);
+      if ($('welcome-step3-next-btn')) {
+        $('welcome-step3-next-btn').textContent = willOpen ? 'Save & continue' : 'Next';
+      }
+    });
+    on('welcome-bridge-test-btn', 'click', async () => {
+      saveWelcomeBridgeInputs();
+      await testWelcomeBridgeConnection({ initialCheck: false });
+    });
+    on('welcome-step3-back-btn', 'click', () => setWelcomeStep(2));
+    on('welcome-step3-skip-btn', 'click', () => {
+      addSkippedStep(3);
+      writeWalkthroughState({ status: 'in_progress', skippedSteps: welcomeState.skippedSteps });
+      setWelcomeStep(4);
+    });
+    on('welcome-step3-next-btn', 'click', async () => {
+      const fieldsOpen = !$('welcome-bridge-fields')?.classList.contains('hidden');
+      if (fieldsOpen) saveWelcomeBridgeInputs();
+      const online = await testWelcomeBridgeConnection({ initialCheck: false });
+      if (online) {
+        setWelcomeStep(4);
+      } else {
+        const errEl = $('welcome-bridge-error');
+        if (errEl) {
+          errEl.textContent = 'File bridge is offline. Verify the URL and API key, or choose Skip for now.';
+          show(errEl, true);
+        }
+      }
+    });
+
+    on('welcome-shortcut-show-btn', 'click', openWelcomeStep4Search);
+    on('welcome-quick-search-input', 'input', (e) => {
+      const val = e.target.value;
+      clearTimeout(welcomeState.step4Timer);
+      welcomeState.step4Timer = setTimeout(() => void runWelcomeStep4Search(val), 120);
+    });
+    on('welcome-quick-search-input', 'keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        const input = $('welcome-quick-search-input');
+        if (input && input.value) {
+          input.value = '';
+          void runWelcomeStep4Search('');
+        } else {
+          input?.blur();
+        }
+      }
+    });
+    on('welcome-quick-search-clear', 'click', () => {
+      const input = $('welcome-quick-search-input');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      void runWelcomeStep4Search('');
+    });
+    on('welcome-step4-back-btn', 'click', () => setWelcomeStep(3));
+    on('welcome-step4-skip-btn', 'click', () => {
+      addSkippedStep(4);
+      writeWalkthroughState({ status: 'in_progress', skippedSteps: welcomeState.skippedSteps });
+      setWelcomeStep(5);
+    });
+    on('welcome-step4-next-btn', 'click', () => setWelcomeStep(5));
+
+    on('welcome-step5-back-btn', 'click', () => setWelcomeStep(4));
+    on('welcome-finish-btn', 'click', () => completeWelcomeToHome(false));
+
+    // Capture-phase Cmd/Ctrl+K inside Step 4
+    window.addEventListener(
+      'keydown',
+      (e) => {
+        if (state.route === 'welcome' && welcomeState.step === 4 && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          e.stopPropagation();
+          openWelcomeStep4Search();
+        }
+      },
+      true
+    );
   }
 
   function rerenderCurrentRoute() {
@@ -11119,13 +11950,23 @@
     updatePlayerBarUI();
     requestAnimationFrame(lyricsFrameLoop);
 
-    await Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]);
-    if (window.PlenripDiscovery?.flushScrobbleQueue) {
-      void window.PlenripDiscovery.flushScrobbleQueue(client);
+    if (needsFirstWalkthrough()) {
+      if (!client.hasSavedCredentials()) {
+        state.connected = false;
+        navigateTo('welcome');
+      } else {
+        navigateTo('welcome');
+        void Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]).catch(() => {});
+      }
+    } else {
+      await Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]);
+      if (window.PlenripDiscovery?.flushScrobbleQueue) {
+        void window.PlenripDiscovery.flushScrobbleQueue(client);
+      }
+      // Warm artist count in sidebar non-blockingly
+      loadAllArtists().catch(() => {});
+      navigateTo('home');
     }
-    // Warm artist count in sidebar non-blockingly
-    loadAllArtists().catch(() => {});
-    navigateTo('home');
     document.querySelectorAll('input[type="range"]').forEach(updateSliderFill);
     refreshIcons();
   }

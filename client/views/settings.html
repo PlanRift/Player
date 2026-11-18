@@ -534,14 +534,37 @@
                 </div>
               </div>
             </div>
-            <div class="pt-2 flex items-center justify-between gap-2">
-              <button
-                id="settings-reset-server-btn"
-                type="button"
-                class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
-              >
-                Reset to Default
-              </button>
+            <div id="settings-server-error-box" role="alert" class="hidden p-3 bg-[#f0605a]/10 border border-[#f0605a]/40 radius-inner flex items-start gap-2.5 text-xs">
+              <i data-lucide="alert-circle" class="w-4 h-4 text-[#f0605a] shrink-0 mt-0.5"></i>
+              <div class="min-w-0">
+                <p id="settings-server-error-title" class="font-medium text-zinc-100">Connection error</p>
+                <p id="settings-server-error-msg" class="font-mono text-[11px] text-zinc-300 mt-0.5 break-words"></p>
+              </div>
+            </div>
+            <div class="pt-2 flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  id="settings-reset-server-btn"
+                  type="button"
+                  class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
+                >
+                  Reset to Default
+                </button>
+                <button
+                  id="settings-disconnect-server-btn"
+                  type="button"
+                  class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#f0605a] text-xs font-mono text-[#f0605a]"
+                >
+                  Disconnect
+                </button>
+                <button
+                  id="settings-rerun-welcome-btn"
+                  type="button"
+                  class="h-9 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200"
+                >
+                  Re-run Setup
+                </button>
+              </div>
               <button
                 type="submit"
                 class="h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold transition-colors"

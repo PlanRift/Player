@@ -1,0 +1,438 @@
+<!-- VIEW: WELCOME (5-Step First-Run Onboarding & Navidrome Login) -->
+<section id="view-welcome" class="hidden w-full min-h-full flex flex-col px-4 py-6 sm:px-6 overflow-y-auto">
+  <div class="w-full max-w-xl mx-auto my-auto space-y-4">
+    <!-- Progress Header -->
+    <header class="space-y-2">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2 min-w-0">
+          <img src="/img/logo.png" alt="" class="w-5 h-5 object-contain shrink-0" />
+          <span class="font-display text-base text-zinc-100 tracking-tight truncate">Plenrip Audio</span>
+        </div>
+        <span id="welcome-step-label" class="font-mono tabular-nums text-xs text-zinc-400 shrink-0">Step 1 of 5</span>
+      </div>
+      <div class="h-1 w-full bg-zinc-800 radius-inner overflow-hidden">
+        <div id="welcome-progress-fill" class="h-full w-full bg-emerald-400 origin-left transition-transform duration-200" style="transform: scaleX(0.2)"></div>
+      </div>
+    </header>
+
+    <!-- Main Walkthrough Card -->
+    <section id="welcome-card" aria-label="Walkthrough step 1 of 5" class="studio-panel p-5 sm:p-6 bg-zinc-900/90 space-y-5 overflow-hidden">
+      <!-- STEP 1: Connect your library -->
+      <div id="welcome-step-1" class="welcome-step-enter space-y-5">
+        <div>
+          <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-tight">Connect your library</h1>
+          <p class="font-mono text-xs text-zinc-400 mt-1.5">Sign in to your Navidrome server to load your catalog.</p>
+        </div>
+
+        <form id="welcome-step1-form" novalidate class="space-y-4">
+          <div class="space-y-1">
+            <label for="welcome-server-url" class="block text-xs font-mono text-zinc-400">SERVER URL</label>
+            <input
+              id="welcome-server-url"
+              type="url"
+              inputmode="url"
+              autocomplete="url"
+              placeholder="http://127.0.0.1:4533"
+              class="w-full min-h-11 sm:min-h-9 h-11 sm:h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono select-text"
+            />
+            <p class="text-[11px] font-mono text-zinc-400">Example: http://127.0.0.1:4533 or music.example.com</p>
+            <p id="welcome-url-error" class="hidden text-[11px] font-mono text-[#f0605a] flex items-center gap-1.5 pt-0.5"></p>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="space-y-1">
+              <label for="welcome-username" class="block text-xs font-mono text-zinc-400">USERNAME</label>
+              <input
+                id="welcome-username"
+                type="text"
+                autocomplete="username"
+                placeholder="Your Navidrome username"
+                class="w-full min-h-11 sm:min-h-9 h-11 sm:h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono select-text"
+              />
+              <p id="welcome-user-error" class="hidden text-[11px] font-mono text-[#f0605a] flex items-center gap-1.5 pt-0.5"></p>
+            </div>
+
+            <div class="space-y-1">
+              <label for="welcome-password" class="block text-xs font-mono text-zinc-400">PASSWORD</label>
+              <div class="relative">
+                <input
+                  id="welcome-password"
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="Password"
+                  class="w-full min-h-11 sm:min-h-9 h-11 sm:h-9 pl-3 pr-11 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono select-text"
+                />
+                <button
+                  id="welcome-pass-toggle"
+                  type="button"
+                  aria-label="Show or hide password"
+                  title="Show / Hide Password"
+                  class="absolute right-1 top-1/2 -translate-y-1/2 min-w-9 min-h-9 sm:min-w-7 sm:min-h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100"
+                >
+                  <i id="welcome-pass-eye-icon" data-lucide="eye" class="w-4 h-4"></i>
+                </button>
+              </div>
+              <p id="welcome-pass-error" class="hidden text-[11px] font-mono text-[#f0605a] flex items-center gap-1.5 pt-0.5"></p>
+            </div>
+          </div>
+
+          <div id="welcome-step1-alert" role="alert" class="hidden p-3 bg-[#f0605a]/10 border border-[#f0605a]/40 radius-inner flex items-start gap-2.5">
+            <i data-lucide="alert-circle" class="w-4 h-4 text-[#f0605a] shrink-0 mt-0.5"></i>
+            <div class="min-w-0 text-xs">
+              <p id="welcome-step1-alert-title" class="font-medium text-zinc-100">Connection failed</p>
+              <p id="welcome-step1-alert-msg" class="font-mono text-[11px] text-zinc-300 mt-0.5 break-words"></p>
+            </div>
+          </div>
+
+          <div class="pt-2 flex justify-end">
+            <button
+              id="welcome-connect-btn"
+              type="submit"
+              class="w-full sm:w-auto min-h-11 sm:min-h-9 px-5 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center justify-center gap-2 transition-colors"
+            >
+              <span>Connect &amp; continue</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- STEP 2: Your library is ready -->
+      <div id="welcome-step-2" class="hidden welcome-step-enter space-y-5">
+        <div>
+          <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-tight">Your library is ready</h1>
+          <p class="text-xs text-zinc-400 mt-1.5">
+            <span id="welcome-host-label" class="font-mono text-zinc-200">127.0.0.1:4533</span>
+            <span class="font-mono text-zinc-400"> · Connected and ready to play.</span>
+          </p>
+        </div>
+
+        <!-- Loading Skeleton -->
+        <div id="welcome-step2-loading" class="space-y-3">
+          <div class="grid grid-cols-3 gap-2.5">
+            <div class="h-16 bg-zinc-950 border border-zinc-800 skeleton-shimmer radius-inner"></div>
+            <div class="h-16 bg-zinc-950 border border-zinc-800 skeleton-shimmer radius-inner"></div>
+            <div class="h-16 bg-zinc-950 border border-zinc-800 skeleton-shimmer radius-inner"></div>
+          </div>
+          <p class="text-xs font-mono text-zinc-400">Loading library counts...</p>
+        </div>
+
+        <!-- Error State -->
+        <div id="welcome-step2-error" role="alert" class="hidden p-3.5 bg-[#f0605a]/10 border border-[#f0605a]/40 radius-inner space-y-2.5">
+          <div class="flex items-start gap-2.5">
+            <i data-lucide="alert-circle" class="w-4 h-4 text-[#f0605a] shrink-0 mt-0.5"></i>
+            <p id="welcome-step2-error-msg" class="text-xs font-mono text-zinc-200"></p>
+          </div>
+          <button
+            id="welcome-step2-retry-btn"
+            type="button"
+            class="min-h-11 sm:min-h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-100"
+          >
+            Retry
+          </button>
+        </div>
+
+        <!-- Populated Library Stats -->
+        <div id="welcome-step2-stats" class="hidden space-y-4">
+          <div class="grid grid-cols-3 gap-2.5">
+            <div class="p-3 bg-zinc-950 border border-zinc-800 radius-inner">
+              <div id="welcome-stat-tracks" class="text-xl sm:text-2xl font-mono tabular-nums text-zinc-100">0</div>
+              <div class="text-[11px] font-mono text-zinc-400 mt-0.5">Tracks</div>
+            </div>
+            <div class="p-3 bg-zinc-950 border border-zinc-800 radius-inner">
+              <div id="welcome-stat-artists" class="text-xl sm:text-2xl font-mono tabular-nums text-zinc-100">0</div>
+              <div class="text-[11px] font-mono text-zinc-400 mt-0.5">Artists</div>
+            </div>
+            <div class="p-3 bg-zinc-950 border border-zinc-800 radius-inner">
+              <div id="welcome-stat-albums" class="text-xl sm:text-2xl font-mono tabular-nums text-zinc-100">0</div>
+              <div class="text-[11px] font-mono text-zinc-400 mt-0.5">Albums</div>
+            </div>
+          </div>
+
+          <div id="welcome-recent-covers" class="hidden flex items-center gap-2.5 flex-wrap"></div>
+
+          <div class="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              id="welcome-play-sample-btn"
+              type="button"
+              class="min-h-11 sm:min-h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold inline-flex items-center gap-2 transition-colors"
+            >
+              <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+              <span>Play something</span>
+            </button>
+            <div id="welcome-now-playing-inline" class="hidden min-w-0 flex-1 flex items-center gap-2 text-xs font-mono text-zinc-300">
+              <i data-lucide="volume-2" class="w-3.5 h-3.5 text-emerald-400 shrink-0"></i>
+              <span id="welcome-now-playing-text" class="truncate"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty / Scanning State -->
+        <div id="welcome-step2-empty" class="hidden p-4 bg-zinc-950 border border-zinc-800 radius-inner space-y-2.5">
+          <p id="welcome-step2-empty-msg" class="text-xs font-mono text-zinc-300">No tracks in this library yet.</p>
+          <button
+            id="welcome-refresh-counts-btn"
+            type="button"
+            class="min-h-11 sm:min-h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 inline-flex items-center gap-1.5"
+          >
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            <span>Refresh counts</span>
+          </button>
+        </div>
+
+        <div class="pt-2 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2">
+          <button
+            id="welcome-step2-back-btn"
+            type="button"
+            class="min-h-11 sm:min-h-9 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200"
+          >
+            Back
+          </button>
+          <div class="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2">
+            <button
+              id="welcome-step2-skip-btn"
+              type="button"
+              class="min-h-11 sm:min-h-9 px-3.5 text-xs font-mono text-zinc-400 hover:text-zinc-100"
+            >
+              Browse my library instead
+            </button>
+            <button
+              id="welcome-step2-next-btn"
+              type="button"
+              class="min-h-11 sm:min-h-9 px-4 bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 text-xs font-mono text-zinc-100"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 3: Files, if you want them -->
+      <div id="welcome-step-3" class="hidden welcome-step-enter space-y-5">
+        <div>
+          <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-tight">Files, if you want them</h1>
+          <p class="font-mono text-xs text-zinc-400 mt-1.5">Optional NAS File Bridge for uploads, folder browsing, and audio tag editing.</p>
+        </div>
+
+        <div class="p-3.5 bg-zinc-950 border border-zinc-800 radius-inner flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-start sm:items-center gap-2.5 min-w-0">
+            <span id="welcome-bridge-dot" class="w-2.5 h-2.5 bg-zinc-500 pill-round shrink-0 mt-1 sm:mt-0"></span>
+            <div class="min-w-0">
+              <p id="welcome-bridge-status-text" class="text-xs font-mono text-zinc-200 break-words">Checking file bridge...</p>
+              <p id="welcome-bridge-last-checked" class="text-[11px] font-mono text-zinc-400 mt-0.5"></p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              id="welcome-bridge-edit-toggle"
+              type="button"
+              class="hidden min-h-11 sm:min-h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-300"
+            >
+              Edit bridge settings
+            </button>
+            <button
+              id="welcome-bridge-test-btn"
+              type="button"
+              class="min-h-11 sm:min-h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200"
+            >
+              Test Connection
+            </button>
+          </div>
+        </div>
+
+        <div id="welcome-bridge-fields" class="space-y-3">
+          <div class="space-y-1">
+            <label for="welcome-bridge-url" class="block text-xs font-mono text-zinc-400">BRIDGE URL</label>
+            <input
+              id="welcome-bridge-url"
+              type="text"
+              placeholder="Leave blank for /bridge or enter http://localhost:3001"
+              class="w-full min-h-11 sm:min-h-9 h-11 sm:h-9 px-3 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono select-text"
+            />
+          </div>
+
+          <div class="space-y-1">
+            <label for="welcome-bridge-key" class="block text-xs font-mono text-zinc-400">API KEY</label>
+            <div class="relative">
+              <input
+                id="welcome-bridge-key"
+                type="password"
+                placeholder="Enter x-api-key if configured"
+                class="w-full min-h-11 sm:min-h-9 h-11 sm:h-9 pl-3 pr-11 bg-zinc-950 border border-zinc-700 text-xs text-zinc-100 font-mono select-text"
+              />
+              <button
+                id="welcome-bridge-key-toggle"
+                type="button"
+                aria-label="Show or hide API key"
+                title="Show / Hide API Key"
+                class="absolute right-1 top-1/2 -translate-y-1/2 min-w-9 min-h-9 sm:min-w-7 sm:min-h-7 flex items-center justify-center text-zinc-400 hover:text-zinc-100"
+              >
+                <i id="welcome-bridge-key-eye" data-lucide="eye" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <div id="welcome-bridge-error" role="alert" class="hidden p-3 bg-[#f0605a]/10 border border-[#f0605a]/40 radius-inner text-xs font-mono text-[#f0605a]"></div>
+        </div>
+
+        <div class="pt-2 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2">
+          <button
+            id="welcome-step3-back-btn"
+            type="button"
+            class="min-h-11 sm:min-h-9 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200"
+          >
+            Back
+          </button>
+          <div class="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2">
+            <button
+              id="welcome-step3-skip-btn"
+              type="button"
+              class="min-h-11 sm:min-h-9 px-3.5 text-xs font-mono text-zinc-400 hover:text-zinc-100"
+            >
+              Skip for now
+            </button>
+            <button
+              id="welcome-step3-next-btn"
+              type="button"
+              class="min-h-11 sm:min-h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold"
+            >
+              Save &amp; continue
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 4: One shortcut -->
+      <div id="welcome-step-4" class="hidden welcome-step-enter space-y-5">
+        <div>
+          <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-tight">One shortcut</h1>
+          <p class="font-mono text-xs text-zinc-400 mt-1.5">Jump to any artist, album, or song from anywhere.</p>
+        </div>
+
+        <div id="welcome-shortcut-box" class="p-4 bg-zinc-950 border border-zinc-800 radius-inner flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5 text-xs text-zinc-200">
+            <span>Press</span>
+            <kbd id="welcome-shortcut-kbd" class="px-2 py-1 bg-zinc-900 border border-zinc-700 font-mono text-emerald-400">Ctrl+K</kbd>
+            <span>to search your library</span>
+          </div>
+          <button
+            id="welcome-shortcut-show-btn"
+            type="button"
+            class="min-h-11 sm:min-h-8 px-3 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 shrink-0"
+          >
+            Show me
+          </button>
+        </div>
+
+        <div id="welcome-quick-search-wrap" class="hidden space-y-2.5">
+          <div class="relative">
+            <i data-lucide="search" class="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"></i>
+            <input
+              id="welcome-quick-search-input"
+              type="text"
+              placeholder="Try an artist, album, or track..."
+              aria-label="Practice search"
+              class="w-full min-h-11 sm:min-h-9 h-11 sm:h-9 pl-9 pr-9 bg-zinc-950 border border-emerald-400/70 text-xs text-zinc-100 font-sans select-text"
+            />
+            <button
+              id="welcome-quick-search-clear"
+              type="button"
+              aria-label="Clear search"
+              class="hidden absolute right-2 top-1/2 -translate-y-1/2 min-w-8 min-h-8 flex items-center justify-center text-zinc-400 hover:text-zinc-100"
+            >
+              <i data-lucide="x" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+          <div id="welcome-quick-search-results" class="border border-zinc-800 bg-zinc-950 divide-y divide-zinc-800/70 max-h-56 overflow-y-auto radius-inner"></div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          <div class="flex items-center justify-between p-2.5 bg-zinc-950 border border-zinc-800 radius-inner">
+            <span class="text-zinc-300">Play or pause</span>
+            <kbd class="font-mono text-emerald-400">Space</kbd>
+          </div>
+          <div class="flex items-center justify-between p-2.5 bg-zinc-950 border border-zinc-800 radius-inner">
+            <span class="text-zinc-300">Seek 10 seconds</span>
+            <kbd class="font-mono text-emerald-400">Left / Right</kbd>
+          </div>
+        </div>
+
+        <div class="pt-2 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2">
+          <button
+            id="welcome-step4-back-btn"
+            type="button"
+            class="min-h-11 sm:min-h-9 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200"
+          >
+            Back
+          </button>
+          <div class="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2">
+            <button
+              id="welcome-step4-skip-btn"
+              type="button"
+              class="min-h-11 sm:min-h-9 px-3.5 text-xs font-mono text-zinc-400 hover:text-zinc-100"
+            >
+              Skip
+            </button>
+            <button
+              id="welcome-step4-next-btn"
+              type="button"
+              class="min-h-11 sm:min-h-9 px-4 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 5: You're set. -->
+      <div id="welcome-step-5" class="hidden welcome-step-enter space-y-5">
+        <div>
+          <h1 class="font-display font-normal text-2xl sm:text-3xl tracking-tight text-zinc-100 leading-tight">You're set.</h1>
+          <p class="font-mono text-xs text-zinc-400 mt-1.5">Here are three quick places to start from.</p>
+        </div>
+
+        <ul class="space-y-2 text-xs">
+          <li class="p-3 bg-zinc-950 border border-zinc-800 radius-inner flex items-center justify-between gap-3">
+            <div>
+              <span class="font-medium text-zinc-100">Search</span>
+              <span class="block text-zinc-400 mt-0.5">Instant local matching across original, kana, romaji, and translated titles.</span>
+            </div>
+            <kbd class="font-mono text-emerald-400 shrink-0">/</kbd>
+          </li>
+          <li class="p-3 bg-zinc-950 border border-zinc-800 radius-inner flex items-center justify-between gap-3">
+            <div>
+              <span class="font-medium text-zinc-100">Queue <span id="welcome-queue-hint" class="hidden font-mono text-emerald-400 ml-1"></span></span>
+              <span class="block text-zinc-400 mt-0.5">Reorder tracks, start Radio, and control AutoPlay from the slide-out drawer.</span>
+            </div>
+            <kbd class="font-mono text-emerald-400 shrink-0">Q</kbd>
+          </li>
+          <li class="p-3 bg-zinc-950 border border-zinc-800 radius-inner flex items-center justify-between gap-3">
+            <div>
+              <span class="font-medium text-zinc-100">Lyrics</span>
+              <span class="block text-zinc-400 mt-0.5">Open the Listening Room for word-synced lyrics, Romaji, and timing offsets.</span>
+            </div>
+            <kbd class="font-mono text-emerald-400 shrink-0">U</kbd>
+          </li>
+        </ul>
+
+        <p class="text-[11px] font-mono text-zinc-400">Everything here can be changed later in Settings.</p>
+
+        <div class="pt-2 border-t border-zinc-800 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2">
+          <button
+            id="welcome-step5-back-btn"
+            type="button"
+            class="min-h-11 sm:min-h-9 px-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200"
+          >
+            Back
+          </button>
+          <button
+            id="welcome-finish-btn"
+            type="button"
+            class="min-h-11 sm:min-h-9 px-5 bg-emerald-400 hover:bg-emerald-300 text-zinc-950 text-xs font-mono font-semibold"
+          >
+            Start listening
+          </button>
+        </div>
+      </div>
+    </section>
+  </div>
+</section>

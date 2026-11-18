@@ -642,6 +642,30 @@ try {
 
     # --- NAS file bridge (Node, port 3001) ---
     if ($Bridge -ne "0") {
+        $RootExpressDir = Join-Path $ProjectDir "node_modules\express"
+        $RootCorsDir = Join-Path $ProjectDir "node_modules\cors"
+        $RootMulterDir = Join-Path $ProjectDir "node_modules\multer"
+        if (-not (Test-Path $RootExpressDir) -or -not (Test-Path $RootCorsDir) -or -not (Test-Path $RootMulterDir)) {
+            Write-Log "Installing server/file-bridge dependencies..."
+            $NpmCommand = Get-Command "npm.cmd" -CommandType Application -ErrorAction SilentlyContinue
+            if (-not $NpmCommand) {
+                $NpmCommand = Get-Command "npm" -CommandType Application -ErrorAction SilentlyContinue
+            }
+            Push-Location $ProjectDir
+            try {
+                if ($NpmCommand) {
+                    & $NpmCommand.Source install --no-audit --no-fund
+                } else {
+                    & $BunCommand.Source install
+                }
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Dependency install failed for root server/file-bridge (exit code $LASTEXITCODE)."
+                }
+            } finally {
+                Pop-Location
+            }
+        }
+
         $NasKeyFile = Join-Path $ProjectDir ".nas-api-key"
         if ([string]::IsNullOrWhiteSpace($env:NAS_API_KEY)) {
             if (Test-Path -LiteralPath $NasKeyFile -PathType Leaf) {
