@@ -4,6 +4,13 @@
  * Inspired by PlanRift.github.io (CustomEase "inOut" & "outSmooth").
  * Edit the ANIM_CONFIG object below to customize timings, eases, distances,
  * intro text, or toggle individual animations on/off.
+ *
+ * Performance Architecture:
+ * - Strict gsap.context() lifecycle per route & transition (reverted on exit)
+ * - 100% GPU-composited transforms (x, y, scale, opacity) + force3D: true
+ * - Zero layout-triggering GSAP properties (no width/height/top/left/overflow)
+ * - Deferred ScrollTrigger.refresh() via rAF after incoming DOM settles
+ * - gsap.quickTo() for high-frequency pointer/drag/scroll interactions
  * ========================================================================== */
 (function () {
   'use strict';
@@ -69,32 +76,32 @@
 
       // Single direct scroll UP / DOWN between verticalStack routes (even when skipping levels)
       verticalScroll: {
-        distance: 112,         // Vertical travel distance in pixels
-        outDuration: 0.36,
-        inDuration: 0.56,
-        outEase: 'outSmooth',
+        distance: 96,          // Vertical GPU travel distance in pixels
+        outDuration: 0.16,     // Snappy GPU exit before single-write DOM swap
+        inDuration: 0.52,
+        outEase: 'power2.in',
         inEase: 'outSmooth',
       },
 
       // 2A: Snappy Portfolio Glide (Playlists, Playlist Detail, Favourites, Artist/Album Detail)
       portfolioGlide: {
-        outDuration: 0.24,
-        outScale: 0.96,
+        outDuration: 0.16,
+        outScale: 0.97,
         outEase: 'power1.in',
-        inDuration: 0.52,
-        inY: 26,
+        inDuration: 0.5,
+        inY: 24,
         inEase: 'outSmooth',
         staggerCards: true,
-        staggerAmount: 0.025,
-        staggerMaxItems: 16,
-        staggerY: 16,
-        staggerDuration: 0.42,
+        staggerAmount: 0.022,
+        staggerMaxItems: 12,
+        staggerY: 14,
+        staggerDuration: 0.38,
       },
 
       // Normal clean fade-in when clicking the song title/cover on the bottom player bar -> Now Playing
       playerTitleFade: {
-        outDuration: 0.2,
-        inDuration: 0.36,
+        outDuration: 0.14,
+        inDuration: 0.34,
         ease: 'power1.out',
       },
     },
@@ -150,11 +157,10 @@
       ease: 'inOut',
     },
 
-    // Sidebar width collapse/expand
+    // Sidebar collapse/expand (GPU-only transform settle, zero width-reflow tweening)
     sidebarCollapse: {
-      expandedWidth: 240,
-      collapsedWidth: 64,
-      duration: 0.34,
+      duration: 0.3,
+      shiftX: 10,
       ease: 'outSmooth',
     },
 
@@ -193,7 +199,7 @@
   };
 
   // ==========================================================================
-  // 2. PROTECTED ZONES & GSAP INITIALIZATION
+  // 2. PROTECTED ZONES, GSAP CONFIG & LIFECYCLE STATE
   // ==========================================================================
   const PROTECTED_MODAL_IDS = new Set([
     'files-metadata-modal',
@@ -210,20 +216,29 @@
     'input[type="range"]',
   ].join(', ');
 
+  const GPU_CLEAR_PROPS = 'transform,opacity,willChange';
+
   let easesRegistered = false;
   let introStarted = false;
-  let introTimeline = null;
+  let introContext = null;
 
-  let activeRouteTimeline = null;
+  // Strict per-route & per-transition gsap.context() handles
+  let activeRouteContext = null;
+  let activeTransitionContext = null;
   let activeOutgoingEl = null;
   let activeIncomingEl = null;
-  let activeRouteMainEl = null;
+  let pendingRefreshRafId = null;
 
-  let toastTimeline = null;
-  let activeModalTweens = new WeakMap();
-  let activeDrawerTweens = new WeakMap();
-  let sigTimeline = null;
-  let contextMenuTween = null;
+  // Tracked overlay & utility handles (prevent orphaned tickers)
+  let toastContext = null;
+  let sigContext = null;
+  let contextMenuContext = null;
+  let sidebarContext = null;
+  let welcomeStepContext = null;
+  const activeModalContexts = new WeakMap();
+  const activeDrawerContexts = new WeakMap();
+  const activeCoverFlyTimelines = new Set();
+  const activeCoverGhostTimers = new Set();
 
   function hasGsap() {
     return typeof window.gsap !== 'undefined';
@@ -232,6 +247,7 @@
   function registerCustomEases() {
     if (easesRegistered || !hasGsap()) return;
     try {
+      window.gsap.config({ force3D: true, nullTargetWarn: false });
       if (typeof window.CustomEase !== 'undefined') {
         window.gsap.registerPlugin(window.CustomEase);
         window.CustomEase.create('inOut', ANIM_CONFIG.eases.inOut);
@@ -268,7 +284,33 @@
     return document.getElementById(id);
   }
 
-  // Register eases immediately if GSAP is already loaded
+  function revertContext(ctx) {
+    if (ctx && typeof ctx.revert === 'function') {
+      try {
+        ctx.revert();
+      } catch {
+        // Ignore already-reverted context errors
+      }
+    }
+    return null;
+  }
+
+  // Defer ScrollTrigger.refresh() until after incoming DOM & GPU transitions settle
+  function scheduleScrollTriggerRefresh() {
+    if (pendingRefreshRafId !== null) {
+      cancelAnimationFrame(pendingRefreshRafId);
+      pendingRefreshRafId = null;
+    }
+    if (typeof window.ScrollTrigger?.refresh !== 'function') return;
+    pendingRefreshRafId = requestAnimationFrame(() => {
+      pendingRefreshRafId = null;
+      if (typeof window.ScrollTrigger?.refresh === 'function') {
+        window.ScrollTrigger.refresh();
+      }
+    });
+  }
+
+  // Register eases & GPU defaults immediately if GSAP is already loaded
   registerCustomEases();
 
   // ==========================================================================
@@ -276,10 +318,7 @@
   // ==========================================================================
   function hideIntroImmediately() {
     introStarted = true;
-    if (introTimeline) {
-      introTimeline.kill();
-      introTimeline = null;
-    }
+    introContext = revertContext(introContext);
     const overlay = $('app-intro-overlay');
     if (overlay) {
       if (hasGsap()) window.gsap.killTweensOf(overlay);
@@ -302,6 +341,8 @@
   // 1A: Full Portfolio Intro -> reveals Login / Welcome view (when NOT logged in)
   function playLoggedOutIntro(options = {}) {
     introStarted = true;
+    introContext = revertContext(introContext);
+
     const cfg = ANIM_CONFIG.introLoggedOut;
     const overlay = $('app-intro-overlay');
     const welcomeEl = options.welcomeEl || $('view-welcome');
@@ -334,54 +375,7 @@
     const welcomeHeader = welcomeEl?.querySelector('header');
     const revealTargets = [welcomeHeader, welcomeCard].filter(Boolean);
 
-    if (revealTargets.length > 0) {
-      gsap.set(revealTargets, { opacity: 0, y: cfg.welcomeRevealY, scale: cfg.welcomeRevealScale });
-    }
-
     let finished = false;
-    const finishAll = (skipped = false) => {
-      if (finished) return;
-      finished = true;
-      window.removeEventListener('keydown', onSkipKey);
-      overlay.removeEventListener('click', onSkipClick);
-      if (introTimeline) {
-        introTimeline.kill();
-        introTimeline = null;
-      }
-
-      if (skipped) {
-        gsap.to(overlay, {
-          opacity: 0,
-          duration: 0.3,
-          ease: resolveEase('outSmooth'),
-          onComplete: () => {
-            overlay.style.display = 'none';
-            overlay.style.pointerEvents = 'none';
-            overlay.classList.add('hidden');
-          },
-        });
-        if (revealTargets.length > 0) {
-          gsap.to(revealTargets, {
-            opacity: 1,
-            y: 0,
-            scale: 1,
-            duration: 0.45,
-            stagger: 0.06,
-            ease: resolveEase('outSmooth'),
-            clearProps: 'transform,opacity',
-          });
-        }
-      } else {
-        overlay.style.display = 'none';
-        overlay.style.pointerEvents = 'none';
-        overlay.classList.add('hidden');
-        if (revealTargets.length > 0) {
-          gsap.set(revealTargets, { clearProps: 'transform,opacity' });
-        }
-      }
-      options.onComplete?.();
-    };
-
     const onSkipClick = () => finishAll(true);
     const onSkipKey = (e) => {
       if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') {
@@ -389,89 +383,153 @@
         finishAll(true);
       }
     };
+
+    const finishAll = (skipped = false) => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener('keydown', onSkipKey);
+      overlay.removeEventListener('click', onSkipClick);
+
+      if (skipped) {
+        introContext = revertContext(introContext);
+        gsap.to(overlay, {
+          opacity: 0,
+          duration: 0.3,
+          force3D: true,
+          ease: resolveEase('outSmooth'),
+          onComplete: () => {
+            overlay.style.display = 'none';
+            overlay.style.pointerEvents = 'none';
+            overlay.classList.add('hidden');
+            gsap.set(overlay, { clearProps: GPU_CLEAR_PROPS });
+          },
+        });
+        if (revealTargets.length > 0) {
+          gsap.fromTo(
+            revealTargets,
+            { opacity: 0, y: 20 },
+            {
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              duration: 0.45,
+              stagger: 0.06,
+              force3D: true,
+              ease: resolveEase('outSmooth'),
+              clearProps: GPU_CLEAR_PROPS,
+            }
+          );
+        }
+      } else {
+        overlay.style.display = 'none';
+        overlay.style.pointerEvents = 'none';
+        overlay.classList.add('hidden');
+        if (revealTargets.length > 0) {
+          gsap.set(revealTargets, { clearProps: GPU_CLEAR_PROPS });
+        }
+        introContext = null;
+      }
+      options.onComplete?.();
+    };
+
     overlay.addEventListener('click', onSkipClick);
     window.addEventListener('keydown', onSkipKey);
 
     const inOut = resolveEase('inOut', 'power3.inOut');
     const outSmooth = resolveEase('outSmooth', 'power3.out');
 
-    const tl = gsap.timeline({
-      onComplete: () => finishAll(false),
-    });
-    introTimeline = tl;
+    introContext = gsap.context(() => {
+      if (revealTargets.length > 0) {
+        gsap.set(revealTargets, {
+          opacity: 0,
+          y: cfg.welcomeRevealY,
+          scale: cfg.welcomeRevealScale,
+          force3D: true,
+          willChange: 'transform, opacity',
+        });
+      }
 
-    if (line1El) {
-      tl.fromTo(
-        line1El,
-        { opacity: 0, y: cfg.line1Y },
-        { opacity: 1, y: 0, duration: cfg.line1Duration, ease: inOut }
-      );
-    }
-    if (line2El) {
-      tl.fromTo(
-        line2El,
-        { opacity: 0, y: cfg.line2Y },
-        { opacity: 1, y: 0, duration: cfg.line2Duration, ease: inOut },
-        `-=${cfg.line2Overlap}`
-      );
-    }
-    if (skipHintEl) {
-      tl.fromTo(
-        skipHintEl,
-        { opacity: 0 },
-        { opacity: 0.55, duration: 0.45, ease: 'power1.out' },
-        '-=0.7'
-      );
-    }
-
-    // Brief cinematic hold
-    tl.to({}, { duration: cfg.holdSeconds });
-
-    // Lift text out cleanly
-    const textEls = [line1El, line2El, skipHintEl].filter(Boolean);
-    if (textEls.length > 0) {
-      tl.to(textEls, {
-        opacity: 0,
-        y: cfg.textFadeOutY,
-        duration: cfg.textFadeOutDuration,
-        stagger: 0.06,
-        ease: inOut,
+      const tl = gsap.timeline({
+        defaults: { force3D: true },
+        onComplete: () => finishAll(false),
       });
-    }
 
-    // Dissolve black veil & allow interaction right away
-    tl.set(overlay, { pointerEvents: 'none' }, '-=0.25');
-    tl.to(
-      overlay,
-      {
-        opacity: 0,
-        duration: cfg.overlayFadeDuration,
-        ease: outSmooth,
-      },
-      '-=0.28'
-    );
+      if (line1El) {
+        tl.fromTo(
+          line1El,
+          { opacity: 0, y: cfg.line1Y },
+          { opacity: 1, y: 0, duration: cfg.line1Duration, ease: inOut }
+        );
+      }
+      if (line2El) {
+        tl.fromTo(
+          line2El,
+          { opacity: 0, y: cfg.line2Y },
+          { opacity: 1, y: 0, duration: cfg.line2Duration, ease: inOut },
+          `-=${cfg.line2Overlap}`
+        );
+      }
+      if (skipHintEl) {
+        tl.fromTo(
+          skipHintEl,
+          { opacity: 0 },
+          { opacity: 0.55, duration: 0.45, ease: 'power1.out' },
+          '-=0.7'
+        );
+      }
 
-    // Smoothly glide in the Welcome / Login card with outSmooth
-    if (revealTargets.length > 0) {
+      tl.to({}, { duration: cfg.holdSeconds });
+
+      const textEls = [line1El, line2El, skipHintEl].filter(Boolean);
+      if (textEls.length > 0) {
+        tl.to(textEls, {
+          opacity: 0,
+          y: cfg.textFadeOutY,
+          duration: cfg.textFadeOutDuration,
+          stagger: 0.06,
+          ease: inOut,
+        });
+      }
+
+      tl.set(overlay, { pointerEvents: 'none' }, '-=0.25');
       tl.to(
-        revealTargets,
+        overlay,
         {
-          opacity: 1,
-          y: 0,
-          scale: 1,
-          duration: cfg.welcomeRevealDuration,
-          stagger: 0.08,
+          opacity: 0,
+          duration: cfg.overlayFadeDuration,
           ease: outSmooth,
-          clearProps: 'transform,opacity',
         },
-        `-=${Math.max(0.2, cfg.overlayFadeDuration * 0.72)}`
+        '-=0.28'
       );
-    }
+
+      if (revealTargets.length > 0) {
+        tl.to(
+          revealTargets,
+          {
+            opacity: 1,
+            y: 0,
+            scale: 1,
+            duration: cfg.welcomeRevealDuration,
+            stagger: 0.08,
+            ease: outSmooth,
+            clearProps: GPU_CLEAR_PROPS,
+          },
+          `-=${Math.max(0.2, cfg.overlayFadeDuration * 0.72)}`
+        );
+      }
+
+      return () => {
+        window.removeEventListener('keydown', onSkipKey);
+        overlay.removeEventListener('click', onSkipClick);
+      };
+    }, document.body);
   }
 
   // 1B: Quick Shell Reveal (plays EVERY load when already logged in)
   function playLoggedInReveal(options = {}) {
     introStarted = true;
+    introContext = revertContext(introContext);
+
     const cfg = ANIM_CONFIG.introLoggedIn;
     const overlay = $('app-intro-overlay');
 
@@ -494,56 +552,69 @@
       overlay.style.pointerEvents = 'none';
     }
 
-    const tl = gsap.timeline({
-      onComplete: () => {
-        if (overlay) {
-          overlay.style.display = 'none';
-          overlay.classList.add('hidden');
-        }
-        introTimeline = null;
-        options.onComplete?.();
-      },
-    });
-    introTimeline = tl;
-
-    if (overlay) {
-      tl.to(overlay, {
-        opacity: 0,
-        duration: cfg.overlayFadeDuration,
-        ease: outSmooth,
+    introContext = gsap.context(() => {
+      const tl = gsap.timeline({
+        defaults: { force3D: true },
+        onComplete: () => {
+          if (overlay) {
+            overlay.style.display = 'none';
+            overlay.classList.add('hidden');
+            gsap.set(overlay, { clearProps: GPU_CLEAR_PROPS });
+          }
+          introContext = null;
+          scheduleScrollTriggerRefresh();
+          options.onComplete?.();
+        },
       });
-    }
 
-    if (options.isWelcome) {
-      const welcomeEl = $('view-welcome');
-      const targets = [welcomeEl?.querySelector('header'), welcomeEl?.querySelector('#welcome-card')].filter(Boolean);
-      if (targets.length > 0) {
-        tl.fromTo(
-          targets,
-          { opacity: 0, y: cfg.mainY },
-          {
-            opacity: 1,
-            y: 0,
-            duration: cfg.mainDuration,
-            stagger: 0.07,
-            ease: outSmooth,
-            clearProps: 'transform,opacity',
-          },
-          overlay ? `-=${cfg.overlayFadeDuration * 0.75}` : 0
-        );
+      if (overlay) {
+        tl.to(overlay, {
+          opacity: 0,
+          duration: cfg.overlayFadeDuration,
+          ease: outSmooth,
+        });
       }
-      return;
-    }
 
-    addShellEntranceTweens(tl, overlay ? `-=${cfg.overlayFadeDuration * 0.8}` : 0);
+      if (options.isWelcome) {
+        const welcomeEl = $('view-welcome');
+        const targets = [welcomeEl?.querySelector('header'), welcomeEl?.querySelector('#welcome-card')].filter(Boolean);
+        if (targets.length > 0) {
+          tl.fromTo(
+            targets,
+            { opacity: 0, y: cfg.mainY, willChange: 'transform, opacity' },
+            {
+              opacity: 1,
+              y: 0,
+              duration: cfg.mainDuration,
+              stagger: 0.07,
+              ease: outSmooth,
+              clearProps: GPU_CLEAR_PROPS,
+            },
+            overlay ? `-=${cfg.overlayFadeDuration * 0.75}` : 0
+          );
+        }
+        return;
+      }
+
+      addShellEntranceTweens(tl, overlay ? `-=${cfg.overlayFadeDuration * 0.8}` : 0);
+    }, document.body);
   }
 
   // Smooth shell reveal without black veil (used when finishing login/welcome -> home)
   function playShellEntrance() {
     if (isMotionDisabled()) return;
     registerCustomEases();
-    const tl = window.gsap.timeline();
-    addShellEntranceTweens(tl, 0);
+    introContext = revertContext(introContext);
+    introContext = window.gsap.context(() => {
+      const tl = window.gsap.timeline({
+        defaults: { force3D: true },
+        onComplete: () => {
+          introContext = null;
+          scheduleScrollTriggerRefresh();
+        },
+      });
+      addShellEntranceTweens(tl, 0);
+    }, document.body);
   }
 
   function addShellEntranceTweens(tl, startPos) {
@@ -558,13 +629,13 @@
     if (sidebar && !sidebar.classList.contains('hidden') && isDesktop()) {
       tl.fromTo(
         sidebar,
-        { x: cfg.sidebarX, opacity: 0 },
+        { x: cfg.sidebarX, opacity: 0, willChange: 'transform, opacity' },
         {
           x: 0,
           opacity: 1,
           duration: cfg.sidebarDuration,
           ease: outSmooth,
-          clearProps: 'transform,opacity',
+          clearProps: GPU_CLEAR_PROPS,
         },
         pos
       );
@@ -574,13 +645,13 @@
     if (activeView) {
       tl.fromTo(
         activeView,
-        { y: cfg.mainY, opacity: 0 },
+        { y: cfg.mainY, opacity: 0, willChange: 'transform, opacity' },
         {
           y: 0,
           opacity: 1,
           duration: cfg.mainDuration,
           ease: outSmooth,
-          clearProps: 'transform,opacity',
+          clearProps: GPU_CLEAR_PROPS,
         },
         pos
       );
@@ -589,13 +660,13 @@
     if (playerBar && !playerBar.classList.contains('hidden')) {
       tl.fromTo(
         playerBar,
-        { y: cfg.playerBarY, opacity: 0 },
+        { y: cfg.playerBarY, opacity: 0, willChange: 'transform, opacity' },
         {
           y: 0,
           opacity: 1,
           duration: cfg.playerBarDuration,
           ease: outSmooth,
-          clearProps: 'transform,opacity',
+          clearProps: GPU_CLEAR_PROPS,
         },
         `-=${Math.max(0.1, cfg.mainDuration * 0.8)}`
       );
@@ -610,32 +681,71 @@
   });
 
   // ==========================================================================
-  // 4. PAGE-TO-PAGE ROUTE TRANSITIONS
-  //    - Vertical stack (search -> home -> artists -> albums -> songs -> files):
-  //      Single direct scroll UP or DOWN straight to the destination
-  //    - Playlists / Favourites / Details: 2A Snappy Portfolio Glide
-  //    - Player bar song title / cover -> Now Playing: Normal fade-in
+  // 4. STRICT ROUTE LIFECYCLE & ZERO-REFLOW PAGE TRANSITIONS
+  //    - Reverts activeRouteContext & activeTransitionContext on every exit
+  //    - Pure GPU transforms (y, scale, opacity, force3D: true)
+  //    - ZERO position:absolute / top / width / overflowY / offsetParent thrash
   // ==========================================================================
-  const ROUTE_CLEAR_PROPS = 'transform,opacity,position,top,left,right,width,zIndex,pointerEvents';
+  function clearAllCoverGhosts() {
+    for (const timer of activeCoverGhostTimers) {
+      clearTimeout(timer);
+    }
+    activeCoverGhostTimers.clear();
+    document.querySelectorAll('.gsap-cover-ghost').forEach((g) => {
+      if (hasGsap()) window.gsap.killTweensOf(g);
+      g.remove();
+    });
+  }
 
+  function killAllCoverFlys() {
+    for (const entry of activeCoverFlyTimelines) {
+      try {
+        entry.tl.kill();
+      } catch {
+        // Ignore
+      }
+      entry.ghost?.remove();
+    }
+    activeCoverFlyTimelines.clear();
+  }
+
+  // Explicitly tear down all route-scoped GSAP contexts, tweens, ScrollTriggers & timers
   function cleanupActiveRouteTransition() {
-    if (activeRouteTimeline) {
-      activeRouteTimeline.kill();
-      activeRouteTimeline = null;
+    if (pendingRefreshRafId !== null) {
+      cancelAnimationFrame(pendingRefreshRafId);
+      pendingRefreshRafId = null;
     }
-    if (activeOutgoingEl) {
+
+    // 1. Revert view-scoped gsap.context() (kills all view tweens, ScrollTriggers, SplitText, listeners)
+    activeRouteContext = revertContext(activeRouteContext);
+
+    // 2. Revert in-flight route transition gsap.context()
+    activeTransitionContext = revertContext(activeTransitionContext);
+
+    // 3. Kill any lingering tweens on previous route elements & clear GPU props
+    const leftover = [activeOutgoingEl, activeIncomingEl].filter(Boolean);
+    if (leftover.length > 0 && hasGsap()) {
+      window.gsap.killTweensOf(leftover);
+      window.gsap.set(leftover, { clearProps: GPU_CLEAR_PROPS });
+    }
+    if (activeOutgoingEl && activeOutgoingEl !== activeIncomingEl) {
       activeOutgoingEl.classList.add('hidden');
-      if (hasGsap()) window.gsap.set(activeOutgoingEl, { clearProps: ROUTE_CLEAR_PROPS });
-      activeOutgoingEl = null;
     }
-    if (activeIncomingEl) {
-      if (hasGsap()) window.gsap.set(activeIncomingEl, { clearProps: ROUTE_CLEAR_PROPS });
-      activeIncomingEl = null;
-    }
-    if (activeRouteMainEl) {
-      activeRouteMainEl.style.overflowY = '';
-      activeRouteMainEl = null;
-    }
+    activeOutgoingEl = null;
+    activeIncomingEl = null;
+
+    // 4. Clean up transient cover ghosts/fly animations from the departing view
+    clearAllCoverGhosts();
+    killAllCoverFlys();
+  }
+
+  // Register view-specific GSAP animations/ScrollTriggers/listeners scoped to the current route
+  function createRouteContext(scopeEl, setupFn) {
+    activeRouteContext = revertContext(activeRouteContext);
+    if (!hasGsap() || typeof setupFn !== 'function') return null;
+    registerCustomEases();
+    activeRouteContext = window.gsap.context(setupFn, scopeEl || document.body);
+    return activeRouteContext;
   }
 
   function resolveRouteMode(fromRoute, toRoute, trigger) {
@@ -674,17 +784,18 @@
     return { type: 'portfolio-glide' };
   }
 
+  // Pure DOM-selector collection — ZERO offsetParent / getBoundingClientRect layout reads!
   function collectStaggerChildren(viewEl) {
     if (!viewEl || viewEl.id === 'view-files') return [];
     const cfg = ANIM_CONFIG.routeTransitions.portfolioGlide;
     if (!cfg.staggerCards) return [];
     const candidates = viewEl.querySelectorAll(
-      '.radius-card, .studio-panel, .mfy-card, .smart-playlist-card, .song-row'
+      '.radius-card:not(.hidden), .studio-panel:not(.hidden), .mfy-card:not(.hidden), .smart-playlist-card:not(.hidden), .song-row:not(.hidden)'
     );
     const list = [];
-    for (const el of candidates) {
-      if (list.length >= cfg.staggerMaxItems) break;
-      if (el.offsetParent !== null) list.push(el);
+    for (let i = 0; i < candidates.length && list.length < cfg.staggerMaxItems; i++) {
+      const el = candidates[i];
+      if (!el.closest('.hidden')) list.push(el);
     }
     return list;
   }
@@ -701,9 +812,10 @@
     immediate,
     animateSameRoute,
   }) {
+    // Always revert outgoing route context & kill lingering tweens FIRST
     cleanupActiveRouteTransition();
 
-    const showOnlyTarget = () => {
+    const swapDomToTarget = () => {
       for (const el of allViewEls || []) {
         if (!el) continue;
         el.classList.toggle('hidden', el !== toEl);
@@ -713,13 +825,14 @@
 
     // Instant swap on first bootstrap, disabled motion, or missing elements
     if (immediate || isMotionDisabled() || !toEl) {
-      showOnlyTarget();
+      swapDomToTarget();
+      scheduleScrollTriggerRefresh();
       return;
     }
 
     // Same route clicked again (unless explicitly asked to animate e.g. switching playlist A -> B)
     if (fromEl === toEl && !animateSameRoute) {
-      showOnlyTarget();
+      swapDomToTarget();
       return;
     }
 
@@ -727,176 +840,174 @@
     const gsap = window.gsap;
     const mode = resolveRouteMode(fromRoute, toRoute, trigger);
 
-    // Hide any stray views other than fromEl and toEl
+    // Leaving welcome -> entering app shell
+    if (mode.type === 'shell-enter') {
+      swapDomToTarget();
+      playShellEntrance();
+      return;
+    }
+
+    const hasDistinctOutgoing = Boolean(fromEl && fromEl !== toEl && !fromEl.classList.contains('hidden'));
+    activeOutgoingEl = hasDistinctOutgoing ? fromEl : null;
+    activeIncomingEl = toEl;
+
+    // Ensure no stray 3rd view is visible
     for (const el of allViewEls || []) {
       if (!el || el === toEl || el === fromEl) continue;
       el.classList.add('hidden');
     }
 
-    // Leaving welcome -> entering app shell
-    if (mode.type === 'shell-enter') {
-      showOnlyTarget();
-      playShellEntrance();
-      return;
-    }
-
-    const prevScrollTop = mainEl ? mainEl.scrollTop : 0;
-    const hasDistinctOutgoing = Boolean(fromEl && fromEl !== toEl && !fromEl.classList.contains('hidden'));
-
-    // Pin outgoing view visually in place before resetting mainEl.scrollTop so there is ZERO jump
-    if (hasDistinctOutgoing) {
-      gsap.set(fromEl, {
-        position: 'absolute',
-        top: -prevScrollTop,
-        left: 0,
-        right: 0,
-        width: '100%',
-        zIndex: 1,
-        pointerEvents: 'none',
-      });
-    }
-
-    toEl.classList.remove('hidden');
-    if (mainEl && !preserveScroll) mainEl.scrollTop = 0;
-
-    gsap.set(toEl, {
-      position: 'relative',
-      zIndex: 2,
-    });
-
-    if (mainEl && hasDistinctOutgoing) {
-      mainEl.style.overflowY = 'hidden';
-      activeRouteMainEl = mainEl;
-    }
-
-    activeOutgoingEl = hasDistinctOutgoing ? fromEl : null;
-    activeIncomingEl = toEl;
-
-    const tl = gsap.timeline({
-      onComplete: () => {
+    // Build entire exit -> single-write swap -> GPU entrance inside one revertable gsap.context()
+    activeTransitionContext = gsap.context(() => {
+      const playIncoming = () => {
+        // Single batched DOM write phase (zero interleaved reads, zero position/width/overflow thrash)
         if (hasDistinctOutgoing && fromEl) {
           fromEl.classList.add('hidden');
-          gsap.set(fromEl, { clearProps: ROUTE_CLEAR_PROPS });
+          gsap.set(fromEl, { clearProps: GPU_CLEAR_PROPS });
         }
-        gsap.set(toEl, { clearProps: ROUTE_CLEAR_PROPS });
-        if (mainEl) mainEl.style.overflowY = '';
-        activeRouteTimeline = null;
-        activeOutgoingEl = null;
-        activeIncomingEl = null;
-        activeRouteMainEl = null;
-      },
-    });
-    activeRouteTimeline = tl;
+        toEl.classList.remove('hidden');
+        if (mainEl && !preserveScroll) mainEl.scrollTop = 0;
 
-    // ------------------------------------------------------------------
-    // MODE A: Normal Fade-In (Player bar song title / cover -> Now Playing)
-    // ------------------------------------------------------------------
-    if (mode.type === 'fade') {
-      const cfg = ANIM_CONFIG.routeTransitions.playerTitleFade;
-      const ease = resolveEase(cfg.ease, 'power1.out');
-      if (hasDistinctOutgoing) {
-        tl.to(fromEl, { opacity: 0, duration: cfg.outDuration, ease }, 0);
-      }
-      tl.fromTo(
-        toEl,
-        { opacity: 0 },
-        { opacity: 1, duration: cfg.inDuration, ease },
-        0
-      );
-      return;
-    }
+        const finishIncoming = () => {
+          gsap.set(toEl, { clearProps: GPU_CLEAR_PROPS });
+          activeOutgoingEl = null;
+          activeIncomingEl = null;
+          activeTransitionContext = null;
+          // Defer ScrollTrigger.refresh() to rAF after incoming DOM has settled
+          scheduleScrollTriggerRefresh();
+        };
 
-    // ------------------------------------------------------------------
-    // MODE B: Directional Vertical Scroll (search -> home -> artists -> albums -> songs -> files)
-    //   Scroll UP   (e.g. albums -> artists, files -> home):
-    //     outgoing slides DOWN (+dist), incoming slides DOWN from TOP (-dist -> 0)
-    //   Scroll DOWN (e.g. home -> songs, search -> files):
-    //     outgoing slides UP (-dist),   incoming slides UP from BOTTOM (+dist -> 0)
-    // ------------------------------------------------------------------
-    if (mode.type === 'vertical-scroll') {
-      const cfg = ANIM_CONFIG.routeTransitions.verticalScroll;
-      const dist = cfg.distance;
-      const outY = mode.direction === 'up' ? dist : -dist;
-      const inStartY = mode.direction === 'up' ? -dist : dist;
-      const outEase = resolveEase(cfg.outEase, 'power3.out');
-      const inEase = resolveEase(cfg.inEase, 'power3.out');
+        // ----------------------------------------------------------------
+        // MODE A: Normal Fade-In (Player bar song title / cover -> Now Playing)
+        // ----------------------------------------------------------------
+        if (mode.type === 'fade') {
+          const cfg = ANIM_CONFIG.routeTransitions.playerTitleFade;
+          gsap.fromTo(
+            toEl,
+            { opacity: 0, willChange: 'opacity' },
+            {
+              opacity: 1,
+              duration: cfg.inDuration,
+              ease: resolveEase(cfg.ease, 'power1.out'),
+              force3D: true,
+              onComplete: finishIncoming,
+            }
+          );
+          return;
+        }
 
-      if (hasDistinctOutgoing) {
-        tl.to(
-          fromEl,
+        // ----------------------------------------------------------------
+        // MODE B: Directional Vertical Scroll (search -> home -> artists -> albums -> songs -> files)
+        //   Scroll UP   (e.g. albums -> artists, files -> home):
+        //     incoming glides DOWN from TOP (-dist -> 0)
+        //   Scroll DOWN (e.g. home -> songs, search -> files):
+        //     incoming glides UP from BOTTOM (+dist -> 0)
+        // ----------------------------------------------------------------
+        if (mode.type === 'vertical-scroll') {
+          const cfg = ANIM_CONFIG.routeTransitions.verticalScroll;
+          const inStartY = mode.direction === 'up' ? -cfg.distance : cfg.distance;
+          gsap.fromTo(
+            toEl,
+            { y: inStartY, opacity: 0, willChange: 'transform, opacity' },
+            {
+              y: 0,
+              opacity: 1,
+              duration: cfg.inDuration,
+              ease: resolveEase(cfg.inEase, 'power3.out'),
+              force3D: true,
+              onComplete: finishIncoming,
+            }
+          );
+          return;
+        }
+
+        // ----------------------------------------------------------------
+        // MODE C: 2A Snappy Portfolio Glide (Playlists, Favourites, Detail routes)
+        // ----------------------------------------------------------------
+        const cfg = ANIM_CONFIG.routeTransitions.portfolioGlide;
+        const inEase = resolveEase(cfg.inEase, 'power3.out');
+        const tlIn = gsap.timeline({
+          defaults: { force3D: true },
+          onComplete: finishIncoming,
+        });
+
+        tlIn.fromTo(
+          toEl,
+          { opacity: 0, y: cfg.inY, willChange: 'transform, opacity' },
           {
-            y: outY,
-            opacity: 0,
-            duration: cfg.outDuration,
-            ease: outEase,
+            opacity: 1,
+            y: 0,
+            duration: cfg.inDuration,
+            ease: inEase,
           },
           0
         );
+
+        const staggerEls = collectStaggerChildren(toEl);
+        if (staggerEls.length > 0) {
+          tlIn.fromTo(
+            staggerEls,
+            { opacity: 0, y: cfg.staggerY },
+            {
+              opacity: 1,
+              y: 0,
+              duration: cfg.staggerDuration,
+              stagger: cfg.staggerAmount,
+              ease: inEase,
+              clearProps: GPU_CLEAR_PROPS,
+            },
+            0.03
+          );
+        }
+      };
+
+      // If no distinct outgoing view, jump straight into incoming GPU animation
+      if (!hasDistinctOutgoing) {
+        playIncoming();
+        return;
       }
 
-      tl.fromTo(
-        toEl,
-        { y: inStartY, opacity: 0 },
-        {
-          y: 0,
-          opacity: 1,
-          duration: cfg.inDuration,
-          ease: inEase,
-        },
-        0
-      );
-      return;
-    }
-
-    // ------------------------------------------------------------------
-    // MODE C: 2A Snappy Portfolio Glide (Playlists, Favourites, Detail routes)
-    // ------------------------------------------------------------------
-    const cfg = ANIM_CONFIG.routeTransitions.portfolioGlide;
-    const outEase = resolveEase(cfg.outEase, 'power1.in');
-    const inEase = resolveEase(cfg.inEase, 'power3.out');
-
-    if (hasDistinctOutgoing) {
-      tl.to(
-        fromEl,
-        {
+      // Snappy GPU-only outgoing exit (no position:absolute, no top/width, no overflow toggle!)
+      if (mode.type === 'fade') {
+        const cfg = ANIM_CONFIG.routeTransitions.playerTitleFade;
+        gsap.to(fromEl, {
           opacity: 0,
-          scale: cfg.outScale,
           duration: cfg.outDuration,
-          ease: outEase,
-        },
-        0
-      );
-    }
+          ease: resolveEase(cfg.ease, 'power1.out'),
+          force3D: true,
+          willChange: 'opacity',
+          onComplete: playIncoming,
+        });
+        return;
+      }
 
-    const enterAt = hasDistinctOutgoing ? Math.max(0, cfg.outDuration * 0.45) : 0;
-    tl.fromTo(
-      toEl,
-      { opacity: 0, y: cfg.inY },
-      {
-        opacity: 1,
-        y: 0,
-        duration: cfg.inDuration,
-        ease: inEase,
-      },
-      enterAt
-    );
+      if (mode.type === 'vertical-scroll') {
+        const cfg = ANIM_CONFIG.routeTransitions.verticalScroll;
+        const outY = mode.direction === 'up' ? cfg.distance : -cfg.distance;
+        gsap.to(fromEl, {
+          y: outY,
+          opacity: 0,
+          duration: cfg.outDuration,
+          ease: resolveEase(cfg.outEase, 'power2.in'),
+          force3D: true,
+          willChange: 'transform, opacity',
+          onComplete: playIncoming,
+        });
+        return;
+      }
 
-    const staggerEls = collectStaggerChildren(toEl);
-    if (staggerEls.length > 0) {
-      tl.fromTo(
-        staggerEls,
-        { opacity: 0, y: cfg.staggerY },
-        {
-          opacity: 1,
-          y: 0,
-          duration: cfg.staggerDuration,
-          stagger: cfg.staggerAmount,
-          ease: inEase,
-          clearProps: 'transform,opacity',
-        },
-        enterAt + 0.04
-      );
-    }
+      // 2A Portfolio Glide exit
+      const cfg = ANIM_CONFIG.routeTransitions.portfolioGlide;
+      gsap.to(fromEl, {
+        opacity: 0,
+        scale: cfg.outScale,
+        duration: cfg.outDuration,
+        ease: resolveEase(cfg.outEase, 'power1.in'),
+        force3D: true,
+        willChange: 'transform, opacity',
+        onComplete: playIncoming,
+      });
+    }, mainEl || document.body);
   }
 
   // ==========================================================================
@@ -904,15 +1015,12 @@
   // ==========================================================================
   function openSignatureModal(modalEl) {
     if (!modalEl) return;
-    if (sigTimeline) {
-      sigTimeline.kill();
-      sigTimeline = null;
-    }
+    sigContext = revertContext(sigContext);
 
     modalEl.classList.remove('hidden');
 
     if (isMotionDisabled()) {
-      if (hasGsap()) window.gsap.set(modalEl, { clearProps: 'transform,opacity' });
+      if (hasGsap()) window.gsap.set(modalEl, { clearProps: GPU_CLEAR_PROPS });
       return;
     }
 
@@ -922,24 +1030,28 @@
     const ease = resolveEase(cfg.inEase, 'power3.out');
 
     gsap.killTweensOf(modalEl);
-    sigTimeline = gsap.fromTo(
-      modalEl,
-      {
-        opacity: 0,
-        scale: cfg.inScale,
-        transformOrigin: '50% 50%',
-      },
-      {
-        opacity: 1,
-        scale: 1,
-        duration: cfg.inDuration,
-        ease,
-        clearProps: 'transform,opacity',
-        onComplete: () => {
-          sigTimeline = null;
+    sigContext = gsap.context(() => {
+      gsap.fromTo(
+        modalEl,
+        {
+          opacity: 0,
+          scale: cfg.inScale,
+          transformOrigin: '50% 50%',
+          willChange: 'transform, opacity',
         },
-      }
-    );
+        {
+          opacity: 1,
+          scale: 1,
+          duration: cfg.inDuration,
+          ease,
+          force3D: true,
+          clearProps: GPU_CLEAR_PROPS,
+          onComplete: () => {
+            sigContext = null;
+          },
+        }
+      );
+    }, modalEl);
   }
 
   function closeSignatureModal(modalEl, onDone) {
@@ -947,14 +1059,11 @@
       onDone?.();
       return;
     }
-    if (sigTimeline) {
-      sigTimeline.kill();
-      sigTimeline = null;
-    }
+    sigContext = revertContext(sigContext);
 
     if (isMotionDisabled() || modalEl.classList.contains('hidden')) {
       modalEl.classList.add('hidden');
-      if (hasGsap()) window.gsap.set(modalEl, { clearProps: 'transform,opacity' });
+      if (hasGsap()) window.gsap.set(modalEl, { clearProps: GPU_CLEAR_PROPS });
       onDone?.();
       return;
     }
@@ -965,23 +1074,27 @@
     const ease = resolveEase(cfg.outEase, 'power2.in');
 
     gsap.killTweensOf(modalEl);
-    sigTimeline = gsap.to(modalEl, {
-      opacity: 0,
-      scale: cfg.outScale,
-      transformOrigin: '50% 50%',
-      duration: cfg.outDuration,
-      ease,
-      onComplete: () => {
-        modalEl.classList.add('hidden');
-        gsap.set(modalEl, { clearProps: 'transform,opacity' });
-        sigTimeline = null;
-        onDone?.();
-      },
-    });
+    sigContext = gsap.context(() => {
+      gsap.to(modalEl, {
+        opacity: 0,
+        scale: cfg.outScale,
+        transformOrigin: '50% 50%',
+        duration: cfg.outDuration,
+        ease,
+        force3D: true,
+        willChange: 'transform, opacity',
+        onComplete: () => {
+          modalEl.classList.add('hidden');
+          gsap.set(modalEl, { clearProps: GPU_CLEAR_PROPS });
+          sigContext = null;
+          onDone?.();
+        },
+      });
+    }, modalEl);
   }
 
   // ==========================================================================
-  // 6. DRAWERS (#queue-drawer, #lyrics-drawer, mobile sidebar) + BLUR BACKDROP
+  // 6. DRAWERS (#queue-drawer, #lyrics-drawer, mobile sidebar) + quickTo DRAG
   // ==========================================================================
   function showDrawerBackdrop(visible) {
     const backdrop = $('drawer-backdrop');
@@ -1001,13 +1114,14 @@
       gsap.fromTo(
         backdrop,
         { opacity: 0 },
-        { opacity: 1, duration: cfg.backdropDuration, ease: 'power2.out' }
+        { opacity: 1, duration: cfg.backdropDuration, ease: 'power2.out', force3D: true }
       );
     } else if (!backdrop.classList.contains('hidden')) {
       gsap.to(backdrop, {
         opacity: 0,
         duration: cfg.backdropDuration * 0.85,
         ease: 'power2.in',
+        force3D: true,
         onComplete: () => {
           backdrop.classList.add('hidden');
           gsap.set(backdrop, { clearProps: 'opacity' });
@@ -1018,14 +1132,14 @@
 
   function openDrawer(drawerEl) {
     if (!drawerEl) return;
-    const prev = activeDrawerTweens.get(drawerEl);
-    if (prev) prev.kill();
+    revertContext(activeDrawerContexts.get(drawerEl));
+    activeDrawerContexts.delete(drawerEl);
 
     drawerEl.classList.remove('hidden');
     showDrawerBackdrop(true);
 
     if (isMotionDisabled()) {
-      if (hasGsap()) window.gsap.set(drawerEl, { clearProps: 'transform,opacity' });
+      if (hasGsap()) window.gsap.set(drawerEl, { clearProps: GPU_CLEAR_PROPS });
       return;
     }
 
@@ -1034,26 +1148,29 @@
     const cfg = ANIM_CONFIG.drawers;
     gsap.killTweensOf(drawerEl);
 
-    const tw = gsap.fromTo(
-      drawerEl,
-      { xPercent: 100, x: 0, opacity: 0.72 },
-      {
-        xPercent: 0,
-        x: 0,
-        opacity: 1,
-        duration: cfg.inDuration,
-        ease: resolveEase(cfg.inEase, 'power3.out'),
-        clearProps: 'transform,opacity',
-        onComplete: () => activeDrawerTweens.delete(drawerEl),
-      }
-    );
-    activeDrawerTweens.set(drawerEl, tw);
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        drawerEl,
+        { xPercent: 100, x: 0, opacity: 0.72, willChange: 'transform, opacity' },
+        {
+          xPercent: 0,
+          x: 0,
+          opacity: 1,
+          duration: cfg.inDuration,
+          ease: resolveEase(cfg.inEase, 'power3.out'),
+          force3D: true,
+          clearProps: GPU_CLEAR_PROPS,
+          onComplete: () => activeDrawerContexts.delete(drawerEl),
+        }
+      );
+    }, drawerEl);
+    activeDrawerContexts.set(drawerEl, ctx);
   }
 
   function closeDrawer(drawerEl, options = {}) {
     if (!drawerEl) return;
-    const prev = activeDrawerTweens.get(drawerEl);
-    if (prev) prev.kill();
+    revertContext(activeDrawerContexts.get(drawerEl));
+    activeDrawerContexts.delete(drawerEl);
 
     if (!options.keepBackdrop) {
       showDrawerBackdrop(false);
@@ -1061,7 +1178,7 @@
 
     if (isMotionDisabled() || drawerEl.classList.contains('hidden')) {
       drawerEl.classList.add('hidden');
-      if (hasGsap()) window.gsap.set(drawerEl, { clearProps: 'transform,opacity' });
+      if (hasGsap()) window.gsap.set(drawerEl, { clearProps: GPU_CLEAR_PROPS });
       return;
     }
 
@@ -1070,18 +1187,22 @@
     const cfg = ANIM_CONFIG.drawers;
     gsap.killTweensOf(drawerEl);
 
-    const tw = gsap.to(drawerEl, {
-      xPercent: 100,
-      opacity: 0.65,
-      duration: cfg.outDuration,
-      ease: resolveEase(cfg.outEase, 'power2.in'),
-      onComplete: () => {
-        drawerEl.classList.add('hidden');
-        gsap.set(drawerEl, { clearProps: 'transform,opacity' });
-        activeDrawerTweens.delete(drawerEl);
-      },
-    });
-    activeDrawerTweens.set(drawerEl, tw);
+    const ctx = gsap.context(() => {
+      gsap.to(drawerEl, {
+        xPercent: 100,
+        opacity: 0.65,
+        duration: cfg.outDuration,
+        ease: resolveEase(cfg.outEase, 'power2.in'),
+        force3D: true,
+        willChange: 'transform, opacity',
+        onComplete: () => {
+          drawerEl.classList.add('hidden');
+          gsap.set(drawerEl, { clearProps: GPU_CLEAR_PROPS });
+          activeDrawerContexts.delete(drawerEl);
+        },
+      });
+    }, drawerEl);
+    activeDrawerContexts.set(drawerEl, ctx);
   }
 
   function snapBackDrawer(drawerEl) {
@@ -1095,8 +1216,36 @@
       x: 0,
       duration: ANIM_CONFIG.drawers.snapBackDuration,
       ease: resolveEase('outSmooth', 'power3.out'),
+      force3D: true,
       clearProps: 'transform',
     });
+  }
+
+  // High-frequency pointer drag helper using gsap.quickTo() (zero per-frame gsap.to allocation)
+  function createDrawerDragController(drawerEl) {
+    let quickX = null;
+    return {
+      move(dx) {
+        if (!drawerEl) return;
+        const clamped = Math.max(0, dx);
+        if (isMotionDisabled()) {
+          drawerEl.style.transform = `translate3d(${clamped}px, 0, 0)`;
+          return;
+        }
+        if (!quickX) {
+          registerCustomEases();
+          quickX = window.gsap.quickTo(drawerEl, 'x', {
+            duration: 0.08,
+            ease: 'power2.out',
+            force3D: true,
+          });
+        }
+        quickX(clamped);
+      },
+      reset() {
+        quickX = null;
+      },
+    };
   }
 
   function setMobileSidebar(sidebarEl, backdropEl, open) {
@@ -1126,33 +1275,36 @@
       sidebarEl.classList.add('translate-x-0');
       gsap.fromTo(
         sidebarEl,
-        { xPercent: -100 },
+        { xPercent: -100, willChange: 'transform' },
         {
           xPercent: 0,
           duration: cfg.inDuration,
           ease: resolveEase(cfg.inEase, 'power3.out'),
-          clearProps: 'transform',
+          force3D: true,
+          clearProps: 'transform,willChange',
         }
       );
       if (backdropEl) {
         backdropEl.classList.remove('hidden');
-        gsap.fromTo(backdropEl, { opacity: 0 }, { opacity: 1, duration: cfg.backdropDuration });
+        gsap.fromTo(backdropEl, { opacity: 0 }, { opacity: 1, duration: cfg.backdropDuration, force3D: true });
       }
     } else {
       gsap.to(sidebarEl, {
         xPercent: -100,
         duration: cfg.outDuration,
         ease: resolveEase(cfg.outEase, 'power2.in'),
+        force3D: true,
         onComplete: () => {
           sidebarEl.classList.add('-translate-x-full');
           sidebarEl.classList.remove('translate-x-0');
-          gsap.set(sidebarEl, { clearProps: 'transform' });
+          gsap.set(sidebarEl, { clearProps: 'transform,willChange' });
         },
       });
       if (backdropEl && !backdropEl.classList.contains('hidden')) {
         gsap.to(backdropEl, {
           opacity: 0,
           duration: cfg.outDuration,
+          force3D: true,
           onComplete: () => {
             backdropEl.classList.add('hidden');
             gsap.set(backdropEl, { clearProps: 'opacity' });
@@ -1178,8 +1330,8 @@
       return;
     }
 
-    const prev = activeModalTweens.get(modalEl);
-    if (prev) prev.kill();
+    revertContext(activeModalContexts.get(modalEl));
+    activeModalContexts.delete(modalEl);
 
     modalEl.classList.remove('hidden');
     modalEl.style.pointerEvents = '';
@@ -1188,7 +1340,7 @@
     if (isMotionDisabled()) {
       if (hasGsap()) {
         window.gsap.set(modalEl, { clearProps: 'opacity,pointerEvents' });
-        if (panel) window.gsap.set(panel, { clearProps: 'transform,opacity' });
+        if (panel) window.gsap.set(panel, { clearProps: GPU_CLEAR_PROPS });
       }
       return;
     }
@@ -1199,36 +1351,39 @@
     gsap.killTweensOf(modalEl);
     if (panel) gsap.killTweensOf(panel);
 
-    const tl = gsap.timeline({
-      onComplete: () => {
-        gsap.set(modalEl, { clearProps: 'opacity,pointerEvents' });
-        if (panel) gsap.set(panel, { clearProps: 'transform,opacity' });
-        activeModalTweens.delete(modalEl);
-      },
-    });
-    activeModalTweens.set(modalEl, tl);
-
-    tl.fromTo(
-      modalEl,
-      { opacity: 0 },
-      { opacity: 1, duration: cfg.backdropDuration, ease: 'power2.out' },
-      0
-    );
-
-    if (panel) {
-      tl.fromTo(
-        panel,
-        { opacity: 0, y: cfg.panelInY, scale: cfg.panelInScale },
-        {
-          opacity: 1,
-          y: 0,
-          scale: 1,
-          duration: cfg.panelInDuration,
-          ease: resolveEase(cfg.panelInEase, 'power3.out'),
+    const ctx = gsap.context(() => {
+      const tl = gsap.timeline({
+        defaults: { force3D: true },
+        onComplete: () => {
+          gsap.set(modalEl, { clearProps: 'opacity,pointerEvents' });
+          if (panel) gsap.set(panel, { clearProps: GPU_CLEAR_PROPS });
+          activeModalContexts.delete(modalEl);
         },
+      });
+
+      tl.fromTo(
+        modalEl,
+        { opacity: 0 },
+        { opacity: 1, duration: cfg.backdropDuration, ease: 'power2.out' },
         0
       );
-    }
+
+      if (panel) {
+        tl.fromTo(
+          panel,
+          { opacity: 0, y: cfg.panelInY, scale: cfg.panelInScale, willChange: 'transform, opacity' },
+          {
+            opacity: 1,
+            y: 0,
+            scale: 1,
+            duration: cfg.panelInDuration,
+            ease: resolveEase(cfg.panelInEase, 'power3.out'),
+          },
+          0
+        );
+      }
+    }, modalEl);
+    activeModalContexts.set(modalEl, ctx);
   }
 
   function closeModal(modalEl, onDone) {
@@ -1243,8 +1398,8 @@
       return;
     }
 
-    const prev = activeModalTweens.get(modalEl);
-    if (prev) prev.kill();
+    revertContext(activeModalContexts.get(modalEl));
+    activeModalContexts.delete(modalEl);
 
     const panel = modalEl.firstElementChild;
 
@@ -1253,7 +1408,7 @@
       modalEl.classList.add('hidden');
       if (hasGsap()) {
         window.gsap.set(modalEl, { clearProps: 'opacity,pointerEvents' });
-        if (panel) window.gsap.set(panel, { clearProps: 'transform,opacity' });
+        if (panel) window.gsap.set(panel, { clearProps: GPU_CLEAR_PROPS });
       }
       onDone?.();
       return;
@@ -1268,40 +1423,43 @@
     modalEl.dataset.gsapClosing = 'true';
     modalEl.style.pointerEvents = 'none';
 
-    const tl = gsap.timeline({
-      onComplete: () => {
-        delete modalEl.dataset.gsapClosing;
-        modalEl.classList.add('hidden');
-        gsap.set(modalEl, { clearProps: 'opacity,pointerEvents' });
-        if (panel) gsap.set(panel, { clearProps: 'transform,opacity' });
-        activeModalTweens.delete(modalEl);
-        onDone?.();
-      },
-    });
-    activeModalTweens.set(modalEl, tl);
+    const ctx = gsap.context(() => {
+      const tl = gsap.timeline({
+        defaults: { force3D: true },
+        onComplete: () => {
+          delete modalEl.dataset.gsapClosing;
+          modalEl.classList.add('hidden');
+          gsap.set(modalEl, { clearProps: 'opacity,pointerEvents' });
+          if (panel) gsap.set(panel, { clearProps: GPU_CLEAR_PROPS });
+          activeModalContexts.delete(modalEl);
+          onDone?.();
+        },
+      });
 
-    if (panel) {
+      if (panel) {
+        tl.to(
+          panel,
+          {
+            opacity: 0,
+            y: cfg.panelOutY,
+            scale: cfg.panelOutScale,
+            duration: cfg.panelOutDuration,
+            ease: resolveEase(cfg.panelOutEase, 'power2.in'),
+          },
+          0
+        );
+      }
       tl.to(
-        panel,
+        modalEl,
         {
           opacity: 0,
-          y: cfg.panelOutY,
-          scale: cfg.panelOutScale,
-          duration: cfg.panelOutDuration,
-          ease: resolveEase(cfg.panelOutEase, 'power2.in'),
+          duration: cfg.panelOutDuration + 0.04,
+          ease: 'power2.in',
         },
         0
       );
-    }
-    tl.to(
-      modalEl,
-      {
-        opacity: 0,
-        duration: cfg.panelOutDuration + 0.04,
-        ease: 'power2.in',
-      },
-      0
-    );
+    }, modalEl);
+    activeModalContexts.set(modalEl, ctx);
   }
 
   // ==========================================================================
@@ -1311,44 +1469,43 @@
     if (!menuEl) return;
     delete menuEl.dataset.gsapClosing;
     menuEl.style.pointerEvents = '';
-    if (contextMenuTween) {
-      contextMenuTween.kill();
-      contextMenuTween = null;
-    }
+    contextMenuContext = revertContext(contextMenuContext);
+
     if (isMotionDisabled()) {
-      if (hasGsap()) window.gsap.set(menuEl, { clearProps: 'transform,opacity,pointerEvents' });
+      if (hasGsap()) window.gsap.set(menuEl, { clearProps: 'transform,opacity,pointerEvents,willChange' });
       return;
     }
 
     registerCustomEases();
     const cfg = ANIM_CONFIG.contextMenu;
-    contextMenuTween = window.gsap.fromTo(
-      menuEl,
-      { opacity: 0, y: cfg.inY, scale: cfg.inScale, transformOrigin: 'top left' },
-      {
-        opacity: 1,
-        y: 0,
-        scale: 1,
-        duration: cfg.inDuration,
-        ease: resolveEase(cfg.inEase, 'power3.out'),
-        clearProps: 'transform,opacity,pointerEvents',
-        onComplete: () => {
-          contextMenuTween = null;
-        },
-      }
-    );
+    contextMenuContext = window.gsap.context(() => {
+      window.gsap.fromTo(
+        menuEl,
+        { opacity: 0, y: cfg.inY, scale: cfg.inScale, transformOrigin: 'top left' },
+        {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          duration: cfg.inDuration,
+          ease: resolveEase(cfg.inEase, 'power3.out'),
+          force3D: true,
+          clearProps: 'transform,opacity,pointerEvents,willChange',
+          onComplete: () => {
+            contextMenuContext = null;
+          },
+        }
+      );
+    }, menuEl);
   }
 
   function closeContextMenu(menuEl) {
     if (!menuEl) return;
-    if (contextMenuTween) {
-      contextMenuTween.kill();
-      contextMenuTween = null;
-    }
+    contextMenuContext = revertContext(contextMenuContext);
+
     if (isMotionDisabled() || menuEl.classList.contains('hidden')) {
       delete menuEl.dataset.gsapClosing;
       menuEl.classList.add('hidden');
-      if (hasGsap()) window.gsap.set(menuEl, { clearProps: 'transform,opacity,pointerEvents' });
+      if (hasGsap()) window.gsap.set(menuEl, { clearProps: 'transform,opacity,pointerEvents,willChange' });
       return;
     }
 
@@ -1356,18 +1513,21 @@
     menuEl.style.pointerEvents = 'none';
 
     const cfg = ANIM_CONFIG.contextMenu;
-    contextMenuTween = window.gsap.to(menuEl, {
-      opacity: 0,
-      scale: 0.97,
-      duration: cfg.outDuration,
-      ease: 'power2.in',
-      onComplete: () => {
-        delete menuEl.dataset.gsapClosing;
-        menuEl.classList.add('hidden');
-        window.gsap.set(menuEl, { clearProps: 'transform,opacity,pointerEvents' });
-        contextMenuTween = null;
-      },
-    });
+    contextMenuContext = window.gsap.context(() => {
+      window.gsap.to(menuEl, {
+        opacity: 0,
+        scale: 0.97,
+        duration: cfg.outDuration,
+        ease: 'power2.in',
+        force3D: true,
+        onComplete: () => {
+          delete menuEl.dataset.gsapClosing;
+          menuEl.classList.add('hidden');
+          window.gsap.set(menuEl, { clearProps: 'transform,opacity,pointerEvents,willChange' });
+          contextMenuContext = null;
+        },
+      });
+    }, menuEl);
   }
 
   let fallbackToastTimer = null;
@@ -1375,10 +1535,7 @@
     if (!el) return;
     el.textContent = message;
 
-    if (toastTimeline) {
-      toastTimeline.kill();
-      toastTimeline = null;
-    }
+    toastContext = revertContext(toastContext);
     if (fallbackToastTimer) {
       clearTimeout(fallbackToastTimer);
       fallbackToastTimer = null;
@@ -1387,7 +1544,7 @@
     el.classList.remove('hidden');
 
     if (isMotionDisabled()) {
-      if (hasGsap()) window.gsap.set(el, { clearProps: 'transform,opacity' });
+      if (hasGsap()) window.gsap.set(el, { clearProps: GPU_CLEAR_PROPS });
       fallbackToastTimer = setTimeout(() => {
         el.classList.add('hidden');
         fallbackToastTimer = null;
@@ -1401,63 +1558,75 @@
     const ease = resolveEase(cfg.ease, 'power3.inOut');
 
     gsap.killTweensOf(el);
-    toastTimeline = gsap
-      .timeline({
-        onComplete: () => {
-          el.classList.add('hidden');
-          gsap.set(el, { clearProps: 'transform,opacity' });
-          toastTimeline = null;
-        },
-      })
-      .fromTo(
-        el,
-        { opacity: 0, y: cfg.yOffset },
-        { opacity: 1, y: 0, duration: cfg.inDuration, ease }
-      )
-      .to({}, { duration: cfg.holdDuration })
-      .to(el, {
-        opacity: 0,
-        y: cfg.yOffset * 0.65,
-        duration: cfg.outDuration,
-        ease,
-      });
+    toastContext = gsap.context(() => {
+      gsap
+        .timeline({
+          defaults: { force3D: true },
+          onComplete: () => {
+            el.classList.add('hidden');
+            gsap.set(el, { clearProps: GPU_CLEAR_PROPS });
+            toastContext = null;
+          },
+        })
+        .fromTo(
+          el,
+          { opacity: 0, y: cfg.yOffset },
+          { opacity: 1, y: 0, duration: cfg.inDuration, ease }
+        )
+        .to({}, { duration: cfg.holdDuration })
+        .to(el, {
+          opacity: 0,
+          y: cfg.yOffset * 0.65,
+          duration: cfg.outDuration,
+          ease,
+        });
+    }, el);
   }
 
   // ==========================================================================
-  // 9. SIDEBAR WIDTH COLLAPSE / EXPAND (GSAP outSmooth)
+  // 9. SIDEBAR COLLAPSE / EXPAND (GPU-Only Transform Settle — Zero Width Reflow!)
   // ==========================================================================
   function animateSidebarWidth(sidebarEl, collapsed) {
     if (!sidebarEl) return;
+    sidebarContext = revertContext(sidebarContext);
+
+    // Toggle layout class once (single layout pass instead of 60fps width reflow)
+    sidebarEl.classList.toggle('sidebar-collapsed', collapsed);
 
     if (isMotionDisabled() || !isDesktop()) {
-      sidebarEl.classList.toggle('sidebar-collapsed', collapsed);
-      if (hasGsap()) window.gsap.set(sidebarEl, { clearProps: 'width' });
+      if (hasGsap()) window.gsap.set(sidebarEl, { clearProps: 'transform,opacity,width' });
       return;
     }
 
     registerCustomEases();
     const gsap = window.gsap;
     const cfg = ANIM_CONFIG.sidebarCollapse;
-    const startW = sidebarEl.getBoundingClientRect().width || (collapsed ? cfg.expandedWidth : cfg.collapsedWidth);
-    const targetW = collapsed ? cfg.collapsedWidth : cfg.expandedWidth;
+    const navEl = sidebarEl.querySelector('nav');
+    const shiftX = collapsed ? cfg.shiftX : -cfg.shiftX;
 
-    gsap.killTweensOf(sidebarEl, 'width');
-    sidebarEl.classList.toggle('sidebar-collapsed', collapsed);
-
-    gsap.fromTo(
-      sidebarEl,
-      { width: startW },
-      {
-        width: targetW,
-        duration: cfg.duration,
-        ease: resolveEase(cfg.ease, 'power3.out'),
-        clearProps: 'width',
+    sidebarContext = gsap.context(() => {
+      if (navEl) {
+        gsap.fromTo(
+          navEl,
+          { x: shiftX, opacity: 0.72 },
+          {
+            x: 0,
+            opacity: 1,
+            duration: cfg.duration,
+            ease: resolveEase(cfg.ease, 'power3.out'),
+            force3D: true,
+            clearProps: GPU_CLEAR_PROPS,
+            onComplete: () => {
+              sidebarContext = null;
+            },
+          }
+        );
       }
-    );
+    }, sidebarEl);
   }
 
   // ==========================================================================
-  // 10. PARABOLIC COVER FLY (Migrated from WAAPI to GSAP)
+  // 10. PARABOLIC COVER FLY (Batched Reads -> GPU-Only Transform Timeline)
   // ==========================================================================
   function coverFly(sourceEl, targetSelector = '#player-cover-btn') {
     if (!sourceEl || isMotionDisabled()) return;
@@ -1465,32 +1634,25 @@
     const targetEl = document.querySelector(targetSelector);
     if (!layer || !targetEl) return;
 
+    // Batch all DOM geometry reads BEFORE any DOM writes
     const sRect = sourceEl.getBoundingClientRect();
     const tRect = targetEl.getBoundingClientRect();
     if (sRect.width <= 0 || tRect.width <= 0) return;
+
+    const img = sourceEl.tagName === 'IMG' ? sourceEl : sourceEl.querySelector('img:not(.hidden)');
+    const imgSrc = img?.src || '';
 
     registerCustomEases();
     const gsap = window.gsap;
     const cfg = ANIM_CONFIG.coverFly;
 
+    // Single write phase
     const ghost = document.createElement('div');
-    const img = sourceEl.tagName === 'IMG' ? sourceEl : sourceEl.querySelector('img:not(.hidden)');
-    ghost.style.position = 'fixed';
-    ghost.style.left = `${sRect.left}px`;
-    ghost.style.top = `${sRect.top}px`;
-    ghost.style.width = `${sRect.width}px`;
-    ghost.style.height = `${sRect.height}px`;
-    ghost.style.borderRadius = 'var(--radius-inner)';
-    ghost.style.overflow = 'hidden';
-    ghost.style.boxShadow = '0 10px 30px rgba(0,0,0,0.55)';
-    ghost.style.border = '1px solid var(--primary)';
-    ghost.style.background = 'var(--card)';
-    ghost.style.pointerEvents = 'none';
-    if (img?.src) {
-      ghost.style.backgroundImage = `url("${img.src}")`;
-      ghost.style.backgroundSize = 'cover';
-      ghost.style.backgroundPosition = 'center';
-    }
+    ghost.style.cssText =
+      `position:fixed;left:${sRect.left}px;top:${sRect.top}px;width:${sRect.width}px;height:${sRect.height}px;` +
+      `border-radius:var(--radius-inner);overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,0.55);` +
+      `border:1px solid var(--primary);background:var(--card);pointer-events:none;will-change:transform,opacity;` +
+      (imgSrc ? `background-image:url("${imgSrc}");background-size:cover;background-position:center;` : '');
     layer.appendChild(ghost);
 
     const dx = tRect.left + tRect.width / 2 - (sRect.left + sRect.width / 2);
@@ -1503,9 +1665,14 @@
     const half = cfg.duration * 0.52;
     const rest = cfg.duration - half;
 
-    gsap
+    const entry = { tl: null, ghost };
+    entry.tl = gsap
       .timeline({
-        onComplete: () => ghost.remove(),
+        defaults: { force3D: true },
+        onComplete: () => {
+          activeCoverFlyTimelines.delete(entry);
+          ghost.remove();
+        },
       })
       .set(ghost, { x: 0, y: 0, scale: 1, opacity: 0.95 })
       .to(ghost, {
@@ -1524,6 +1691,8 @@
         duration: rest,
         ease,
       });
+
+    activeCoverFlyTimelines.add(entry);
   }
 
   // ==========================================================================
@@ -1533,6 +1702,11 @@
     const parent = imgEl?.parentElement;
     if (!parent) return;
     parent.querySelectorAll('.gsap-cover-ghost').forEach((g) => {
+      if (g.dataset.cleanupTimer) {
+        const tid = Number(g.dataset.cleanupTimer);
+        clearTimeout(tid);
+        activeCoverGhostTimers.delete(tid);
+      }
       if (hasGsap()) window.gsap.killTweensOf(g);
       g.remove();
     });
@@ -1556,14 +1730,17 @@
 
     // Safety cleanup in case the incoming track has no artwork and never calls finishCoverCrossfade
     const timer = setTimeout(() => {
+      activeCoverGhostTimers.delete(timer);
       if (!ghost.isConnected) return;
       window.gsap.to(ghost, {
         opacity: 0,
         duration: ANIM_CONFIG.coverCrossfade.fadeOutDuration,
         ease: 'power2.out',
+        force3D: true,
         onComplete: () => ghost.remove(),
       });
     }, 650);
+    activeCoverGhostTimers.add(timer);
     ghost.dataset.cleanupTimer = String(timer);
   }
 
@@ -1590,18 +1767,24 @@
         scale: 1,
         duration: cfg.fadeInDuration,
         ease,
-        clearProps: 'transform,opacity',
+        force3D: true,
+        clearProps: GPU_CLEAR_PROPS,
       }
     );
 
     if (parent) {
       parent.querySelectorAll('.gsap-cover-ghost').forEach((ghost) => {
-        if (ghost.dataset.cleanupTimer) clearTimeout(Number(ghost.dataset.cleanupTimer));
+        if (ghost.dataset.cleanupTimer) {
+          const tid = Number(ghost.dataset.cleanupTimer);
+          clearTimeout(tid);
+          activeCoverGhostTimers.delete(tid);
+        }
         gsap.killTweensOf(ghost);
         gsap.to(ghost, {
           opacity: 0,
           duration: cfg.fadeOutDuration,
           ease: 'power2.out',
+          force3D: true,
           onComplete: () => ghost.remove(),
         });
       });
@@ -1614,21 +1797,28 @@
   function animateWelcomeStep(panelEl, direction = 1) {
     if (!panelEl || isMotionDisabled()) return;
     registerCustomEases();
+    welcomeStepContext = revertContext(welcomeStepContext);
+
     const cfg = ANIM_CONFIG.welcomeStep;
     const startX = direction >= 0 ? cfg.xOffset : -cfg.xOffset;
 
-    window.gsap.killTweensOf(panelEl);
-    window.gsap.fromTo(
-      panelEl,
-      { opacity: 0, x: startX },
-      {
-        opacity: 1,
-        x: 0,
-        duration: cfg.duration,
-        ease: resolveEase(cfg.ease, 'power3.out'),
-        clearProps: 'transform,opacity',
-      }
-    );
+    welcomeStepContext = window.gsap.context(() => {
+      window.gsap.fromTo(
+        panelEl,
+        { opacity: 0, x: startX },
+        {
+          opacity: 1,
+          x: 0,
+          duration: cfg.duration,
+          ease: resolveEase(cfg.ease, 'power3.out'),
+          force3D: true,
+          clearProps: GPU_CLEAR_PROPS,
+          onComplete: () => {
+            welcomeStepContext = null;
+          },
+        }
+      );
+    }, panelEl);
   }
 
   function animateWelcomeProgress(fillEl, ratio) {
@@ -1643,6 +1833,8 @@
       scaleX: clamped,
       duration: ANIM_CONFIG.welcomeStep.progressDuration,
       ease: resolveEase('outSmooth', 'power3.out'),
+      force3D: true,
+      overwrite: 'auto',
     });
   }
 
@@ -1675,6 +1867,8 @@
         scale: 1,
         duration: ANIM_CONFIG.buttonPress.upDuration,
         ease: resolveEase(ANIM_CONFIG.buttonPress.upEase, 'power3.out'),
+        force3D: true,
+        overwrite: 'auto',
         clearProps: 'transform',
       });
     };
@@ -1690,6 +1884,7 @@
           scale: ANIM_CONFIG.buttonPress.pressScale,
           duration: ANIM_CONFIG.buttonPress.downDuration,
           ease: 'power2.out',
+          force3D: true,
           overwrite: 'auto',
         });
       },
@@ -1718,6 +1913,9 @@
     playLoggedOutIntro,
     playLoggedInReveal,
     playShellEntrance,
+    createRouteContext,
+    cleanupActiveRouteTransition,
+    scheduleScrollTriggerRefresh,
     transitionRoute,
     resolveRouteMode,
     openSignatureModal,
@@ -1725,6 +1923,7 @@
     openDrawer,
     closeDrawer,
     snapBackDrawer,
+    createDrawerDragController,
     setMobileSidebar,
     openModal,
     closeModal,

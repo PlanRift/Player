@@ -10682,10 +10682,12 @@
       openModal('save-queue-playlist-modal');
     });
 
-    // Left-edge drag/swipe to dismiss #queue-drawer
+    // Left-edge drag/swipe to dismiss #queue-drawer (GPU quickTo, zero per-frame tween allocation)
     const qHandle = $('queue-drag-handle');
     if (qHandle) {
       let startX = null;
+      const drawer = $('queue-drawer');
+      const dragCtrl = window.PlenripAnimations?.createDrawerDragController?.(drawer);
       qHandle.addEventListener('pointerdown', (e) => {
         startX = e.clientX;
         qHandle.setPointerCapture?.(e.pointerId);
@@ -10693,14 +10695,17 @@
       qHandle.addEventListener('pointermove', (e) => {
         if (startX === null) return;
         const dx = Math.max(0, e.clientX - startX);
-        const drawer = $('queue-drawer');
-        if (drawer) drawer.style.transform = `translateX(${dx}px)`;
+        if (dragCtrl) {
+          dragCtrl.move(dx);
+        } else if (drawer) {
+          drawer.style.transform = `translate3d(${dx}px, 0, 0)`;
+        }
       });
       const finishQDrag = (e) => {
         if (startX === null) return;
         const dx = e.clientX - startX;
         startX = null;
-        const drawer = $('queue-drawer');
+        dragCtrl?.reset();
         if (dx > 85) {
           toggleQueueDrawer(false);
         } else if (drawer) {
