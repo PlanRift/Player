@@ -60,6 +60,15 @@
 
 <body class="h-screen w-screen overflow-hidden flex flex-col bg-zinc-950 text-zinc-100 select-none">
 
+  <!-- GSAP Opening Intro & Reveal Overlay (1A: Logged-Out Intro, 1B: Logged-In Quick Veil) -->
+  <div id="app-intro-overlay" aria-hidden="true">
+    <div class="intro-text-wrap hidden text-center px-6">
+      <div class="intro-line-1 font-display">Plenrip</div>
+      <div class="intro-line-2 font-display">Audio</div>
+      <div class="intro-skip-hint font-mono">Click anywhere or press Esc to skip</div>
+    </div>
+  </div>
+
   <!-- Mobile Top Header (< md, hidden when on /now-playing) -->
   <header id="mobile-top-bar"
     class="md:hidden h-12 px-3 bg-zinc-900 border-b border-zinc-700 flex items-center justify-between shrink-0 z-30">
@@ -259,7 +268,7 @@
         </div>
 
         <!-- Dynamic Views Mount Container (loaded from ./views/*.html) -->
-        <div id="view-mount" class="h-full"></div>
+        <div id="view-mount" class="h-full relative"></div>
       </main>
 
       <!-- Floating Bottom Player Bar (Inside Main Content Area) -->
@@ -492,6 +501,9 @@
         </nav>
       </footer>
     </div>
+
+    <!-- Blurred Backdrop behind Right Drawers (keeps bottom player bar z-30 interactive) -->
+    <div id="drawer-backdrop" class="hidden fixed inset-0 z-[25] bg-black/45 backdrop-blur-[3px]"></div>
 
     <!-- Slide-Out Right Queue Drawer (3-Section: Queue / Continue Playing / Autoplay) -->
     <aside id="queue-drawer" aria-label="Playback Queue"
@@ -1367,6 +1379,11 @@
 
   <!-- Parabolic Cover-Fly Animation Layer -->
   <div id="cover-fly-layer" aria-hidden="true" class="fixed inset-0 pointer-events-none z-[60] overflow-hidden"></div>
+
+  <!-- GSAP 3.15.1 + CustomEase + Centralized Animation Controller -->
+  <script src="vendor/gsap.min.js"></script>
+  <script src="vendor/CustomEase.min.js"></script>
+  <script src="animations.js"></script>
 
   <!-- Discovery, Core Engine + Application Logic -->
   <script src="discovery.js"></script>

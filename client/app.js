@@ -298,47 +298,9 @@
 
   function triggerCoverFly(sourceEl, targetSelector = '#player-cover-btn') {
     if (!sourceEl || state.appearance.pauseAnimations) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
-    const layer = $('cover-fly-layer');
-    const targetEl = document.querySelector(targetSelector);
-    if (!layer || !targetEl) return;
-    const sRect = sourceEl.getBoundingClientRect();
-    const tRect = targetEl.getBoundingClientRect();
-    if (sRect.width <= 0 || tRect.width <= 0) return;
-
-    const ghost = document.createElement('div');
-    const img = sourceEl.tagName === 'IMG' ? sourceEl : sourceEl.querySelector('img:not(.hidden)');
-    ghost.style.position = 'fixed';
-    ghost.style.left = `${sRect.left}px`;
-    ghost.style.top = `${sRect.top}px`;
-    ghost.style.width = `${sRect.width}px`;
-    ghost.style.height = `${sRect.height}px`;
-    ghost.style.borderRadius = 'var(--radius-inner)';
-    ghost.style.overflow = 'hidden';
-    ghost.style.boxShadow = '0 10px 30px rgba(0,0,0,0.55)';
-    ghost.style.border = '1px solid var(--primary)';
-    ghost.style.background = 'var(--card)';
-    if (img?.src) {
-      ghost.style.backgroundImage = `url("${img.src}")`;
-      ghost.style.backgroundSize = 'cover';
-      ghost.style.backgroundPosition = 'center';
+    if (window.PlenripAnimations?.coverFly) {
+      window.PlenripAnimations.coverFly(sourceEl, targetSelector);
     }
-    layer.appendChild(ghost);
-
-    const dx = tRect.left + tRect.width / 2 - (sRect.left + sRect.width / 2);
-    const dy = tRect.top + tRect.height / 2 - (sRect.top + sRect.height / 2);
-    const midX = dx * 0.5;
-    const midY = dy * 0.5 - Math.min(90, Math.max(36, Math.abs(dx) * 0.18));
-
-    const anim = ghost.animate(
-      [
-        { transform: 'translate3d(0, 0, 0) scale(1)', opacity: 0.95 },
-        { transform: `translate3d(${midX}px, ${midY}px, 0) scale(0.72)`, opacity: 0.9, offset: 0.55 },
-        { transform: `translate3d(${dx}px, ${dy}px, 0) scale(0.32)`, opacity: 0.15 },
-      ],
-      { duration: 460, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'forwards' }
-    );
-    anim.onfinish = () => ghost.remove();
   }
 
   function escapeHtml(str) {
@@ -398,6 +360,10 @@
   function showToast(message) {
     const el = $('toast-banner');
     if (!el) return;
+    if (window.PlenripAnimations?.showToast) {
+      window.PlenripAnimations.showToast(el, message);
+      return;
+    }
     el.textContent = message;
     el.classList.remove('hidden');
     if (toastTimer) clearTimeout(toastTimer);
@@ -822,6 +788,10 @@
   // Cover art with optional track coverId & stream-header fallback
   function attachCoverImage(imgEl, fallbackEl, coverId, fallbackSongId, size = 300, extraOpts = {}) {
     if (!imgEl) return;
+    const useFade = Boolean(extraOpts.animateFade);
+    if (useFade) {
+      window.PlenripAnimations?.prepareCoverCrossfade?.(imgEl);
+    }
     imgEl.classList.add('hidden');
     if (fallbackEl) fallbackEl.classList.remove('hidden');
     imgEl.removeAttribute('src');
@@ -852,6 +822,7 @@
           imgEl.src = streamUrl;
           imgEl.classList.remove('hidden');
           if (fallbackEl) fallbackEl.classList.add('hidden');
+          if (useFade) window.PlenripAnimations?.finishCoverCrossfade?.(imgEl);
           if (cacheAlbumId) {
             artistAlbumCoverCache.set(cacheAlbumId, streamUrl);
           }
@@ -861,10 +832,18 @@
 
     const showImg = (url) => {
       if (!url) return;
-      imgEl.onload = async () => {
-        const loadedSrc = imgEl.currentSrc || imgEl.src || url;
+      let fadeFinished = false;
+      const revealLoaded = () => {
         imgEl.classList.remove('hidden');
         if (fallbackEl) fallbackEl.classList.add('hidden');
+        if (useFade && !fadeFinished) {
+          fadeFinished = true;
+          window.PlenripAnimations?.finishCoverCrossfade?.(imgEl);
+        }
+      };
+      imgEl.onload = async () => {
+        const loadedSrc = imgEl.currentSrc || imgEl.src || url;
+        revealLoaded();
 
         if (cacheAlbumId) {
           const isPlaceholder = await isNavidromePlaceholderImageUrl(loadedSrc);
@@ -883,8 +862,7 @@
       };
       imgEl.src = url;
       if (imgEl.complete && imgEl.naturalWidth > 0) {
-        imgEl.classList.remove('hidden');
-        if (fallbackEl) fallbackEl.classList.add('hidden');
+        revealLoaded();
       }
     };
 
@@ -1040,12 +1018,22 @@
   function toggleSidebar() {
     state.sidebarCollapsed = !state.sidebarCollapsed;
     localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, state.sidebarCollapsed ? 'true' : 'false');
-    applySidebarState();
+    const sidebar = $('sidebar');
+    if (window.PlenripAnimations?.animateSidebarWidth && sidebar) {
+      window.PlenripAnimations.animateSidebarWidth(sidebar, state.sidebarCollapsed);
+      setIcon($('sidebar-toggle-icon'), state.sidebarCollapsed ? 'chevron-right' : 'chevron-left');
+    } else {
+      applySidebarState();
+    }
   }
 
   function setMobileSidebar(open) {
     const sidebar = $('sidebar');
     if (!sidebar) return;
+    if (window.PlenripAnimations?.setMobileSidebar) {
+      window.PlenripAnimations.setMobileSidebar(sidebar, $('mobile-sidebar-backdrop'), open);
+      return;
+    }
     sidebar.classList.toggle('-translate-x-full', !open);
     sidebar.classList.toggle('translate-x-0', open);
     show($('mobile-sidebar-backdrop'), open);
@@ -1053,9 +1041,12 @@
 
   function navigateTo(route, options = {}) {
     if (!MAIN_VIEWS.includes(route)) route = 'home';
-    const wasWelcome = state.route === 'welcome';
-    if (state.route !== route) {
-      state.previousRoute = wasWelcome ? 'home' : state.route;
+    const fromRoute = state.route;
+    const fromEl = $(`view-${fromRoute}`);
+    const toEl = $(`view-${route}`);
+    const wasWelcome = fromRoute === 'welcome';
+    if (fromRoute !== route) {
+      state.previousRoute = wasWelcome ? 'home' : fromRoute;
     }
     state.route = route;
     const isWelcome = route === 'welcome';
@@ -1064,17 +1055,35 @@
     // so the action bar never acts on songs from a view the user left.
     clearMultiSelect();
 
-    for (const v of MAIN_VIEWS) {
-      show($(`view-${v}`), v === route);
-    }
-
-    // Hide app chrome during onboarding walkthrough
+    // Hide app chrome during onboarding walkthrough (update chrome BEFORE route transition so shell reveal sees visible chrome)
     show($('sidebar'), !isWelcome);
     show($('bottom-player-bar'), !isWelcome);
     if (isWelcome) {
       show($('mobile-top-bar'), false);
       show($('mobile-sidebar-backdrop'), false);
       show($('error-banner'), false);
+    }
+
+    const main = $('main-content');
+    const allViewEls = MAIN_VIEWS.map((v) => $(`view-${v}`));
+    if (window.PlenripAnimations?.transitionRoute) {
+      window.PlenripAnimations.transitionRoute({
+        fromRoute,
+        toRoute: route,
+        fromEl,
+        toEl,
+        mainEl: main,
+        allViewEls,
+        trigger: options.trigger,
+        preserveScroll: options.preserveScroll,
+        immediate: options.immediate,
+        animateSameRoute: options.animateSameRoute,
+      });
+    } else {
+      for (const v of MAIN_VIEWS) {
+        show($(`view-${v}`), v === route);
+      }
+      if (main && !options.preserveScroll) main.scrollTop = 0;
     }
 
     document.querySelectorAll('.sidebar-nav-btn[data-route]').forEach((btn) => {
@@ -1102,9 +1111,6 @@
     });
     highlightSidebarPlaylists();
 
-    const main = $('main-content');
-    if (main && !options.preserveScroll) main.scrollTop = 0;
-
     // Mobile chrome
     const isNp = route === 'now-playing';
     if (!isWelcome) {
@@ -1118,7 +1124,7 @@
 
     if (route === 'welcome') initWelcomeView();
     else if (route === 'home') loadHomeView();
-    else if (route === 'search') setTimeout(() => $('search-input')?.focus(), 30);
+    else if (route === 'search') setTimeout(() => $('search-input')?.focus({ preventScroll: true }), 40);
     else if (route === 'artists') libraryViews.artists.load();
     else if (route === 'albums') libraryViews.albums.load();
     else if (route === 'songs') libraryViews.songs.load();
@@ -3271,7 +3277,7 @@
 
   async function openArtistDetail(artistId) {
     if (!artistId) return;
-    navigateTo('artist-detail');
+    navigateTo('artist-detail', { animateSameRoute: true });
     const grid = $('artist-albums-grid');
     $('artist-detail-name').textContent = 'Loading...';
     $('artist-detail-meta').textContent = '';
@@ -3400,7 +3406,7 @@
     if (!albumOrId) return;
     state.albumBackRoute = backRoute;
     state.currentAlbum = null;
-    navigateTo('album-detail');
+    navigateTo('album-detail', { animateSameRoute: true });
     $('album-detail-title').textContent = 'Loading...';
     $('album-tracks-list').innerHTML = '<div class="p-6 text-xs font-mono text-zinc-400">Loading tracklist...</div>';
     show($('album-more-menu'), false);
@@ -3745,7 +3751,7 @@
     const D = window.PlenripDiscovery;
     if (!D || !smartId) return;
     state.deletePlaylistConfirm = false;
-    navigateTo('playlist-detail');
+    navigateTo('playlist-detail', { animateSameRoute: true });
     $('playlist-detail-title').textContent = 'Loading...';
     $('playlist-tracks-list').innerHTML = '<div class="p-6 text-xs font-mono text-zinc-400">Evaluating smart rules...</div>';
     show($('playlist-more-menu'), false);
@@ -3819,7 +3825,7 @@
       return;
     }
     state.deletePlaylistConfirm = false;
-    navigateTo('playlist-detail');
+    navigateTo('playlist-detail', { animateSameRoute: true });
     $('playlist-detail-title').textContent = 'Loading...';
     $('playlist-tracks-list').innerHTML = '<div class="p-6 text-xs font-mono text-zinc-400">Loading playlist...</div>';
     show($('playlist-more-menu'), false);
@@ -3969,11 +3975,21 @@
   }
 
   function openModal(id) {
-    show($(id), true);
+    const el = $(id);
+    if (window.PlenripAnimations?.openModal) {
+      window.PlenripAnimations.openModal(el);
+    } else {
+      show(el, true);
+    }
     refreshIcons();
   }
   function closeModal(id) {
-    show($(id), false);
+    const el = $(id);
+    if (window.PlenripAnimations?.closeModal) {
+      window.PlenripAnimations.closeModal(el);
+    } else {
+      show(el, false);
+    }
   }
 
   async function createPlaylistWithSongs(name, songs) {
@@ -8707,19 +8723,51 @@
   }
 
   function toggleQueueDrawer(force) {
-    state.queueOpen = typeof force === 'boolean' ? force : !state.queueOpen;
-    if (state.queueOpen && state.lyricsDrawerOpen) toggleLyricsDrawer(false);
+    const nextOpen = typeof force === 'boolean' ? force : !state.queueOpen;
+    if (nextOpen === state.queueOpen) return;
+    state.queueOpen = nextOpen;
+    if (state.queueOpen && state.lyricsDrawerOpen) {
+      state.lyricsDrawerOpen = false;
+      if (window.PlenripAnimations?.closeDrawer) {
+        window.PlenripAnimations.closeDrawer($('lyrics-drawer'), { keepBackdrop: true });
+      } else {
+        show($('lyrics-drawer'), false);
+      }
+      setPressed($('btn-lyrics-drawer'), false);
+      updateLyricsVisibilityDependents();
+    }
     const drawer = $('queue-drawer');
     if (drawer) drawer.style.transform = '';
-    show(drawer, state.queueOpen);
+    if (window.PlenripAnimations?.openDrawer && window.PlenripAnimations?.closeDrawer) {
+      if (state.queueOpen) window.PlenripAnimations.openDrawer(drawer);
+      else window.PlenripAnimations.closeDrawer(drawer, { keepBackdrop: state.lyricsDrawerOpen });
+    } else {
+      show(drawer, state.queueOpen);
+    }
     setPressed($('btn-queue'), state.queueOpen);
     if (state.queueOpen) renderQueueViews(true);
   }
 
   function toggleLyricsDrawer(force) {
-    state.lyricsDrawerOpen = typeof force === 'boolean' ? force : !state.lyricsDrawerOpen;
-    if (state.lyricsDrawerOpen && state.queueOpen) toggleQueueDrawer(false);
-    show($('lyrics-drawer'), state.lyricsDrawerOpen);
+    const nextOpen = typeof force === 'boolean' ? force : !state.lyricsDrawerOpen;
+    if (nextOpen === state.lyricsDrawerOpen) return;
+    state.lyricsDrawerOpen = nextOpen;
+    if (state.lyricsDrawerOpen && state.queueOpen) {
+      state.queueOpen = false;
+      if (window.PlenripAnimations?.closeDrawer) {
+        window.PlenripAnimations.closeDrawer($('queue-drawer'), { keepBackdrop: true });
+      } else {
+        show($('queue-drawer'), false);
+      }
+      setPressed($('btn-queue'), false);
+    }
+    const drawer = $('lyrics-drawer');
+    if (window.PlenripAnimations?.openDrawer && window.PlenripAnimations?.closeDrawer) {
+      if (state.lyricsDrawerOpen) window.PlenripAnimations.openDrawer(drawer);
+      else window.PlenripAnimations.closeDrawer(drawer, { keepBackdrop: state.queueOpen });
+    } else {
+      show(drawer, state.lyricsDrawerOpen);
+    }
     setPressed($('btn-lyrics-drawer'), state.lyricsDrawerOpen);
     updateDrawerMeta();
     updateLyricsVisibilityDependents();
@@ -8754,11 +8802,17 @@
     if (y + rect.height > window.innerHeight - 12) y = Math.max(12, window.innerHeight - rect.height - 12);
     menu.style.left = `${Math.max(12, x)}px`;
     menu.style.top = `${y}px`;
+    window.PlenripAnimations?.openContextMenu?.(menu);
     refreshIcons();
   }
 
   function closeTrackContextMenu() {
-    show($('track-context-menu'), false);
+    const menu = $('track-context-menu');
+    if (window.PlenripAnimations?.closeContextMenu) {
+      window.PlenripAnimations.closeContextMenu(menu);
+    } else {
+      show(menu, false);
+    }
     state.ctxSong = null;
     state.ctxQueueIndex = null;
   }
@@ -9281,7 +9335,12 @@
 
   function openSignatureView() {
     state.signatureOpen = true;
-    show($('signature-modal'), true);
+    const modal = $('signature-modal');
+    if (window.PlenripAnimations?.openSignatureModal) {
+      window.PlenripAnimations.openSignatureModal(modal);
+    } else {
+      show(modal, true);
+    }
     updateSignatureMetadataUI(true);
     wakeSignatureChrome();
     ensureLyrics(false);
@@ -9290,10 +9349,16 @@
   }
 
   function closeSignatureView() {
+    if (!state.signatureOpen && $('signature-modal')?.classList.contains('hidden')) return;
     state.signatureOpen = false;
-    show($('signature-modal'), false);
-    $('signature-modal')?.classList.remove('signature-idle');
+    const modal = $('signature-modal');
+    modal?.classList.remove('signature-idle');
     if (sigIdleTimer) clearTimeout(sigIdleTimer);
+    if (window.PlenripAnimations?.closeSignatureModal) {
+      window.PlenripAnimations.closeSignatureModal(modal);
+    } else {
+      show(modal, false);
+    }
     closeLyricsSourceModal();
   }
 
@@ -9331,8 +9396,11 @@
     $('sig-offset-value').textContent = `${offset >= 0 ? '+' : ''}${offset.toFixed(1)}s`;
 
     if (force || lastSigCoverId !== song.id) {
+      const shouldFade = !force && lastSigCoverId !== null && lastSigCoverId !== song.id;
       lastSigCoverId = song.id;
-      attachCoverImage($('sig-cover-img'), $('sig-cover-fallback'), song.coverArt || song.albumId, song.id, 600);
+      attachCoverImage($('sig-cover-img'), $('sig-cover-fallback'), song.coverArt || song.albumId, song.id, 600, {
+        animateFade: shouldFade,
+      });
       const backdrop = $('sig-backdrop-art');
       const coverId = song.coverArt || song.albumId;
       if (backdrop && coverId) {
@@ -9383,7 +9451,12 @@
       return;
     }
     state.lyricsSourceModalOpen = true;
-    show($('lyrics-source-modal'), true);
+    const modal = $('lyrics-source-modal');
+    if (window.PlenripAnimations?.openModal) {
+      window.PlenripAnimations.openModal(modal);
+    } else {
+      show(modal, true);
+    }
     $('lyrics-manual-title').value = song.title || '';
     $('lyrics-manual-artist').value = song.artist || '';
     $('lyrics-manual-results-list').innerHTML = '';
@@ -9392,7 +9465,12 @@
 
   function closeLyricsSourceModal() {
     state.lyricsSourceModalOpen = false;
-    show($('lyrics-source-modal'), false);
+    const modal = $('lyrics-source-modal');
+    if (window.PlenripAnimations?.closeModal) {
+      window.PlenripAnimations.closeModal(modal);
+    } else {
+      show(modal, false);
+    }
   }
 
   function probeProviders(song, force) {
@@ -9579,9 +9657,14 @@
     $('np-mobile-artist').textContent = song.artist || 'Unknown Artist';
 
     if (lastNpTrackId !== song.id) {
+      const shouldFade = lastNpTrackId !== null && lastNpTrackId !== song.id;
       lastNpTrackId = song.id;
-      attachCoverImage($('np-cover-img'), $('np-cover-fallback'), song.coverArt || song.albumId, song.id, 700);
-      attachCoverImage($('np-mobile-cover-img'), $('np-mobile-cover-fallback'), song.coverArt || song.albumId, song.id, 700);
+      attachCoverImage($('np-cover-img'), $('np-cover-fallback'), song.coverArt || song.albumId, song.id, 700, {
+        animateFade: shouldFade,
+      });
+      attachCoverImage($('np-mobile-cover-img'), $('np-mobile-cover-fallback'), song.coverArt || song.albumId, song.id, 700, {
+        animateFade: shouldFade,
+      });
       const backdrop = $('np-backdrop-art');
       const coverId = song.coverArt || song.albumId;
       if (backdrop && coverId) {
@@ -10168,14 +10251,24 @@
 
   function openSettings(tab = 'appearance') {
     state.settingsOpen = true;
-    show($('settings-modal'), true);
+    const modal = $('settings-modal');
+    if (window.PlenripAnimations?.openModal) {
+      window.PlenripAnimations.openModal(modal);
+    } else {
+      show(modal, true);
+    }
     renderSettings();
     setSettingsTab(tab);
   }
 
   function closeSettings() {
     state.settingsOpen = false;
-    show($('settings-modal'), false);
+    const modal = $('settings-modal');
+    if (window.PlenripAnimations?.closeModal) {
+      window.PlenripAnimations.closeModal(modal);
+    } else {
+      show(modal, false);
+    }
   }
 
   // ============================================================================
@@ -10608,18 +10701,30 @@
         const dx = e.clientX - startX;
         startX = null;
         const drawer = $('queue-drawer');
-        if (drawer) drawer.style.transform = '';
-        if (dx > 85) toggleQueueDrawer(false);
+        if (dx > 85) {
+          toggleQueueDrawer(false);
+        } else if (drawer) {
+          if (window.PlenripAnimations?.snapBackDrawer) {
+            window.PlenripAnimations.snapBackDrawer(drawer);
+          } else {
+            drawer.style.transform = '';
+          }
+        }
       };
       qHandle.addEventListener('pointerup', finishQDrag);
       qHandle.addEventListener('pointercancel', finishQDrag);
     }
 
+    on('drawer-backdrop', 'click', () => {
+      if (state.queueOpen) toggleQueueDrawer(false);
+      if (state.lyricsDrawerOpen) toggleLyricsDrawer(false);
+    });
+
     on('btn-lyrics-drawer', 'click', () => toggleLyricsDrawer());
     on('lyrics-drawer-close-btn', 'click', () => toggleLyricsDrawer(false));
 
-    // Bottom Player Bar (untouched structure, bound cleanly)
-    const openNowPlaying = () => navigateTo('now-playing');
+    // Bottom Player Bar (untouched structure, bound cleanly — title/cover triggers normal fade-in)
+    const openNowPlaying = () => navigateTo('now-playing', { trigger: 'player-title' });
     on('player-cover-btn', 'click', openNowPlaying);
     on('player-title-btn', 'click', openNowPlaying);
     on('mobile-mini-track-btn', 'click', openNowPlaying);
@@ -11219,19 +11324,23 @@
       }
 
       if (e.key === 'Escape') {
+        const isOverlayOpen = (el) =>
+          window.PlenripAnimations?.isOverlayOpen
+            ? window.PlenripAnimations.isOverlayOpen(el)
+            : Boolean(el && !el.classList.contains('hidden'));
         const volToggle = $('volume-toggle');
         if (volToggle && volToggle.checked) {
           volToggle.checked = false;
           return;
         }
-        if (!$('track-context-menu').classList.contains('hidden')) return closeTrackContextMenu();
+        if (isOverlayOpen($('track-context-menu'))) return closeTrackContextMenu();
         if (metaEditorState.active || !$('files-metadata-modal')?.classList.contains('hidden')) return closeMetadataEditor();
         for (const id of ['add-to-playlist-modal', 'save-queue-playlist-modal', 'create-playlist-modal', 'playlist-cover-modal']) {
-          if ($(id) && !$(id).classList.contains('hidden')) return closeModal(id);
+          if (isOverlayOpen($(id))) return closeModal(id);
         }
         if (state.lyricsSourceModalOpen) return closeLyricsSourceModal();
         if (state.settingsOpen) return closeSettings();
-        if (!$('shortcuts-modal').classList.contains('hidden')) return closeModal('shortcuts-modal');
+        if (isOverlayOpen($('shortcuts-modal'))) return closeModal('shortcuts-modal');
         if (state.signatureOpen) return closeSignatureView();
         if (state.queueOpen) return toggleQueueDrawer(false);
         if (state.lyricsDrawerOpen) return toggleLyricsDrawer(false);
@@ -11249,8 +11358,11 @@
       } else if (e.key === '?') {
         if (onWelcome) return;
         e.preventDefault();
-        const hidden = $('shortcuts-modal').classList.contains('hidden');
-        hidden ? openModal('shortcuts-modal') : closeModal('shortcuts-modal');
+        const shortcutsEl = $('shortcuts-modal');
+        const isOpen = window.PlenripAnimations?.isOverlayOpen
+          ? window.PlenripAnimations.isOverlayOpen(shortcutsEl)
+          : Boolean(shortcutsEl && !shortcutsEl.classList.contains('hidden'));
+        isOpen ? closeModal('shortcuts-modal') : openModal('shortcuts-modal');
       } else if (e.code === 'Space') {
         e.preventDefault();
         audioEngine.togglePlayPause();
@@ -11346,14 +11458,21 @@
     }
   }
 
-  function setWelcomeStep(stepNum) {
+  function setWelcomeStep(stepNum, options = {}) {
+    const prevStep = welcomeState.step || 1;
     const step = Math.max(1, Math.min(5, Number(stepNum) || 1));
     welcomeState.step = step;
 
     const label = $('welcome-step-label');
     if (label) label.textContent = `Step ${step} of 5`;
     const fill = $('welcome-progress-fill');
-    if (fill) fill.style.transform = `scaleX(${step / 5})`;
+    if (fill) {
+      if (options.animate !== false && window.PlenripAnimations?.animateWelcomeProgress) {
+        window.PlenripAnimations.animateWelcomeProgress(fill, step / 5);
+      } else {
+        fill.style.transform = `scaleX(${step / 5})`;
+      }
+    }
     const card = $('welcome-card');
     if (card) card.setAttribute('aria-label', `Walkthrough step ${step} of 5`);
 
@@ -11362,10 +11481,8 @@
       if (!panel) continue;
       const active = i === step;
       panel.classList.toggle('hidden', !active);
-      if (active) {
-        panel.classList.remove('welcome-step-enter');
-        void panel.offsetWidth;
-        panel.classList.add('welcome-step-enter');
+      if (active && options.animate !== false && window.PlenripAnimations?.animateWelcomeStep) {
+        window.PlenripAnimations.animateWelcomeStep(panel, step >= prevStep ? 1 : -1);
       }
     }
 
@@ -11399,7 +11516,7 @@
     if (startStep === 1) {
       state.connected = false;
     }
-    setWelcomeStep(startStep);
+    setWelcomeStep(startStep, { animate: false });
   }
 
   async function loadWelcomeStep2(force = false) {
@@ -11933,7 +12050,12 @@
     applyAppearanceTheme();
     updateViewportScale();
     applySidebarState();
-    await loadViewTemplates();
+    try {
+      await loadViewTemplates();
+    } catch (err) {
+      window.PlenripAnimations?.hideIntroImmediately?.();
+      throw err;
+    }
 
     audioEngine = new GaplessAudioEngine(client, historyStore, updatePlayerBarUI, (err, song) => {
       const label = song ? ` "${song.title || 'Untitled'}"` : '';
@@ -11950,22 +12072,38 @@
     updatePlayerBarUI();
     requestAnimationFrame(lyricsFrameLoop);
 
+    const isLoggedIn = client.hasSavedCredentials();
+
     if (needsFirstWalkthrough()) {
-      if (!client.hasSavedCredentials()) {
+      if (!isLoggedIn) {
+        // Not logged in -> 1A Full Portfolio Opening Intro revealing the Welcome / Login page
         state.connected = false;
-        navigateTo('welcome');
+        navigateTo('welcome', { immediate: true });
+        if (window.PlenripAnimations?.playLoggedOutIntro) {
+          window.PlenripAnimations.playLoggedOutIntro({ welcomeEl: $('view-welcome') });
+        }
       } else {
-        navigateTo('welcome');
+        // Already logged in (resuming walkthrough) -> 1B Quick Reveal
+        navigateTo('welcome', { immediate: true });
+        if (window.PlenripAnimations?.playLoggedInReveal) {
+          window.PlenripAnimations.playLoggedInReveal({ isWelcome: true });
+        }
         void Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]).catch(() => {});
       }
     } else {
-      await Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()]);
+      // Already logged in -> 1B Quick Shell Reveal on every page load
+      navigateTo('home', { immediate: true });
+      if (window.PlenripAnimations?.playLoggedInReveal) {
+        window.PlenripAnimations.playLoggedInReveal({ isWelcome: false });
+      }
+      void Promise.all([syncStarredFromServer(), refreshPlaylistsSidebarAndCache()])
+        .then(() => refreshStarButtons())
+        .catch(() => {});
       if (window.PlenripDiscovery?.flushScrobbleQueue) {
         void window.PlenripDiscovery.flushScrobbleQueue(client);
       }
       // Warm artist count in sidebar non-blockingly
       loadAllArtists().catch(() => {});
-      navigateTo('home');
     }
     document.querySelectorAll('input[type="range"]').forEach(updateSliderFill);
     refreshIcons();

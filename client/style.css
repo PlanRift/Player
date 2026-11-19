@@ -584,11 +584,14 @@ input[type="range"].studio-range-thin::-moz-range-thumb {
   transform: translateY(-50%) translateX(0);
 }
 
-/* Sidebar width (Photon 240px) & collapse behavior */
+/* Sidebar width (Photon 240px) & collapse behavior (width & mobile slide animated by GSAP) */
 #sidebar {
   width: 15rem;
   background-color: var(--sidebar);
-  transition: width 180ms cubic-bezier(0.22, 1, 0.36, 1), transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#main-content {
+  overflow-x: hidden;
 }
 
 #sidebar.sidebar-collapsed {
@@ -832,34 +835,68 @@ input[type="range"].studio-range-thin::-moz-range-thumb {
   cursor: none !important;
 }
 
-/* Welcome step transition */
-@keyframes welcome-step-in {
-  from {
-    opacity: 0;
-    transform: translateX(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+/* ============================================================================
+ * GSAP Opening Intro Overlay (PlanRift.github.io inspired)
+ * 1A (Logged-Out): black veil + two-line serif title -> reveals Login/Welcome
+ * 1B (Logged-In):  black veil lifts quickly into staggered shell reveal
+ * ========================================================================== */
+#app-intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background-color: #000000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  pointer-events: auto;
+  user-select: none;
 }
 
-.welcome-step-enter {
-  animation: welcome-step-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+#app-intro-overlay .intro-line-1 {
+  color: #ffffff;
+  font-size: clamp(2.25rem, 5vw, 2.6rem);
+  line-height: 1.08;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  opacity: 0;
 }
 
-/* Pause Looping Animations setting */
+#app-intro-overlay .intro-line-2 {
+  color: #ffffff;
+  font-size: clamp(3rem, 7vw, 5.2rem);
+  line-height: 1.04;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  opacity: 0;
+}
+
+#app-intro-overlay .intro-skip-hint {
+  margin-top: 2rem;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  opacity: 0;
+}
+
+/* Pause Looping / Motion Animations setting */
+html[data-motion-paused] #app-intro-overlay {
+  display: none !important;
+}
+
 html[data-motion-paused] *,
 html[data-motion-paused] *::before,
 html[data-motion-paused] *::after {
   animation-play-state: paused !important;
 }
 
-html[data-motion-paused] .welcome-step-enter {
-  animation: none !important;
-}
-
 @media (prefers-reduced-motion: reduce) {
+  #app-intro-overlay {
+    display: none !important;
+  }
+
   *,
   *::before,
   *::after {
